@@ -1,5 +1,9 @@
 # FinanceOS — Migration Strategy
 
+## Applied migrations
+- `20260719045753_init` (Phase 0/1): auth models + Account/Transaction/Category/Tag/TransactionTag. There was no production data yet, so no backward-compatibility constraints applied.
+- `20260719205827_phase2_budgeting_goals_bills_notifications` (Phase 2): adds `Budget`, `BudgetCategory`, `Goal`, `GoalContribution`, `Bill`, `BillOccurrence`, `Notification`, `Receipt`; drops `Transaction.receiptUrl` (see below). This migration includes a destructive change (dropping a column) without a Release Manager sign-off gate — acceptable here only because there was still no production data at the time (same reasoning as the init migration); rule 5 below remains binding for every migration from this point forward, once real users exist.
+
 ## Phase 0/1 baseline
 - First migration (`prisma migrate dev --name init`) creates the full Phase 0/1 schema in one shot — auth models + Account/Transaction/Category/Tag/TransactionTag. There is no production data yet, so no backward-compatibility constraints apply to this migration.
 
@@ -10,8 +14,8 @@
 4. **Renames are two migrations**, not one: add the new column, backfill/dual-write, then drop the old column in a later migration — never a single `ALTER ... RENAME` on a table that might have production data by Phase 2+.
 5. Destructive migrations (drop column/table) require Release Manager sign-off per the release checklist — they are irreversible in production.
 
-## Phase-by-phase schema growth (planned, not yet modeled)
-- **Phase 2**: `Budget`, `BudgetCategory`, `Goal`, `Bill` — **correction (CTO, 2026-07-19, per resolved product-decision open questions in `docs/product/{budgeting,savings-goals,bills}.md`)**: `Budget`/`BudgetCategory` reference `Category`; `Bill` optionally references `Category` and optionally links a paid occurrence to an existing `Transaction` (a single-use link, not a duplicating relation); `Goal` references neither `Category` nor `Account` — goal progress is tracked purely through a manually-logged `GoalContribution` model, fully independent of Accounts, to avoid two independently-maintained numbers (account balance vs. goal progress) drifting or double-counting. No changes to Phase 0/1 tables expected.
+## Phase-by-phase schema growth
+- **Phase 2 (applied, see "Applied migrations" above)**: `Budget`/`BudgetCategory` reference `Category`; `Goal`/`GoalContribution` reference neither `Category` nor `Account` — goal progress is tracked purely through the manually-logged `GoalContribution` model; `Bill`/`BillOccurrence` optionally reference `Category` and optionally link a paid occurrence to an existing `Transaction` (a single-use, unique FK, not a duplicating relation); `Notification` (originally missing from this note — added by the Database Architect alongside the models above, flagged by the Solution Architect as a gap in this document) references `BudgetCategory`/`BillOccurrence`; `Receipt` (Transactions addendum) replaces the Phase 1 `Transaction.receiptUrl` placeholder with a proper one-to-many model. See `docs/database/er-diagram.md`'s Phase 2 design notes for the full rationale on each.
 - **Phase 3**: `DebtDetail` (extends `Account` where `type` is a debt-bearing type), `InvestmentHolding`, `RecurringIncome` — may add fields to `Account` (e.g. `payoffDate` lives on `DebtDetail`, not `Account`, to avoid nullable-field sprawl on the shared table).
 - **Phase 4**: AI-related tables (e.g. cached insights, financial health score snapshots) are additive-only against existing domains.
 

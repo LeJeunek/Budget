@@ -1,9 +1,13 @@
-// FinanceOS — Prisma schema (Phase 0 + Phase 1)
-// Scope: auth (Better Auth), Accounts, Transactions, Categories, Tags.
-// Later-phase domains (Budget, Goal, Bill, Debt, Investment) are added by the
-// Database Architect in their own phase, per docs/planning/roadmap.md — do not
-// pre-model them here to avoid guessing business rules the Product Owner hasn't
-// specified yet.
+// FinanceOS — Prisma schema (Phase 0 + Phase 1 + Phase 2)
+// Scope: auth (Better Auth), Accounts, Transactions, Categories, Tags (Phase 1);
+// Budgeting, Savings Goals, Bills, Notifications, and a multi-file Receipt model
+// for Transactions (Phase 2). Modeled per docs/product/{budgeting,savings-goals,
+// bills,calendar-and-notifications}.md and the Transactions receipt-attachment
+// addendum, all resolved by the CTO on 2026-07-19, plus docs/architecture/
+// api-contracts.md and Architecture.md's Phase 2 module-boundary sections.
+// Later-phase domains (Debt, Investment, Recurring Income) remain deferred to
+// Phase 3 — do not pre-model them here to avoid guessing business rules the
+// Product Owner hasn't specified yet.
 
 generator client {
   provider = "prisma-client-js"
@@ -31,11 +35,21 @@ model User {
   sessions Session[]
   accounts AuthAccount[]
 
-  // FinanceOS domain data
+  // FinanceOS domain data (Phase 1)
   financialAccounts Account[]
   transactions      Transaction[]
   categories        Category[]
   tags              Tag[]
+
+  // FinanceOS domain data (Phase 2)
+  budgets           Budget[]
+  budgetCategories  BudgetCategory[]
+  goals             Goal[]
+  goalContributions GoalContribution[]
+  bills             Bill[]
+  billOccurrences   BillOccurrence[]
+  notifications     Notification[]
+  receipts          Receipt[]
 
   @@map("user")
 }
@@ -146,6 +160,14 @@ model Category {
 
   transactions Transaction[]
 
+  // Phase 2 back-relations. Category itself is unchanged (still hard-delete for
+  // custom categories per categories.md AC6) — BudgetCategory.categoryId and
+  // Bill.categoryId both use onDelete: SetNull below, the same pattern already
+  // established for Transaction.categoryId, so a deleted category never leaves
+  // a dangling FK on either new model.
+  budgetCategories BudgetCategory[]
+  bills            Bill[]
+
   @@unique([userId, name])
   @@map("category")
 }
@@ -183,11 +205,23 @@ model Transaction {
   parentTransactionId String?
   parentTransaction   Transaction?  @relation("TransactionSplits", fields: [parentTransactionId], references: [id], onDelete: Cascade)
   splits              Transaction[] @relation("TransactionSplits")
-  receiptUrl  String? // UploadThing URL, populated once file storage lands (Phase 1 or 2, per roadmap)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   tags TransactionTag[]
+
+  // Phase 2: the Phase 1 placeholder `receiptUrl: String?` (a single URL) is
+  // dropped in favor of a proper one-to-many Receipt model — see Receipt below.
+  // Safe to drop outright (not a two-migration rename per migration-strategy.md
+  // rule #4): there is no production data yet, and Phase 1 never built any UI
+  // that wrote to receiptUrl, so there is nothing to backfill/dual-write.
+  receipts Receipt[]
+
+  // Phase 2: the optional Bill occurrence this transaction backs, if any (a
+  // Transaction may satisfy at most one BillOccurrence — see BillOccurrence's
+  // unique transactionId below). Nullable/optional from this side since most
+  // transactions never link to a bill.
+  billOccurrence BillOccurrence?
 
   @@index([userId, date])
   @@index([accountId])
@@ -205,4 +239,329 @@ model TransactionTag {
 
   @@id([transactionId, tagId])
   @@map("transaction_tag")
+}
+
+// ---------------------------------------------------------------------------
+// FinanceOS domain (Phase 2) — Budgeting, Savings Goals, Bills, Notifications,
+// and the Receipt addendum to Transactions above.
+// ---------------------------------------------------------------------------
+
+// ---- Budgeting --------------------------------------------------------------
+//
+// Modeling decision (docs/product/budgeting.md AC2/AC3/AC4, resolved gap #4 in
+// the Database Architect's task brief): "unset" vs. "allocated $0" for a given
+// category+month must be distinguishable, and must not overload a single
+// nullable `amount` column with two meanings. This is modeled as **row
+// presence**: no BudgetCategory row for a given month+category means unset; a
+// row with amount: 0 means deliberately zero. setCategoryAllocation's
+// upsert semantics only need to validate amount >= 0 — there is no separate
+// "clear allocation" action anywhere in the spec.
+//
+// A lightweight Budget "header" row (one per user per calendar month) anchors
+// each month's BudgetCategory rows and gives the carry-forward / past-month
+// read logic (api-contracts.md's getBudgetMonth) a single row whose mere
+// existence answers "has this month been materialized" without scanning
+// BudgetCategory — a past month with no Budget row was genuinely never
+// opened/materialized ("no budget was set this month," per the edge case);
+// a past month WITH a Budget row (even one with zero BudgetCategory children)
+// was live at some point and its history is preserved and read-only.
+// isEditable itself is a pure function of `month` vs. "today" — it is never
+// stored, to avoid a stored/derived-drift bug the app otherwise avoids
+// everywhere else in Phase 2 (Budget Health Score, Goal progress, bill status).
+model Budget {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // First-of-month UTC calendar date representing "YYYY-MM" (e.g. 2026-07-01
+  // for July 2026), mirroring Transaction.date's @db.Date + UTC convention
+  // (risk-register.md #8) rather than introducing a second date representation
+  // (e.g. a raw "YYYY-MM" string) alongside it. The service layer maps
+  // "YYYY-MM" <-> first-of-month Date at the API boundary per api-contracts.md.
+  month     DateTime @db.Date
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  categories BudgetCategory[]
+
+  @@unique([userId, month])
+  @@index([userId, month])
+  @@map("budget")
+}
+
+model BudgetCategory {
+  id       String @id @default(cuid())
+  budgetId String
+  budget   Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  // Denormalized alongside budgetId (not reached via a Budget join) per this
+  // schema's established convention of a direct userId FK + index on every
+  // user-owned model (mirrors Transaction.userId despite Transaction.accountId
+  // already implying ownership) — keeps user-scoped queries and row-level
+  // security checks a single-column lookup, no join required.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Nullable + onDelete: SetNull, the same pattern already established for
+  // Transaction.categoryId: a hard-deleted custom category (categories.md AC6)
+  // must not cascade-delete this row, since budgeting.md's edge case requires
+  // *past* months' allocations for a deleted category to survive as read-only
+  // history (only current/future allocations are removed, which is an
+  // application-level responsibility in the Categories deletion flow per
+  // Architecture.md's module-boundary rules — Prisma cannot express a
+  // "delete only if month >= current month" FK behavior declaratively).
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  // Row presence is the "unset vs. set" signal (see Budgeting's modeling
+  // decision above) — this column itself is never nullable.
+  amount    Decimal  @db.Decimal(14, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  notifications Notification[]
+
+  // One allocation row per category per budget(month) — this is the DB-enforced
+  // half of "unset vs. set to zero" (row absence vs. presence).
+  @@unique([budgetId, categoryId])
+  @@index([userId])
+  @@index([categoryId])
+  @@map("budget_category")
+}
+
+// ---- Savings Goals ------------------------------------------------------
+//
+// No Account linkage anywhere in this domain (savings-goals.md, resolved CTO
+// 2026-07-19): progress comes only from GoalContribution, never a derived
+// account balance, to avoid two independently-maintained numbers drifting or
+// double-counting against each other. currentProgress/percentComplete/
+// isCompleted/estimatedCompletion are all computed at read time in
+// features/goals/server/service.ts, never stored — this is what makes
+// "editing targetAmount can flip Completed<->Active" and "deleting a
+// contribution recalculates progress" (both spec'd behaviors) fall out for
+// free with zero write-side sync logic.
+model Goal {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name   String
+  targetAmount Decimal @db.Decimal(14, 2)
+  // Optional per savings-goals.md AC1.
+  targetDate DateTime? @db.Date
+  // Optional per savings-goals.md AC1; used by the read-time estimated-
+  // completion calculation (AC7, case 1) when present.
+  plannedMonthlyContribution Decimal? @db.Decimal(14, 2)
+  // Archive-only (savings-goals.md AC6, resolved CTO 2026-07-19) — matches
+  // Account's soft-delete pattern exactly, never a hard delete. Archiving is
+  // purely a visibility action; it has no effect on contribution history or
+  // completion status (both remain fully computable from GoalContribution
+  // regardless of archivedAt).
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  contributions GoalContribution[]
+
+  @@index([userId])
+  @@map("goal")
+}
+
+model GoalContribution {
+  id     String @id @default(cuid())
+  goalId String
+  goal   Goal   @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  // Direct userId FK + index, same rationale as BudgetCategory.userId above.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Validated > 0 in application code (savings-goals.md Edge Cases: "negative
+  // or non-numeric... contribution amount: rejected"); no DB CHECK constraint,
+  // consistent with this schema's existing precedent of leaving numeric-range
+  // validation to Zod (e.g. Transaction.amount has no DB-level sign constraint
+  // either, despite its own sign convention).
+  amount Decimal @db.Decimal(14, 2)
+  date   DateTime @db.Date
+  // No updatedAt: contributions are an append/delete-only ledger per the spec
+  // (AC5 — delete a mis-logged contribution; there is no "edit contribution"
+  // action), so there is nothing to track a modification timestamp for.
+  createdAt DateTime @default(now())
+
+  @@index([goalId])
+  @@index([userId])
+  @@map("goal_contribution")
+}
+
+// ---- Bills ----------------------------------------------------------------
+
+enum BillSchedule {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  QUARTERLY
+  ANNUALLY
+}
+
+model Bill {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name   String
+  // The typical/planned amount (bills.md AC1) — a planning estimate only; the
+  // actual amount paid for a given occurrence may differ (variable bills like
+  // Electric/Water) and lives on BillOccurrence instead, never overwritten
+  // here by an actual payment.
+  expectedAmount Decimal @db.Decimal(14, 2)
+  // The anchor date for occurrence generation — the bill's next/first
+  // occurrence at creation time (bills.md AC1), NOT a live "next due date"
+  // figure (that is always computed at read time from BillOccurrence rows in
+  // features/bills/server/service.ts, per api-contracts.md's lazy-generation
+  // design, to avoid a second stored/derived date that could drift from the
+  // generated occurrences).
+  dueDate  DateTime     @db.Date
+  schedule BillSchedule
+  // Optional (bills.md AC1) — a bill with no category assigned simply doesn't
+  // participate in category-level reporting until one is set (Edge Cases).
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  // Archive-only (bills.md AC5 / Edge Cases) — matches Account's pattern.
+  // Archiving stops future occurrence generation without deleting payment
+  // history; reactivating resumes generation forward from "today" and does
+  // not backfill the archived gap (api-contracts.md's unarchiveBill contract).
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  occurrences BillOccurrence[]
+
+  @@index([userId])
+  @@map("bill")
+}
+
+model BillOccurrence {
+  id     String @id @default(cuid())
+  billId String
+  bill   Bill   @relation(fields: [billId], references: [id], onDelete: Cascade)
+  // Direct userId FK + index, same rationale as BudgetCategory.userId above —
+  // also lets the upcoming-list/calendar queries (getUpcomingOccurrences,
+  // getCalendarMonth) scope and range-query by userId without a Bill join.
+  userId  String
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dueDate DateTime @db.Date
+  // Manual (non-linked) paid path only (bills.md AC7). When transactionId is
+  // set below, the occurrence's *effective* paid amount/date are read live via
+  // a join to the linked Transaction at read time instead — never copied onto
+  // these two columns — which is what makes "a linked occurrence's paid amount
+  // always reflects its linked Transaction's amount, live" true with zero
+  // write-side sync code. These columns are simply unused/null whenever
+  // transactionId is set.
+  paidAmount Decimal?  @db.Decimal(14, 2)
+  paidDate   DateTime? @db.Date
+  // At most one Transaction may back one occurrence (bills.md Edge Cases: "a
+  // Transaction can back at most one bill occurrence") — enforced here via
+  // @unique as a database-level invariant, not just an application check.
+  // onDelete: SetNull reverts the occurrence to its computed Upcoming/Due
+  // Today/Late status if its linked Transaction is later deleted (bills.md
+  // Edge Cases: "the linked Transaction is later deleted... reverts to...
+  // effectively un-paid"), with no Bills-side event/webhook handling required
+  // — the same onDelete: SetNull pattern already established for
+  // Transaction.categoryId in Phase 1.
+  transactionId String?      @unique
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  notifications Notification[]
+
+  // Status (Upcoming/Due Today/Late/Paid) is never a stored column — always
+  // computed at read time from dueDate/paidAmount/paidDate/transactionId, per
+  // api-contracts.md's occurrence.ts::computeStatus. Storing it would create
+  // exactly the stored/derived-drift bug this app avoids everywhere in Phase 2.
+
+  // Prevents the lazy on-read generator (ensureOccurrencesGenerated) from ever
+  // creating two occurrence rows for the same bill+due-date, making generation
+  // naturally idempotent across repeated reads/requests without extra locking.
+  @@unique([billId, dueDate])
+  @@index([userId, dueDate])
+  @@index([billId])
+  @@map("bill_occurrence")
+}
+
+// ---- Notifications ----------------------------------------------------------
+//
+// Persisted, lazily-materialized rows (api-contracts.md's Notifications
+// section) — NOT a Phase-2-schema-growth omission to be left uncorrected: this
+// model was missing from docs/database/migration-strategy.md's original Phase 2
+// note (which listed Budget/BudgetCategory/Goal/Bill only); see this schema's
+// migration-strategy.md update for the correction. A purely ephemeral
+// (compute-only, nothing stored) design cannot satisfy this spec: dismissing a
+// notification must be durable (AC4) even though the underlying trigger
+// condition doesn't go away, and the "one active over-budget notification per
+// category per month" / "one due-soon and one late notification per bill
+// occurrence" dedup rules (Edge Cases) need a stable identity to dedupe
+// against across reads.
+enum NotificationType {
+  BUDGET_OVER
+  BILL_DUE_SOON
+  BILL_LATE
+}
+
+model Notification {
+  id     String           @id @default(cuid())
+  userId String
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type   NotificationType
+  // Exactly one of these two is set, matching whichever domain triggered this
+  // notification (BUDGET_OVER -> budgetCategoryId; BILL_DUE_SOON/BILL_LATE ->
+  // billOccurrenceId). Enforced in features/notifications/server/service.ts,
+  // not a DB CHECK constraint, consistent with this schema's existing
+  // precedent of leaving cross-column invariants to application code (e.g.
+  // Transaction's split-sum-equals-parent rule). onDelete: Cascade on both so
+  // a notification never outlives the row it refers to (e.g. Budgeting or
+  // Bills data cascading away with its owning User).
+  budgetCategoryId String?
+  budgetCategory   BudgetCategory? @relation(fields: [budgetCategoryId], references: [id], onDelete: Cascade)
+  billOccurrenceId String?
+  billOccurrence   BillOccurrence? @relation(fields: [billOccurrenceId], references: [id], onDelete: Cascade)
+  readAt           DateTime?
+  dismissedAt      DateTime?
+  createdAt        DateTime        @default(now())
+
+  // Dedup guarantees per api-contracts.md's ensureNotifications algorithm: at
+  // most one BUDGET_OVER notification per BudgetCategory row (a category going
+  // over budget again in a later month naturally gets a new BudgetCategory row,
+  // since allocations are per-month, so this does not block re-notifying in a
+  // future month), and at most one notification of a given type per
+  // BillOccurrence (one due-soon and, separately, one late notification per
+  // occurrence, per calendar-and-notifications.md AC2).
+  @@unique([budgetCategoryId, type])
+  @@unique([billOccurrenceId, type])
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+  @@map("notification")
+}
+
+// ---- Receipts (Phase 2 addendum to Transactions) ---------------------------
+//
+// Replaces the Phase 1 `Transaction.receiptUrl: String?` placeholder (dropped
+// above), which could only ever represent a single file and cannot satisfy
+// transactions.md's Phase 2 addendum requirement of multiple receipts per
+// transaction (AC1: "attach one or more files"; Edge Cases: "a transaction
+// with multiple receipts attached... all individually removable"). Actual file
+// deletion from UploadThing storage (utapi.deleteFiles(key)) is a Backend
+// Engineer responsibility in features/transactions/server/receipts.ts, not
+// something the DB cascade below performs — onDelete: Cascade here only
+// guarantees no *orphaned row* survives a deleted transaction; the
+// corresponding storage object must be deleted by application code in the same
+// operation (per api-contracts.md's removeReceipt / deleteTransaction contract).
+model Receipt {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  url      String // UploadThing-hosted file URL
+  key      String // UploadThing file key — required to call utapi.deleteFiles(key) on removal
+  name     String // original filename, for display
+  size     Int // bytes
+  mimeType String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([transactionId])
+  @@map("receipt")
 }
