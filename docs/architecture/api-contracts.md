@@ -20,9 +20,11 @@ All responses use `ApiResult<T>` from `lib/api-response.ts` (see naming-standard
 Archiving (never hard-deleting) an account with existing transactions is required — transaction history must remain intact for analytics/reports in later phases. `archivedAt` is a timestamp, not a boolean, per the Database Architect's schema.
 
 ## Transactions (`features/transactions`)
+**Doc correction (CTO, 2026-07-19):** the List row originally had no `sortBy`/`sortDir` params, even though `docs/product/transactions.md` AC2 requires sorting by date/amount/merchant/category. The implementing agent correctly declined to extend this contract unilaterally and flagged the gap instead of guessing — resolved below.
+
 | Action | Mechanism | Input | Output |
 |---|---|---|---|
-| List (paginated/filtered) | `GET /api/transactions?page=&pageSize=&accountId=&categoryId=&search=&dateFrom=&dateTo=` | query params, parsed via `TransactionFilterSchema` | `ApiResult<{ items: Transaction[]; total: number }>` |
+| List (paginated/filtered/sorted) | `GET /api/transactions?page=&pageSize=&accountId=&categoryId=&search=&dateFrom=&dateTo=&sortBy=&sortDir=` | query params, parsed via `TransactionFilterSchema`. `sortBy` is one of `date` \| `amount` \| `merchant` \| `category` (default `date`); `sortDir` is `asc` \| `desc` (default `desc`) | `ApiResult<{ items: Transaction[]; total: number }>` |
 | Create | Server Action `createTransaction` | `CreateTransactionSchema` | `ApiResult<Transaction>` |
 | Update (incl. re-categorize, add notes/tags) | Server Action `updateTransaction` | `UpdateTransactionSchema` | `ApiResult<Transaction>` |
 | Delete | Server Action `deleteTransaction` | `{ id: string }` | `ApiResult<{ id: string }>` |
