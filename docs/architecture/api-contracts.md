@@ -6,14 +6,18 @@ All responses use `ApiResult<T>` from `lib/api-response.ts` (see naming-standard
 - `ALL /api/auth/[...all]` — handled entirely by Better Auth's Next.js handler. Backend Engineer wires it up; does not reimplement auth logic.
 
 ## Accounts (`features/accounts`)
+**Doc correction (Backend Engineer, 2026-07-19):** this table previously listed a `deleteAccount` action returning `ApiResult<{ id: string }>`, implying a hard delete. There is no hard-delete action — the implementation (and `docs/product/accounts.md` AC4/AC5, and the schema's own "Never hard-delete an Account" comment) is archive/unarchive only, corrected below.
+
 | Action | Mechanism | Input | Output |
 |---|---|---|---|
-| List accounts | Server Component direct call to `service.getAccounts(userId)` | — | `Account[]` |
+| List accounts | Server Component direct call to `service.getAccounts(userId, { includeArchived? })` | — | `Account[]` |
 | Create account | Server Action `createAccount` | `CreateAccountSchema` (name, type, institution?, balance, interestRate?, color) | `ApiResult<Account>` |
 | Update account | Server Action `updateAccount` | `UpdateAccountSchema` (id + partial fields) | `ApiResult<Account>` |
-| Delete account | Server Action `deleteAccount` | `{ id: string }` | `ApiResult<{ id: string }>` |
+| Archive account (soft delete) | Server Action `archiveAccount` | `AccountIdSchema` (`{ id: string }`) — idempotent, archiving an already-archived account just confirms the end state | `ApiResult<Account>` |
+| Unarchive account (restore) | Server Action `unarchiveAccount` | `AccountIdSchema` (`{ id: string }`) — idempotent | `ApiResult<Account>` |
+| List (client-side refetch) | `GET /api/accounts?includeArchived=` — thin wrapper around `service.getAccounts`, used only by `features/accounts/hooks/use-accounts.ts` for post-mutation cache refetch; Server Components should still call `service.getAccounts` directly, not this route | — | `ApiResult<Account[]>` |
 
-Deleting an account with existing transactions is a soft-delete (`archivedAt` timestamp) — never a hard delete — since transaction history must remain intact for analytics/reports in later phases. Backend Engineer enforces this; Database Architect models `archivedAt` accordingly.
+Archiving (never hard-deleting) an account with existing transactions is required — transaction history must remain intact for analytics/reports in later phases. `archivedAt` is a timestamp, not a boolean, per the Database Architect's schema.
 
 ## Transactions (`features/transactions`)
 | Action | Mechanism | Input | Output |
