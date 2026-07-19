@@ -39,8 +39,8 @@ Transactions are the single largest and most frequently touched data set in the 
 20. If a CSV row includes a category value that matches one of the user's existing category names, the imported transaction is assigned to that category automatically; otherwise it is imported as Uncategorized rather than blocking the import.
 21. The system enforces a reasonable maximum file size/row count per import and rejects oversized files with a clear, actionable message rather than failing silently or timing out.
 
-### Receipt attachment — deferred
-22. Receipt attachment is **out of scope for Phase 1**. Per the Roadmap, this was an Architect's call contingent on file-storage integration risk, and the Phase 1 architecture does not wire up file storage — it lands in Phase 2 alongside Bills' storage needs. Phase 1 transactions do not expose an attach-receipt action.
+### Receipt attachment — deferred (see Phase 2 addendum below)
+22. Receipt attachment was **out of scope for Phase 1**. Per the Roadmap, this was an Architect's call contingent on file-storage integration risk, and the Phase 1 architecture did not wire up file storage. It ships in Phase 2 alongside Bills' storage needs — see the addendum at the end of this document.
 
 ## Edge Cases
 
@@ -70,7 +70,7 @@ Transactions are the single largest and most frequently touched data set in the 
 - Accounts (Phase 1): a transaction cannot exist without an account.
 - Categories (Phase 1): categorization, filtering, and the Uncategorized state all depend on the category list existing.
 - Dashboard Overview v1 (Phase 1): consumes transaction data for every stat card and chart; transaction correctness (sign convention, split handling, duplicate handling) directly determines dashboard accuracy.
-- File storage (UploadThing), planned for Phase 2, is a dependency for receipt attachment only — not for any other Transactions functionality in this phase.
+- File storage (UploadThing), delivered in Phase 2 (see addendum below), is a dependency for receipt attachment only — not for any other Transactions functionality in this phase.
 
 ## Success Metrics
 
@@ -118,3 +118,43 @@ A fast, reliable global search is a small feature with an outsized trust payoff 
 - Global search usage rate among active users (adoption of the pattern).
 - Percentage of searches that result in a click-through to a result (relevance signal).
 - Zero reported cross-user data exposure incidents via search.
+
+---
+
+## Phase 2 Addendum: Receipt Attachment
+
+Deferred from Phase 1 (see acceptance criterion 22 above) specifically pending file-storage integration. That integration (UploadThing) is wired up in Phase 2, alongside Bills' storage needs per the Roadmap, so receipt attachment ships now as a small addition to the existing Transactions feature — not a new top-level domain or document.
+
+### User Story
+As a FinanceOS user, I want to attach a photo or file of a receipt to a transaction, so I have proof of purchase alongside the transaction record without needing to keep paper receipts or dig through email confirmations later.
+
+### Business Value
+Receipts are the one piece of supporting evidence a transaction record can't capture on its own (itemized contents, warranty proof, return-eligibility proof, tax/expense documentation). Attaching them directly to the transaction they belong to keeps that evidence where a user will actually look for it later, rather than scattered across email or a phone's camera roll.
+
+### Acceptance Criteria
+1. A user can attach one or more files (image or PDF) to an existing transaction.
+2. A user can view and download any receipt attached to a transaction from that transaction's detail view.
+3. A user can remove a receipt attached to a transaction.
+4. Attaching, viewing, and removing receipts works the same for split transactions' individual line items as for unsplit transactions.
+5. The system enforces a reasonable maximum file size and limits accepted file types to common receipt formats (images, PDF), rejecting anything else with a clear, actionable message.
+6. Receipts are scoped strictly to the authenticated user's own transactions — never visible or accessible to any other user.
+
+### Edge Cases
+- **Deleting a transaction that has an attached receipt**: the receipt is deleted along with it (no orphaned file left in storage), consistent with the existing split-parent-deletion warning behavior above.
+- **Attaching an oversized or unsupported file**: rejected before upload completes, with a clear message, not a silent failure or a stuck/hanging upload state.
+- **A transaction with multiple receipts attached** (e.g. an itemized receipt plus a warranty card): all are listed and individually removable.
+- **Very slow network / large file upload**: user sees a clear upload progress/loading state, not a frozen UI.
+
+### Definition of Done
+- Attach, view/download, and remove all work end to end against real files, including the maximum-size and unsupported-type rejection paths.
+- Split-transaction line items support the same receipt behavior as unsplit transactions.
+- Meets the release-level bar defined in the Project Charter: tests passing, Security Architect review (no cross-user file access, upload handled safely — same bar as CSV import), Performance Engineer review, documentation, and CTO/architecture sign-off.
+
+### Dependencies
+- File storage (UploadThing), wired up in Phase 2 per the Roadmap — this addendum is the reason that integration exists; per the Bills spec, Bills does not currently require its own storage feature in this phase, so Transactions is presently UploadThing's only consumer.
+- Transactions (Phase 1, this document): receipts attach to an existing transaction/split line item; this addendum has no functionality independent of that base feature.
+
+### Success Metrics
+- Percentage of transactions with a receipt attached (adoption, likely concentrated in larger or tax-relevant purchases rather than every transaction).
+- Receipt upload success rate (technical reliability signal, mirrors the CSV import success-rate metric already tracked for this feature).
+- Zero reported cross-user file access incidents.
