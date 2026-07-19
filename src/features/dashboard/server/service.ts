@@ -144,7 +144,14 @@ async function getIncomeAndExpenses(
   const income = incomeResult._sum.amount?.toNumber() ?? 0
   // Expenses are stored as negative amounts; negate to the positive total
   // the API contract and UI expect ("sum of money-out transactions").
-  const expenses = -(expenseResult._sum.amount?.toNumber() ?? 0)
+  // `|| 0` (not just `?? 0`) matters here: when there are zero expense
+  // transactions, `-(0)` is IEEE-754 negative zero, and
+  // `Intl.NumberFormat` (lib/utils.ts's formatCurrency) renders `-0` as
+  // "-$0.00" — a real, user-visible bug caught by live-testing an
+  // account with no transactions yet. `-0 || 0` normalizes it to `+0`
+  // since `-0` is falsy in JS; a genuine negative expense total is never
+  // falsy, so this only ever affects the zero case.
+  const expenses = -(expenseResult._sum.amount?.toNumber() ?? 0) || 0
 
   return { income, expenses }
 }
