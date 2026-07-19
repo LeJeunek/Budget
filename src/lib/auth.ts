@@ -16,6 +16,19 @@ import { db } from "@/lib/db"
  * auth through the shared `db` client (lib/db.ts) instead of a second
  * connection means one Prisma connection pool for the whole app.
  *
+ * `account.modelName` MUST be set to "authAccount": Prisma Client generates
+ * its client property from the *model name*, not `@@map` — `@@map` only
+ * renames the underlying SQL table. Our Prisma model is named `AuthAccount`
+ * (to avoid colliding with FinanceOS's own `Account` model, which is a
+ * separate, unrelated concept — a financial account), so its Prisma Client
+ * property is `db.authAccount`, not `db.account`. Without this override,
+ * Better Auth's Prisma adapter defaults to calling `db.account`, which
+ * Prisma resolves to FinanceOS's financial Account model instead — causing
+ * every credential sign-up to fail with a confusing "Argument `name` is
+ * missing" error (financial Account.name is a required field the auth
+ * payload obviously never provides). Caught via a real signup attempt
+ * against the live dev database, not by typecheck/lint/build.
+ *
  * `nextCookies()` must be the last entry in `plugins`: it rewrites the
  * Set-Cookie headers Better Auth's core produces so session cookies can be
  * set from Server Actions (via next/headers' cookies()), not just from the
@@ -25,6 +38,9 @@ export const auth = betterAuth({
   database: prismaAdapter(db, {
     provider: "postgresql",
   }),
+  account: {
+    modelName: "authAccount",
+  },
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: process.env.BETTER_AUTH_URL,
   // Phase 0 scope per docs/planning/roadmap.md: email/password + Google only.
