@@ -4,28 +4,17 @@
 // 11-category starter set plus a couple of accounts so the dashboard has
 // something to render during Phase 1 development.
 //
-// The 11 system categories are also the exact list every *real* new user
-// should get at signup — DEFAULT_CATEGORIES is exported so the Backend
-// Engineer's signup flow (features/accounts or an auth hook) can reuse it
-// instead of duplicating the list. Do not hardcode this list a second time.
+// DEFAULT_CATEGORIES lives in src/features/categories/default-categories.ts
+// (not defined here) so src/lib/auth.ts's real signup hook can import it
+// too, without pulling in this file's top-level `main()` side effects (this
+// file runs main() unconditionally at import time — importing it from
+// application/runtime code, not just other scripts, would re-run the demo
+// seed on every server start).
 
 import { PrismaClient, AccountType } from "@prisma/client";
+import { DEFAULT_CATEGORIES } from "../src/features/categories/default-categories";
 
 const prisma = new PrismaClient();
-
-export const DEFAULT_CATEGORIES: { name: string; color: string }[] = [
-  { name: "Housing", color: "#f97316" },
-  { name: "Utilities", color: "#eab308" },
-  { name: "Transportation", color: "#84cc16" },
-  { name: "Food", color: "#22c55e" },
-  { name: "Entertainment", color: "#06b6d4" },
-  { name: "Shopping", color: "#6366f1" },
-  { name: "Healthcare", color: "#a855f7" },
-  { name: "Insurance", color: "#ec4899" },
-  { name: "Investments", color: "#14b8a6" },
-  { name: "Savings", color: "#0ea5e9" },
-  { name: "Misc", color: "#94a3b8" },
-];
 
 async function main() {
   const demoUser = await prisma.user.upsert({

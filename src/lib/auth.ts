@@ -4,6 +4,7 @@ import { nextCookies } from "better-auth/next-js"
 import { headers } from "next/headers"
 
 import { db } from "@/lib/db"
+import { DEFAULT_CATEGORIES } from "@/features/categories/default-categories"
 
 /**
  * Better Auth server instance.
@@ -54,6 +55,41 @@ export const auth = betterAuth({
       // request time with unset credentials rather than crashing the app.
       clientId: process.env.GOOGLE_CLIENT_ID ?? "",
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+    },
+  },
+  // Seeds the Charter's fixed 11-category starter set for every new user,
+  // per docs/product/categories.md AC1 ("Every new user automatically
+  // receives the ... starter set at signup, with no action required on
+  // their part"). This was flagged as an open gap by the agent that built
+  // the Categories backend and went unaddressed until caught by live
+  // testing sign-up through the actual UI — typecheck/lint/build never
+  // exercise this path since it only matters at request time.
+  //
+  // `createMany` (not sequential `create` calls) so this is one round-trip;
+  // failures here intentionally do not block sign-up itself (a user should
+  // never be unable to create an account because category seeding hiccuped)
+  // — logged, not rethrown, per the `after` hook's `Promise<void>` contract
+  // giving Better Auth's core no way to surface a partial failure anyway.
+  databaseHooks: {
+    user: {
+      create: {
+        after: async (user) => {
+          try {
+            await db.category.createMany({
+              data: DEFAULT_CATEGORIES.map((category) => ({
+                ...category,
+                userId: user.id,
+                isSystem: true,
+              })),
+            })
+          } catch (error) {
+            console.error(
+              `Failed to seed default categories for user ${user.id}:`,
+              error,
+            )
+          }
+        },
+      },
     },
   },
   plugins: [nextCookies()],
