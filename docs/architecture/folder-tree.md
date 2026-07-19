@@ -77,6 +77,15 @@ Budget/
 │   │   │       ├── net-worth-chart.tsx
 │   │   │       ├── spending-by-category-chart.tsx
 │   │   │       └── income-vs-expense-chart.tsx
+│   │   ├── categories/               # small module: consumed by transactions, dashboard,
+│   │   │   ├── server/                # and (Phase 2+) budgeting — not owned by any one of them.
+│   │   │   │   ├── service.ts        # See api-contracts.md's 2026-07-19 CTO scope correction.
+│   │   │   │   ├── actions.ts
+│   │   │   │   └── validation.ts
+│   │   │   ├── types.ts
+│   │   │   └── components/
+│   │   │       ├── category-form.tsx
+│   │   │       └── category-list.tsx
 │   │   ├── budgeting/                # Phase 2 — reserved, empty
 │   │   ├── goals/                    # Phase 2 — reserved, empty
 │   │   ├── bills/                    # Phase 2 — reserved, empty

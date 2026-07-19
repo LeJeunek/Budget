@@ -36,5 +36,16 @@ Read-only aggregation, Server Component direct calls (no client mutation, so no 
 
 These are intentionally not REST endpoints in Phase 1 since nothing client-side needs to refetch them independently of a full page load; promote to `/api/dashboard/*` routes only if a later phase needs client-side refresh (e.g. after a transaction is added without a full page reload).
 
-## Categories
-Seed-only in Phase 1 (the fixed 11-category list from the Charter). No CRUD UI yet — `service.getCategories(userId)` returns the seeded + any user-added rows. Full category management is a Phase 4 admin feature.
+## Categories (`features/categories`)
+**Scope correction (CTO, 2026-07-19):** this section previously scoped Phase 1 Categories as seed-only/no-CRUD, which conflicted with the Roadmap's Phase 1 description ("seeded per user, user-editable") and with the Database Architect's own rationale for the `isSystem` flag (documented in `docs/database/er-diagram.md`), which exists specifically to let non-system categories be freely renamed/deleted while protecting the fixed 11. The Product Owner's spec (`docs/product/categories.md`) flagged this conflict rather than silently picking a side, and it's resolved as follows: **minimal custom-category CRUD ships in Phase 1.** "Full category management" (bulk merge, icons, custom ordering, org-wide admin controls) remains deferred to the Phase 4 admin feature — this is a small, scoped CRUD surface, not that.
+
+The fixed 11-category list from the Charter is still seeded automatically at signup (`isSystem: true`, protected from rename/delete).
+
+| Action | Mechanism | Input | Output |
+|---|---|---|---|
+| List categories | Server Component direct call to `service.getCategories(userId)` | — | `Category[]` (system + custom) |
+| Create custom category | Server Action `createCategory` | `CreateCategorySchema` (name, color?) — name unique per user, case-insensitive | `ApiResult<Category>` |
+| Rename/recolor category | Server Action `updateCategory` | `UpdateCategorySchema` (id, name?, color?) — server rejects a `name` change where `isSystem: true`; color changes are allowed on any category | `ApiResult<Category>` |
+| Delete custom category | Server Action `deleteCategory` | `{ id: string }` — server rejects if `isSystem: true`; transactions referencing the deleted category are left in place with `categoryId` set to `null` (matches the schema's `onDelete: SetNull`, i.e. Uncategorized), not deleted | `ApiResult<{ id: string }>` |
+
+New small feature module: `features/categories/{server/{service.ts, actions.ts, validation.ts}, types.ts, components/category-form.tsx, category-list.tsx}` per folder-tree.md's module boundary rules — not folded into `features/transactions`, since Categories is consumed by Transactions, Dashboard, and (from Phase 2 onward) Budgeting alike, and a single-owner domain shouldn't hold a concept three other domains depend on.

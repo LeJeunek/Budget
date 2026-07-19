@@ -27,7 +27,7 @@ Phases are sequential. Each phase must be feature-complete, tested, reviewed, an
 In scope:
 - **Accounts**: create/edit/delete accounts of every type (checking, savings, credit card, cash, investment, retirement, crypto); balance, institution, interest rate, color
 - **Transactions**: table with date/merchant/category/amount/account/notes/tags; search, sort, pagination, filters; manual add/edit/delete; CSV import; split transactions; notes. (Receipt attachment can slip to Phase 2 if storage integration adds risk — Architect's call.)
-- **Categories**: the fixed starter category list (Housing, Utilities, Transportation, Food, Entertainment, Shopping, Healthcare, Insurance, Investments, Savings, Misc) as seed data, user-editable
+- **Categories**: the fixed starter category list (Housing, Utilities, Transportation, Food, Entertainment, Shopping, Healthcare, Insurance, Investments, Savings, Misc) seeded automatically per user and protected from rename/delete; users can add/rename/recolor/delete their own custom categories on top of that set. (Scope note, 2026-07-19: this is a small, scoped CRUD surface — bulk merge, icons, ordering, and org-wide admin controls are still Phase 4. See `docs/architecture/api-contracts.md`'s Categories section for the resolved contract.)
 - **Dashboard Overview v1**: Net Worth, Monthly Income, Monthly Expenses, Remaining Budget (once budgeting exists — see Phase 2, so this may show "no budget set" state), Cash Flow, Savings Rate; charts: Spending by Category, Income vs Expense, Monthly Trends
 - **Global search v1**: transactions + accounts only (expand scope in later phases)
 - Loading skeletons, toast notifications, basic responsive polish (established as patterns here, reused everywhere after)
