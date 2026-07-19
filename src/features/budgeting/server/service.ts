@@ -373,6 +373,114 @@ export async function getBudgetMonthSummary(
   return { ...view.totals }
 }
 
+/** One category that is currently over its allocation for a given month —
+ * the trigger data source for `features/notifications`' `BUDGET_OVER` type
+ * (docs/architecture/api-contracts.md's Notifications section: "Calls
+ * `budgeting.service.getOverBudgetCategories(userId, currentMonth)`").
+ *
+ * `budgetCategoryId` is the real `BudgetCategory` row id — deliberately not
+ * part of `BudgetCategoryLine` (that read model is a client-safe view for
+ * the planner UI, and never exposes internal row ids). Notifications needs
+ * this specific id because `Notification.budgetCategoryId`'s dedup
+ * constraint (`@@unique([budgetCategoryId, type])`, prisma/schema.prisma) is
+ * keyed off it, not off `Category.id`.
+ */
+export interface OverBudgetCategory {
+  budgetCategoryId: string
+  categoryId: string
+  categoryName: string
+}
+
+/**
+ * Currently over-allocation categories for `month` (spent > allocated),
+ * scoped to categories whose `BudgetCategory` row is **already materialized**
+ * for that month — i.e. a real `Budget` row exists (see
+ * `resolveAllocationRows` above for the materialized-vs-carry-forward
+ * distinction).
+ *
+ * This is a deliberate, narrower scope than `getBudgetMonth`'s own
+ * `isOverBudget` flag, which also reports categories that are over budget
+ * only via the read-time carry-forward view (no `Budget` row persisted yet
+ * for `month`). A carry-forward-only category has no persisted
+ * `BudgetCategory.id` to hand back — there is nothing yet for a Notification
+ * row to stably reference — and this module's own carry-forward design is
+ * explicit that materialization must only ever happen as a side effect of an
+ * edit (`server/actions.ts`'s `setCategoryAllocation`), never of a read (see
+ * `resolveAllocationRows`'s JSDoc); this function is a read and must not
+ * violate that rule itself.
+ *
+ * Practical consequence, flagged for the Solution Architect/Product Owner
+ * rather than silently decided: a category that only ever goes over budget
+ * via carry-forward (the user never touches that month's budget planner at
+ * all this month) will not surface a BUDGET_OVER notification until the
+ * month is materialized by some edit — even an edit to a *different*
+ * category, since `setCategoryAllocation` materializes the full
+ * carried-forward row set for the month, not just the row being edited. This
+ * is the smallest change that satisfies the Notification schema's dedup
+ * constraint without altering Budgeting's existing "materialize on edit
+ * only" invariant; revisit if this delay proves unacceptable in practice.
+ */
+export async function getOverBudgetCategories(
+  userId: string,
+  month: string,
+): Promise<OverBudgetCategory[]> {
+  const parsedMonth = MonthSchema.safeParse(month)
+  if (!parsedMonth.success) {
+    throw new Error(`Invalid month "${month}" — expected "YYYY-MM"`)
+  }
+  const monthDate = parseMonthToDate(month)
+
+  const budget = await db.budget.findUnique({
+    where: { userId_month: { userId, month: monthDate } },
+    select: {
+      categories: {
+        where: { categoryId: { not: null } },
+        select: {
+          id: true,
+          categoryId: true,
+          amount: true,
+          category: { select: { name: true } },
+        },
+      },
+    },
+  })
+
+  if (!budget) {
+    return []
+  }
+
+  const spending = await getSpendingByCategoryForMonth(userId, monthDate)
+  const spentByCategoryId = new Map(spending.map((s) => [s.categoryId, s.amount]))
+
+  const overBudget: OverBudgetCategory[] = []
+  for (const row of budget.categories) {
+    if (!row.categoryId || !row.category) {
+      // Defensive only: filtered out at the query level above already; a
+      // deleted category's row (onDelete: SetNull) would only ever reach
+      // here in a narrow concurrent-delete race, and is simply skipped
+      // rather than surfaced as a notification trigger.
+      continue
+    }
+
+    const spent = spentByCategoryId.get(row.categoryId) ?? 0
+    const allocated = row.amount.toNumber()
+
+    // Same over-budget rule as `buildCategoryLine` above (`spent > allocated`)
+    // — re-stated as a single comparison rather than imported, since
+    // `buildCategoryLine` returns a full `BudgetCategoryLine` that discards
+    // the row id this function exists specifically to preserve.
+    if (spent > allocated) {
+      overBudget.push({
+        budgetCategoryId: row.id,
+        categoryId: row.categoryId,
+        categoryName: row.category.name,
+      })
+    }
+  }
+
+  return overBudget
+}
+
 /**
  * Removes a deleted category's allocation from the *current and future*
  * months only — past months' historical `BudgetCategory` rows are left
