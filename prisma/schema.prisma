@@ -1,0 +1,208 @@
+// FinanceOS — Prisma schema (Phase 0 + Phase 1)
+// Scope: auth (Better Auth), Accounts, Transactions, Categories, Tags.
+// Later-phase domains (Budget, Goal, Bill, Debt, Investment) are added by the
+// Database Architect in their own phase, per docs/planning/roadmap.md — do not
+// pre-model them here to avoid guessing business rules the Product Owner hasn't
+// specified yet.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Auth (Better Auth's required shape — do not rename fields, the adapter
+// expects these exact models/columns)
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions Session[]
+  accounts AuthAccount[]
+
+  // FinanceOS domain data
+  financialAccounts Account[]
+  transactions      Transaction[]
+  categories        Category[]
+  tags              Tag[]
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  expiresAt DateTime
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("session")
+}
+
+// Better Auth's own "Account" concept (OAuth provider link), distinct from
+// FinanceOS's financial Account model below — kept separate on purpose and
+// named AuthAccount here to avoid the collision; Better Auth is configured
+// to map to the "account" table regardless of this Prisma model name.
+model AuthAccount {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("verification")
+}
+
+// ---------------------------------------------------------------------------
+// FinanceOS domain (Phase 1)
+// ---------------------------------------------------------------------------
+
+// Single type covering every Phase-1-through-3 account kind. Modeled broadly
+// now (per docs/planning/risk-register.md #1) so Phase 3's debt/investment
+// accounts extend this instead of requiring a new top-level entity and a
+// breaking migration. interestRate is nullable because it's meaningless for
+// e.g. CASH or CHECKING.
+enum AccountType {
+  CHECKING
+  SAVINGS
+  CREDIT_CARD
+  CASH
+  INVESTMENT
+  RETIREMENT
+  CRYPTO
+}
+
+model Account {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name          String
+  type          AccountType
+  institution   String?
+  balance       Decimal     @default(0) @db.Decimal(14, 2)
+  interestRate  Decimal?    @db.Decimal(5, 2)
+  color         String      @default("#6366f1") // hex, user-chosen — see naming-standards.md
+  // Soft delete: transaction history must survive account removal for
+  // analytics/reports in later phases. Never hard-delete an Account.
+  archivedAt    DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  transactions Transaction[]
+
+  @@index([userId])
+  // Better Auth's own OAuth-link model (AuthAccount, above) owns the
+  // "account" table name per its adapter contract — this financial Account
+  // model maps to a different table name to avoid the collision.
+  @@map("financial_account")
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  // Seed categories (Housing, Utilities, ...) are marked isSystem so the UI
+  // can prevent deletion/renaming of the Charter's fixed starter set while
+  // still allowing user-added categories to be freely edited.
+  isSystem  Boolean  @default(false)
+  color     String   @default("#94a3b8")
+  createdAt DateTime @default(now())
+
+  transactions Transaction[]
+
+  @@unique([userId, name])
+  @@map("category")
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime @default(now())
+
+  transactions TransactionTag[]
+
+  @@unique([userId, name])
+  @@map("tag")
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId   String
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  merchant    String
+  amount      Decimal  @db.Decimal(14, 2) // positive = income/credit, negative = expense/debit
+  date        DateTime @db.Date // UTC calendar date; see risk-register.md #8 on timezone handling
+  notes       String?
+  // Split transactions: a parent transaction's amount is divided across
+  // categories. parentTransactionId is null for normal/parent transactions;
+  // set for the generated split "child" rows, which together must sum to the
+  // parent's amount (enforced in features/transactions/server/service.ts, not
+  // at the DB level, since Prisma can't express a cross-row sum constraint).
+  parentTransactionId String?
+  parentTransaction   Transaction?  @relation("TransactionSplits", fields: [parentTransactionId], references: [id], onDelete: Cascade)
+  splits              Transaction[] @relation("TransactionSplits")
+  receiptUrl  String? // UploadThing URL, populated once file storage lands (Phase 1 or 2, per roadmap)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tags TransactionTag[]
+
+  @@index([userId, date])
+  @@index([accountId])
+  @@index([categoryId])
+  @@map("transaction")
+}
+
+// Explicit join model (not an implicit m-n) so future fields like
+// "taggedAt" or "taggedBy" have somewhere to go without a migration.
+model TransactionTag {
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  tagId         String
+  tag           Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([transactionId, tagId])
+  @@map("transaction_tag")
+}

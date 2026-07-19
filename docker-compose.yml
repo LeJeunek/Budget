@@ -1,0 +1,17 @@
+# Local dev Postgres for FinanceOS. Run: docker compose up -d
+# Not used in CI/production — those get a real provisioned Postgres instance.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: financeos
+      POSTGRES_PASSWORD: financeos
+      POSTGRES_DB: financeos
+    ports:
+      - "5432:5432"
+    volumes:
+      - financeos-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  financeos-postgres-data:
