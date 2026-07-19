@@ -63,8 +63,16 @@ export function toTransaction(row: TransactionRow): Transaction {
  * it and features/<domain>/server modules are not meant to import each
  * other's internals across domains (folder-tree.md's module boundary). If
  * this predicate's semantics ever change, update both copies together.
+ *
+ * Exported (Phase 2) so `./aggregations.ts` — the one deliberate exception
+ * to the "no cross-domain server imports" rule above, per
+ * docs/architecture/api-contracts.md's Budgeting section — can reuse it
+ * rather than holding a *third* copy. `aggregations.ts` lives inside this
+ * same `transactions` module, so importing from it is an intra-module
+ * import, not a cross-domain one; Dashboard and Budgeting then both import
+ * `aggregations.ts` instead of reaching into this file directly.
  */
-const EXCLUDE_SPLIT_PARENTS: Prisma.TransactionWhereInput = {
+export const EXCLUDE_SPLIT_PARENTS: Prisma.TransactionWhereInput = {
   splits: { none: {} },
 }
 

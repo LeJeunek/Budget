@@ -9,6 +9,7 @@ import {
   UpdateCategorySchema,
   DeleteCategorySchema,
 } from "@/features/categories/server/validation"
+import { removeCategoryFromCurrentAndFutureBudgets } from "@/features/budgeting/server/service"
 
 /**
  * Mutating Server Actions for the Categories module. Per
@@ -138,6 +139,17 @@ export async function updateCategory(
  * docs/database/er-diagram.md's design notes. Callers that need to warn the
  * user with an affected-transaction count before calling this action should
  * call `service.getCategoryUsageCount` first (see server/service.ts).
+ *
+ * Current/future budget allocations for this category are removed first, via
+ * `budgeting.service.removeCategoryFromCurrentAndFutureBudgets` — per
+ * docs/product/budgeting.md's "Category deleted mid-month" edge case, a
+ * *past* month's allocation must survive as read-only history (the schema's
+ * `BudgetCategory.categoryId onDelete: SetNull` already handles that half
+ * automatically), but current/future allocations for a category that no
+ * longer exists must be removed outright rather than left dangling with a
+ * null category. This is a deliberate, explicit cross-domain service call
+ * (not a Prisma cascade) — see docs/architecture/api-contracts.md's
+ * Categories section.
  */
 export async function deleteCategory(
   input: unknown
@@ -164,6 +176,7 @@ export async function deleteCategory(
     )
   }
 
+  await removeCategoryFromCurrentAndFutureBudgets(user.id, id)
   await db.category.delete({ where: { id } })
 
   return ok({ id })
