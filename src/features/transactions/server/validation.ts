@@ -303,3 +303,86 @@ export const TransactionFilterSchema = z.object({
 })
 
 export type TransactionFilterInput = z.infer<typeof TransactionFilterSchema>
+
+// ---------------------------------------------------------------------------
+// Receipts (Phase 2 addendum) — see docs/product/transactions.md's "Phase 2
+// Addendum: Receipt Attachment" and docs/architecture/api-contracts.md's
+// Receipts section. Schemas/constants for `server/receipts.ts` and
+// `app/api/uploadthing/core.ts`.
+// ---------------------------------------------------------------------------
+
+// Chosen max: 8MB. A single receipt photo taken on a modern phone camera is
+// typically 2-6MB even before any client-side compression, and a multi-page
+// PDF receipt/invoice is almost always well under 5MB — 8MB comfortably
+// covers both common cases with headroom while still bounding worst-case
+// upload time/storage cost per file. Mirrors the same "generous but bounded"
+// reasoning as `server/import.ts`'s `MAX_IMPORT_FILE_SIZE_BYTES` for CSV
+// imports. Also exported as `RECEIPT_MAX_FILE_SIZE_LABEL` (UploadThing's
+// required `FileSize` string format) so `app/api/uploadthing/core.ts`'s
+// FileRouter config enforces the identical limit client-side (AC5's
+// "rejected before upload completes") as `ReceiptFileDataSchema` re-enforces
+// server-side below — the two constants are defined together here so they
+// can never drift apart.
+export const RECEIPT_MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024
+export const RECEIPT_MAX_FILE_SIZE_LABEL = "8MB"
+
+// Defensive cap on files per single upload batch — not a product-spec
+// requirement (AC1 only says "one or more"), same rationale as
+// `MAX_TAGS_PER_TRANSACTION` above: prevents a single request from creating
+// an unbounded number of `Receipt` rows / storage objects.
+export const RECEIPT_MAX_FILES_PER_UPLOAD = 5
+
+const RECEIPT_NAME_MAX_LENGTH = 255
+
+/** Matches the two file categories `app/api/uploadthing/core.ts`'s
+ * `receiptUploader` FileRouter config accepts (`image` + `pdf`) — kept here
+ * as the single source of truth so this schema's `mimeType` check can never
+ * drift out of sync with what the FileRouter itself allows through. */
+function isAllowedReceiptMimeType(mimeType: string): boolean {
+  return mimeType.startsWith("image/") || mimeType === "application/pdf"
+}
+
+/**
+ * Validates the file metadata `server/receipts.ts`'s `attachReceipt` persists
+ * to a new `Receipt` row. UploadThing's FileRouter config already enforces
+ * file type/size *before* the browser upload is accepted (AC5's "rejected
+ * before upload completes"), but `onUploadComplete`'s `file` payload
+ * technically arrives from UploadThing's servers, not directly from our own
+ * validated request — re-checking it here is a cheap defense-in-depth layer,
+ * consistent with this module's existing precedent of never trusting a
+ * single validation layer (e.g. `amountSchema`'s precision check mirrors a
+ * DB-level `Decimal(14, 2)` column constraint rather than relying on it
+ * alone).
+ */
+export const ReceiptFileDataSchema = z.object({
+  url: z.string().url("Receipt url must be a valid URL"),
+  key: z.string().min(1, "Receipt key is required"),
+  name: z
+    .string()
+    .trim()
+    .min(1, "Receipt file name is required")
+    .max(
+      RECEIPT_NAME_MAX_LENGTH,
+      `File name must be ${RECEIPT_NAME_MAX_LENGTH} characters or fewer`,
+    ),
+  size: z
+    .number()
+    .int("File size must be a whole number of bytes")
+    .positive("File size must be greater than zero")
+    .max(
+      RECEIPT_MAX_FILE_SIZE_BYTES,
+      `File must be ${RECEIPT_MAX_FILE_SIZE_BYTES / (1024 * 1024)}MB or smaller`,
+    ),
+  mimeType: z.string().refine(isAllowedReceiptMimeType, {
+    message: "Only image and PDF files are supported",
+  }),
+})
+
+export type ReceiptFileInput = z.infer<typeof ReceiptFileDataSchema>
+
+/** `removeReceipt`'s public Server Action input. */
+export const ReceiptIdSchema = z.object({
+  id: z.string().min(1, "Receipt id is required"),
+})
+
+export type ReceiptIdInput = z.infer<typeof ReceiptIdSchema>

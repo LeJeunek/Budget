@@ -1,4 +1,7 @@
-import type { Transaction as PrismaTransaction } from "@prisma/client"
+import type {
+  Receipt as PrismaReceipt,
+  Transaction as PrismaTransaction,
+} from "@prisma/client"
 
 // Re-export the Uncategorized sentinel from the Dashboard module rather than
 // declaring a second one here. Both modules need the exact same string value
@@ -100,6 +103,34 @@ export interface TransactionListFilters {
   dateFrom?: string
   /** `"yyyy-mm-dd"` — see `server/validation.ts`'s `dateOnlySchema`. */
   dateTo?: string
+}
+
+/**
+ * Client-safe representation of a `Receipt` (Phase 2 addendum — see
+ * prisma/schema.prisma's Receipt model and
+ * docs/product/transactions.md's "Phase 2 Addendum: Receipt Attachment").
+ *
+ * Unlike `Transaction`/`Account`, every `Receipt` column is already a plain,
+ * directly-serializable type (`String`/`Int`/`DateTime` — no Prisma
+ * `Decimal`), so no field-by-field conversion is needed here; the Prisma row
+ * shape is already the client-safe shape, so this is a direct re-export
+ * rather than a mapped type.
+ */
+export type Receipt = PrismaReceipt
+
+/**
+ * Transaction shape for the detail view (a single transaction's own page),
+ * distinct from the table-row `Transaction` shape above per
+ * docs/architecture/api-contracts.md's Receipts section: `receipts` is
+ * deliberately NOT a field on `Transaction` itself, since `listTransactions`
+ * would otherwise need to fetch every row's receipts on every page load of a
+ * table that can have thousands of rows (an N+1-style cost for data almost
+ * no row actually has). `receipts` is only ever populated by
+ * `server/service.ts`'s `getTransactionDetail`, used solely by the
+ * transaction detail Server Component.
+ */
+export interface TransactionDetail extends Transaction {
+  receipts: Receipt[]
 }
 
 /** Return shape of `service.listTransactions` — matches
