@@ -35,6 +35,30 @@ import { DEFAULT_CATEGORIES } from "@/features/categories/default-categories"
  * set from Server Actions (via next/headers' cookies()), not just from the
  * Route Handler in app/api/auth/[...all]/route.ts.
  */
+/**
+ * Additional origins Better Auth accepts a request from, beyond `baseURL`
+ * itself. Real-world gap this closes: `http://localhost:3000` and
+ * `http://127.0.0.1:3000` are the same server but different origins as far
+ * as Better Auth's strict origin check is concerned — a browser, VS Code's
+ * preview pane, or any tool that happens to open the 127.0.0.1 form instead
+ * of `localhost` gets rejected with "Invalid origin" even though `baseURL`
+ * is configured correctly. Reproduced and confirmed 2026-07-20: `.env`'s
+ * `BETTER_AUTH_URL` was correctly `http://localhost:3000` the whole time —
+ * this was the actual cause, not a misconfigured `baseURL`.
+ *
+ * Also includes `VERCEL_URL` (a hostname-only value Vercel injects
+ * automatically at build/runtime — see
+ * https://vercel.com/docs/environment-variables/system-environment-variables)
+ * so every preview deployment's unique subdomain is trusted without needing
+ * `BETTER_AUTH_URL` hand-updated per preview — only the stable production
+ * URL needs that (see .env.example).
+ */
+const trustedOrigins = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  ...(process.env.VERCEL_URL ? [`https://${process.env.VERCEL_URL}`] : []),
+]
+
 export const auth = betterAuth({
   database: prismaAdapter(db, {
     provider: "postgresql",
@@ -44,6 +68,7 @@ export const auth = betterAuth({
   },
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: process.env.BETTER_AUTH_URL,
+  trustedOrigins,
   // Phase 0 scope per docs/planning/roadmap.md: email/password + Google only.
   emailAndPassword: {
     enabled: true,
