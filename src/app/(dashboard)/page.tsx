@@ -12,7 +12,7 @@ import {
 import { getCurrentUser } from "@/lib/auth"
 import { formatCurrency } from "@/lib/utils"
 import { StatCard } from "@/components/shared/stat-card"
-import { currentMonthString } from "@/components/shared/month-navigator"
+import { currentMonthString } from "@/components/shared/month-utils"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {

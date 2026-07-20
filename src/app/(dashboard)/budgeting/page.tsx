@@ -9,7 +9,7 @@ import {
 import {
   currentMonthString,
   formatMonthLabel,
-} from "@/components/shared/month-navigator"
+} from "@/components/shared/month-utils"
 import { BudgetMonthNav } from "@/features/budgeting/components/budget-month-nav"
 import { BudgetSummaryCards } from "@/features/budgeting/components/budget-summary-cards"
 import { BudgetHealthScoreBadge } from "@/features/budgeting/components/budget-health-score-badge"

@@ -28,52 +28,28 @@
  * const [month, setMonth] = useState(currentMonthString())
  * <MonthNavigator month={month} onMonthChange={setMonth} />
  * ```
+ *
+ * `shiftMonth`/`currentMonthString`/`formatMonthLabel` live in the sibling
+ * `month-utils.ts` module (no `"use client"` directive), not here — see that
+ * file's header comment for why: a Server Component (Dashboard/Budgeting/
+ * Bills all call `currentMonthString()` directly) cannot call a plain
+ * function imported from a `"use client"` file, even though this file used
+ * to define them locally and export them. Re-exported below purely so
+ * existing client-side imports of `shiftMonth` et al. *from this path*
+ * keep working — Server Components must import from `month-utils` directly.
  */
 
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import {
+  currentMonthString,
+  formatMonthLabel,
+  shiftMonth,
+} from "@/components/shared/month-utils"
 
-const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/
-
-function assertValidMonth(month: string): void {
-  if (!MONTH_PATTERN.test(month)) {
-    throw new Error(`Invalid month "${month}" — expected "YYYY-MM"`)
-  }
-}
-
-/** Adds `delta` calendar months to a `"YYYY-MM"` string, wrapping year
- * boundaries correctly in either direction (e.g. `shiftMonth("2026-01", -1)`
- * === `"2025-12"`). */
-export function shiftMonth(month: string, delta: number): string {
-  assertValidMonth(month)
-  const [yearStr, monthStr] = month.split("-")
-  const totalMonths = Number(yearStr) * 12 + (Number(monthStr) - 1) + delta
-  const year = Math.floor(totalMonths / 12)
-  const monthIndex = ((totalMonths % 12) + 12) % 12
-  return `${year}-${String(monthIndex + 1).padStart(2, "0")}`
-}
-
-/** `"YYYY-MM"` for the current UTC calendar month — matches
- * `features/budgeting/server/validation.ts`'s `currentMonthStart`'s own UTC
- * convention (risk-register.md #8), so a client evaluating "is this the
- * current month" never disagrees with the server. */
-export function currentMonthString(now: Date = new Date()): string {
-  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`
-}
-
-/** Human-readable label for a `"YYYY-MM"` string, e.g. `"July 2026"`. */
-export function formatMonthLabel(month: string): string {
-  assertValidMonth(month)
-  const [yearStr, monthStr] = month.split("-")
-  const date = new Date(Date.UTC(Number(yearStr), Number(monthStr) - 1, 1))
-  return new Intl.DateTimeFormat("en-US", {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(date)
-}
+export { shiftMonth, currentMonthString, formatMonthLabel }
 
 export interface MonthNavigatorProps {
   /** Currently displayed month, `"YYYY-MM"`. */

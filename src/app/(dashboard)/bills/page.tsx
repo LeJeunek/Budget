@@ -7,7 +7,7 @@ import {
   getCalendarMonth,
   getUpcomingOccurrences,
 } from "@/features/bills/server/service"
-import { currentMonthString } from "@/components/shared/month-navigator"
+import { currentMonthString } from "@/components/shared/month-utils"
 
 import { BillsClient } from "./bills-client"
 
