@@ -3,7 +3,8 @@
 /**
  * TopNav — top bar for the authenticated app shell: mobile nav trigger
  * (opens `Sidebar` in a `Sheet`), a global search input (presentation
- * only — no fetching), a theme toggle slot, and a user menu.
+ * only — no fetching), a theme toggle slot, a notification bell slot, and a
+ * user menu.
  *
  * Usage:
  * ```tsx
@@ -11,6 +12,7 @@
  *   user={{ name: "Ada Lovelace", email: "ada@example.com" }}
  *   onSignOut={() => signOutAction()}
  *   onSearchChange={(value) => setQuery(value)}
+ *   notificationBell={<NotificationBell />}
  * />
  *
  * // No user loaded yet (e.g. still fetching in a Server Component parent)
@@ -21,6 +23,11 @@
  * search/filtering logic is a feature module's responsibility.
  * `onSignOut` is left unimplemented here on purpose — auth logic belongs
  * to the Backend Engineer's `lib/auth.ts` / server actions.
+ * `notificationBell` has no default (unlike `themeToggle`, which defaults to
+ * `<ThemeToggle />`) because this component must stay domain-agnostic and
+ * fetch-free — it cannot import `features/notifications/components/notification-bell`
+ * itself. Callers (currently `app/(dashboard)/layout.tsx`) pass it in; when
+ * omitted, no bell renders.
  */
 
 import * as React from "react"
@@ -64,6 +71,11 @@ export interface TopNavProps {
   onSearchChange?: (value: string) => void
   /** Override the default `<ThemeToggle />` slot if needed. */
   themeToggle?: React.ReactNode
+  /** Notification bell slot, rendered between the theme toggle and the user
+   * menu. No default — see this file's top JSDoc for why. Pass
+   * `<NotificationBell />` (`features/notifications/components/notification-bell.tsx`)
+   * from a page/layout that has access to that feature module. */
+  notificationBell?: React.ReactNode
 }
 
 function getInitials(name: string): string {
@@ -83,6 +95,7 @@ export function TopNav({
   searchPlaceholder = "Search transactions, accounts...",
   onSearchChange,
   themeToggle,
+  notificationBell,
 }: TopNavProps) {
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false)
 
@@ -131,6 +144,7 @@ export function TopNav({
 
       <div className="ml-auto flex items-center gap-2">
         {themeToggle ?? <ThemeToggle />}
+        {notificationBell}
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
