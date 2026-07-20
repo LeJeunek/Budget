@@ -56,8 +56,20 @@ import { DEFAULT_CATEGORIES } from "@/features/categories/default-categories"
 const trustedOrigins = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
-  ...(process.env.VERCEL_URL ? [`https://${process.env.VERCEL_URL}`] : []),
+  ...(process.env.VERCEL_URL ? [`https://${process.env.VERCEL_URL.trim()}`] : []),
 ]
+
+/**
+ * `.trim()` guards against a real production incident (2026-07-20): a
+ * trailing space pasted into Vercel's `BETTER_AUTH_URL` env var value
+ * survives `new URL()` on the bare origin (the URL parser trims it), but
+ * Better Auth's internal `withPath()` only trims trailing *slashes* before
+ * appending `/api/auth` — leaving the space embedded between origin and
+ * path (`"https://…app /api/auth"`), which then fails an unguarded
+ * `new URL()` deeper in Better Auth's request handling with a raw
+ * `TypeError: Invalid URL` at request time (no build-time or type error).
+ */
+const betterAuthUrl = process.env.BETTER_AUTH_URL?.trim()
 
 export const auth = betterAuth({
   database: prismaAdapter(db, {
@@ -67,7 +79,7 @@ export const auth = betterAuth({
     modelName: "authAccount",
   },
   secret: process.env.BETTER_AUTH_SECRET,
-  baseURL: process.env.BETTER_AUTH_URL,
+  baseURL: betterAuthUrl,
   trustedOrigins,
   // Phase 0 scope per docs/planning/roadmap.md: email/password + Google only.
   emailAndPassword: {
