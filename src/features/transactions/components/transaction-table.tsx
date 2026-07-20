@@ -1,12 +1,14 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
 import type { ColumnDef } from "@tanstack/react-table"
 import {
   ArrowDown,
   ArrowUp,
   ChevronsUpDown,
   MoreHorizontal,
+  Paperclip,
   Pencil,
   Scissors,
   Trash2,
@@ -355,6 +357,19 @@ export function TransactionTable({ categories, onEdit, onSplit }: TransactionTab
                   <DropdownMenuItem onSelect={() => onEdit(transaction)}>
                     <Pencil className="size-4" aria-hidden="true" />
                     Edit
+                  </DropdownMenuItem>
+                  {/* Phase 2 addendum: receipts live on a dedicated detail
+                     route, not this dialog — see
+                     app/(dashboard)/transactions/[id]/page.tsx's JSDoc for
+                     why (getTransactionDetail is Server-Component-callable
+                     only, so a route is required to reach it). Works
+                     identically for split line items (AC4) since
+                     `transaction.id` is already that row's own id. */}
+                  <DropdownMenuItem asChild>
+                    <Link href={`/transactions/${transaction.id}`}>
+                      <Paperclip className="size-4" aria-hidden="true" />
+                      Receipts
+                    </Link>
                   </DropdownMenuItem>
                   {!isSplitChild && (
                     <DropdownMenuItem onSelect={() => onSplit(transaction)}>
