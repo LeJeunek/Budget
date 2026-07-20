@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient } from "@prisma/client"
 
 import { getCurrentUser } from "@/lib/auth"
 import { db } from "@/lib/db"
+import { utapi } from "@/lib/uploadthing"
 import { ok, fail, type ApiResult } from "@/lib/api-response"
 import type { Transaction } from "@/features/transactions/types"
 import {
@@ -11,11 +12,13 @@ import {
   UpdateTransactionSchema,
   TransactionIdSchema,
   SplitTransactionSchema,
+  ReceiptIdSchema,
 } from "@/features/transactions/server/validation"
 import {
   TRANSACTION_INCLUDE,
   toTransaction,
 } from "@/features/transactions/server/service"
+import { removeReceipt as removeReceiptForUser } from "@/features/transactions/server/receipts"
 
 /**
  * Mutating Server Actions for the Transactions module. Per
@@ -266,11 +269,31 @@ export async function updateTransaction(
  * `onDelete: Cascade` in prisma/schema.prisma (verified against the current
  * schema, not assumed) means deleting the parent row automatically deletes
  * every child row pointing at it via that foreign key, and (by the same
- * cascade rule applied transitively) each child's own `TransactionTag` rows.
- * No explicit cascade logic is implemented here — docs/product/transactions.md
- * AC10's "user is warned about this before confirming" is a Frontend Lead
- * concern (a confirmation dialog before calling this action), not something
- * this action needs to re-implement.
+ * cascade rule applied transitively) each child's own `TransactionTag` and
+ * `Receipt` rows. No explicit cascade logic is implemented here for those —
+ * docs/product/transactions.md AC10's "user is warned about this before
+ * confirming" is a Frontend Lead concern (a confirmation dialog before
+ * calling this action), not something this action needs to re-implement.
+ *
+ * **Phase 2 addition (Receipts):** the DB cascade above deletes `Receipt`
+ * *rows*, but it cannot reach into UploadThing storage and delete the actual
+ * files those rows pointed at — per prisma/schema.prisma's comment on the
+ * `Receipt` model, that is this action's job, per
+ * docs/architecture/api-contracts.md's Receipts section ("`deleteTransaction`
+ * ... must be updated to also call `utapi.deleteFiles(...)` for every
+ * receipt attached to the transaction being deleted"). Every receipt on the
+ * transaction itself *and* on any of its split children is purged — a split
+ * parent's children are cascade-deleted transitively by the same `delete`
+ * call below, so their receipts would otherwise become silent storage
+ * orphans (no `Receipt` row survives to ever reference them again), which is
+ * exactly the "no orphaned file left in storage" requirement from the
+ * addendum's Edge Cases. Storage files are purged *before* the transaction
+ * row is deleted — same ordering rationale as `server/receipts.ts`'s
+ * `removeReceipt`: if the storage purge fails, this returns early and
+ * nothing is deleted yet, so the transaction/receipts stay in sync and the
+ * user can simply retry, rather than risking a storage failure *after* the
+ * DB rows are already gone (which would permanently orphan the files with no
+ * row left to ever reference them).
  */
 export async function deleteTransaction(
   input: unknown,
@@ -291,9 +314,51 @@ export async function deleteTransaction(
     return fail("Transaction not found")
   }
 
+  const attachedReceipts = await db.receipt.findMany({
+    where: {
+      transaction: {
+        userId: user.id,
+        OR: [{ id }, { parentTransactionId: id }],
+      },
+    },
+    select: { key: true },
+  })
+
+  if (attachedReceipts.length > 0) {
+    const deleteResult = await utapi.deleteFiles(
+      attachedReceipts.map((receipt) => receipt.key),
+    )
+    if (!deleteResult.success) {
+      return fail(
+        "Failed to remove attached receipt files; transaction was not deleted",
+      )
+    }
+  }
+
   await db.transaction.delete({ where: { id } })
 
   return ok({ id })
+}
+
+/**
+ * Removes a single receipt from a transaction (docs/product/transactions.md
+ * addendum AC3), per docs/architecture/api-contracts.md's Receipts section.
+ * Thin Server Action wrapper: authenticates and validates input, then
+ * delegates to `server/receipts.ts`'s `removeReceipt` for the actual
+ * ownership check + storage/DB delete ordering (see that function's JSDoc).
+ */
+export async function removeReceipt(
+  input: unknown,
+): Promise<ApiResult<{ id: string }>> {
+  const user = await getCurrentUser()
+  if (!user) return fail("UNAUTHENTICATED")
+
+  const parsed = ReceiptIdSchema.safeParse(input)
+  if (!parsed.success) {
+    return fail(parsed.error.issues[0]?.message ?? "Invalid receipt id")
+  }
+
+  return removeReceiptForUser(user.id, parsed.data.id)
 }
 
 /** Formats an integer cents value as a `"$X.XX"` string for error messages

@@ -2,9 +2,14 @@ import type { Prisma } from "@prisma/client"
 
 import { db } from "@/lib/db"
 
-import type { Transaction, TransactionListResult } from "../types"
+import type {
+  Transaction,
+  TransactionDetail,
+  TransactionListResult,
+} from "../types"
 import { UNCATEGORIZED_CATEGORY_ID } from "../types"
 import type { TransactionFilterInput } from "./validation"
+import { getReceiptsForTransaction } from "./receipts"
 
 // This module is imported by `server/actions.ts`, the `GET /api/transactions`
 // Route Handler, and `server/import.ts` — never from a Client Component.
@@ -213,4 +218,33 @@ export async function getTransactionById(
   })
 
   return row ? toTransaction(row) : null
+}
+
+/**
+ * Fetches a single transaction *with its attached receipts* — the shape the
+ * transaction detail page needs (docs/architecture/api-contracts.md's
+ * Receipts section: "used in the transaction detail view only, not included
+ * in the paginated table-row shape"). Returns `null` under the same
+ * "missing vs. someone else's" non-distinguishing rule as `getTransactionById`.
+ *
+ * A thin composition over `getTransactionById` + `./receipts`'s
+ * `getReceiptsForTransaction`, run concurrently, rather than a single joined
+ * Prisma query — kept as two calls (not folded into `TRANSACTION_INCLUDE`)
+ * because `TRANSACTION_INCLUDE` is shared by `listTransactions`, and adding
+ * `receipts` there would silently reintroduce the exact per-row receipt
+ * fetch this split shape exists to avoid. `getReceiptsForTransaction` stays
+ * independently exported/callable too (e.g. for a lighter "just refresh the
+ * receipt list" refetch after `removeReceipt`, without re-fetching the whole
+ * transaction).
+ */
+export async function getTransactionDetail(
+  userId: string,
+  id: string,
+): Promise<TransactionDetail | null> {
+  const [transaction, receipts] = await Promise.all([
+    getTransactionById(userId, id),
+    getReceiptsForTransaction(userId, id),
+  ])
+
+  return transaction ? { ...transaction, receipts } : null
 }
