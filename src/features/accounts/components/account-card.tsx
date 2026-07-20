@@ -23,6 +23,7 @@ import {
   unarchiveAccount,
 } from "@/features/accounts/server/actions"
 import { AccountFormDialog } from "@/features/accounts/components/account-form"
+import { ACCOUNT_TYPE_LABELS } from "@/features/accounts/components/account-form-schema"
 import { cn, formatCurrency } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -33,23 +34,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-
-/**
- * Human-readable labels for `AccountType` — the raw Prisma enum
- * (e.g. "CREDIT_CARD") is never shown directly to the user (per this
- * component's spec requirement). Exported so account-form.tsx's type
- * `<Select>` uses the exact same labels instead of re-deriving its own
- * copy that could drift out of sync.
- */
-export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
-  CHECKING: "Checking",
-  SAVINGS: "Savings",
-  CREDIT_CARD: "Credit Card",
-  CASH: "Cash",
-  INVESTMENT: "Investment",
-  RETIREMENT: "Retirement",
-  CRYPTO: "Crypto",
-}
 
 /**
  * Per docs/product/accounts.md AC7: Investment/Retirement/Crypto balances

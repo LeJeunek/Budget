@@ -16,7 +16,29 @@
 import { z } from "zod"
 
 import type { Account, AccountType } from "@/features/accounts/types"
-import { ACCOUNT_TYPE_LABELS } from "@/features/accounts/components/account-card"
+
+/**
+ * Human-readable labels for `AccountType` — the raw Prisma enum
+ * (e.g. "CREDIT_CARD") is never shown directly to the user. Lives here
+ * (not in account-card.tsx, where it originally lived) because account-
+ * card.tsx also imports `AccountFormDialog` from account-form.tsx, which in
+ * turn needs this constant: keeping it there created a real circular import
+ * (account-card -> account-form -> account-card) that worked fine in dev
+ * but crashed Vercel's production Turbopack build with a TDZ
+ * `ReferenceError: Cannot access 'G' before initialization` — dev's bundler
+ * tolerates the cycle via lazy live bindings, production's concatenated
+ * chunk does not. This file has no dependents among the three, so both
+ * account-card.tsx and account-form.tsx can import it one-way instead.
+ */
+export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
+  CHECKING: "Checking",
+  SAVINGS: "Savings",
+  CREDIT_CARD: "Credit Card",
+  CASH: "Cash",
+  INVESTMENT: "Investment",
+  RETIREMENT: "Retirement",
+  CRYPTO: "Crypto",
+}
 
 // Matches the Prisma column default (see prisma/schema.prisma's Account.color
 // and server/validation.ts's DEFAULT_ACCOUNT_COLOR) so a brand-new account

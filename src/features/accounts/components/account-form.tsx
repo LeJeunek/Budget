@@ -31,8 +31,8 @@ import {
   createAccount,
   updateAccount,
 } from "@/features/accounts/server/actions"
-import { ACCOUNT_TYPE_LABELS } from "@/features/accounts/components/account-card"
 import {
+  ACCOUNT_TYPE_LABELS,
   ACCOUNT_TYPE_VALUES,
   AccountFormSchema,
   INTEREST_BEARING_TYPES,
