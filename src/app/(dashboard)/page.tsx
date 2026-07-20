@@ -12,6 +12,7 @@ import {
 import { getCurrentUser } from "@/lib/auth"
 import { formatCurrency } from "@/lib/utils"
 import { StatCard } from "@/components/shared/stat-card"
+import { currentMonthString } from "@/components/shared/month-navigator"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -20,6 +21,11 @@ import {
   getNetWorth,
   getSpendingByCategory,
 } from "@/features/dashboard/server/service"
+import {
+  getBudgetHealthScore,
+  getBudgetMonthSummary,
+} from "@/features/budgeting/server/service"
+import { BudgetHealthScoreBadge } from "@/features/budgeting/components/budget-health-score-badge"
 import { IncomeVsExpenseChart } from "@/features/dashboard/components/income-vs-expense-chart"
 import { MonthlyTrendsChart } from "@/features/dashboard/components/monthly-trends-chart"
 import { SpendingByCategoryChart } from "@/features/dashboard/components/spending-by-category-chart"
@@ -41,6 +47,15 @@ import { SpendingByCategoryChart } from "@/features/dashboard/components/spendin
  * trends are all computed by the (already-reviewed) service. This file's
  * only job is arranging those already-correct numbers into the stat
  * cards/charts dashboard-overview.md's acceptance criteria describe.
+ *
+ * Also fetches the current month's `getBudgetMonthSummary`/
+ * `getBudgetHealthScore` from Budgeting's own service (AC11/AC12 of
+ * docs/product/budgeting.md) — the two pieces of this page that shipped as
+ * intentional Phase 1 placeholders specifically because Budgeting didn't
+ * exist yet. Both are `Server-Component-callable reads (same "no REST
+ * route/TanStack Query hook" contract `budgeting/page.tsx` relies on), so
+ * they join the existing `Promise.all` batch below rather than needing a
+ * separate fetch waterfall.
  */
 export default async function DashboardPage() {
   const user = await getCurrentUser()
@@ -54,13 +69,23 @@ export default async function DashboardPage() {
     redirect("/login")
   }
 
-  const [netWorth, monthlySummary, spendingByCategory, monthlyTrends] =
-    await Promise.all([
-      getNetWorth(user.id),
-      getMonthlySummary(user.id, new Date()),
-      getSpendingByCategory(user.id, new Date()),
-      getMonthlyTrends(user.id, 6),
-    ])
+  const currentMonth = currentMonthString()
+
+  const [
+    netWorth,
+    monthlySummary,
+    spendingByCategory,
+    monthlyTrends,
+    budgetSummary,
+    budgetHealthScore,
+  ] = await Promise.all([
+    getNetWorth(user.id),
+    getMonthlySummary(user.id, new Date()),
+    getSpendingByCategory(user.id, new Date()),
+    getMonthlyTrends(user.id, 6),
+    getBudgetMonthSummary(user.id, currentMonth),
+    getBudgetHealthScore(user.id, currentMonth),
+  ])
 
   // dashboard-overview.md's "brand-new user, zero accounts" edge case: every
   // number below (income, expenses, cash flow, savings rate, all three
@@ -117,13 +142,19 @@ export default async function DashboardPage() {
               value={formatCurrency(monthlySummary.expenses)}
               icon={TrendingDown}
             />
-            {/* Phase 2 (Budgeting) placeholder — dashboard-overview.md AC4
-                requires this to read as an intentional, forward-looking
-                empty state, not a broken/missing card. Do not compute a
-                real value here; there is no Budget model yet. */}
+            {/* Budgeting (Phase 2) is now live — AC11: shows Total
+                Remaining for the current month once the user has at least
+                one category allocation set; `getBudgetMonthSummary` returns
+                `null` under the exact same "zero allocations set" condition
+                the Phase 1 placeholder covered, so that empty state is
+                preserved rather than replaced with a misleading $0. */}
             <StatCard
               label="Remaining Budget"
-              value="No budget set yet"
+              value={
+                budgetSummary === null
+                  ? "No budget set yet"
+                  : formatCurrency(budgetSummary.totalRemaining)
+              }
               icon={Target}
             />
             <StatCard
@@ -146,6 +177,12 @@ export default async function DashboardPage() {
               }
               icon={PiggyBank}
             />
+            {/* AC12: Budget Health Score goes live alongside Remaining
+                Budget — `BudgetHealthScoreBadge` already renders its own
+                "Not enough data yet" state for the `null` case (same
+                "zero allocations set" condition as the card above), so no
+                extra branching is needed here. */}
+            <BudgetHealthScoreBadge score={budgetHealthScore} />
           </div>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
