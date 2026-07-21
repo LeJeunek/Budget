@@ -1,6 +1,6 @@
-# FinanceOS — API Contracts (Phase 0 + Phase 1 + Phase 2)
+# FinanceOS — API Contracts (Phase 0 + Phase 1 + Phase 2 + Phase 3a)
 
-All responses use `ApiResult<T>` from `lib/api-response.ts` (see naming-standards.md). All endpoints require an authenticated session (Better Auth) except `/api/auth/*`; unauthenticated requests return `{ success: false, error: "UNAUTHENTICATED" }` with HTTP 401. All queries are scoped server-side to `getCurrentUser().id` — no endpoint accepts a client-supplied user ID.
+All responses use `ApiResult<T>` from `lib/api-response.ts` (see naming-standards.md). All endpoints require an authenticated session (Better Auth) except `/api/auth/*`; unauthenticated requests return `{ success: false, error: "UNAUTHENTICATED" }` with HTTP 401. All queries are scoped server-side to `getCurrentUser().id` — no endpoint accepts a client-supplied user ID. **(Phase 3a exception, documented in full in its own section below)**: `app/api/cron/net-worth-snapshot/route.ts` is authenticated by a shared secret instead of a user session, since it has no calling user — it iterates all users server-side. It does not use `ApiResult<T>` either, for the same reason `app/api/uploadthing/route.ts` doesn't (system/integration surface, not a client-facing contract).
 
 ## Auth
 - `ALL /api/auth/[...all]` — handled entirely by Better Auth's Next.js handler. Backend Engineer wires it up; does not reimplement auth logic.
@@ -19,6 +19,8 @@ All responses use `ApiResult<T>` from `lib/api-response.ts` (see naming-standard
 
 Archiving (never hard-deleting) an account with existing transactions is required — transaction history must remain intact for analytics/reports in later phases. `archivedAt` is a timestamp, not a boolean, per the Database Architect's schema.
 
+**(Phase 3a) `setDerivedBalance` — new, narrow, internal function, not a client-facing action.** Per Architecture.md's "Investments → Accounts: the derived-balance write-back," `features/accounts/server/service.ts` exports one new function, e.g. `setDerivedBalance(userId, accountId, balance): Promise<Account>`, called only from `features/investments/server/actions.ts` (never from a Route Handler, Server Action, or any client code) whenever a holding is created/updated/closed for that container. This is not listed as a user-facing "Action" in the table above because it is not one — it exists purely to keep `Account.balance` correct for `Account`'s own pre-existing consumers (Accounts list/detail, Transaction form's account picker, Dashboard's Net Worth base sum) without those consumers needing any Investments-awareness. Naming/exact signature is Backend Engineer's implementation call; the constraint (Investments-only caller, same-transaction atomicity with the holding mutation) is what matters architecturally.
+
 ## Transactions (`features/transactions`)
 **Doc correction (CTO, 2026-07-19):** the List row originally had no `sortBy`/`sortDir` params, even though `docs/product/transactions.md` AC2 requires sorting by date/amount/merchant/category. The implementing agent correctly declined to extend this contract unilaterally and flagged the gap instead of guessing — resolved below.
 
@@ -33,7 +35,9 @@ Archiving (never hard-deleting) an account with existing transactions is require
 
 Pagination uses `page`/`pageSize` (not cursor) for Phase 1 — matches TanStack Table's built-in pagination model. Revisit to cursor-based only if a phase-3+ performance review flags it.
 
-**Phase 2 update (see Receipts section below):** `deleteTransaction`'s behavior changes — it now also purges any attached receipt files from storage before removing the row. This is documented fully in the Receipts section rather than duplicated here; the row above is otherwise unchanged.
+**Phase 2 update (see Receipts section below):** `deleteTransaction`'s behavior changes — it now also purges any attached receipt files from storage before removing the row.
+
+**(Phase 3a) `searchTransactionsForLinking` reused, not duplicated.** Recurring Income's mark-received link-picker (AC8) reuses the exact same exported function Bills already added in Phase 2 (`features/transactions/server/service.ts`'s `searchTransactionsForLinking(userId, { query? })`) rather than either domain defining its own copy. No signature change needed — the function already returns generic transaction search results with no Bills-specific shape baked in.
 
 ## Dashboard (`features/dashboard`)
 Read-only aggregation, Server Component direct calls (no client mutation, so no Server Actions/routes needed):
@@ -42,14 +46,16 @@ Read-only aggregation, Server Component direct calls (no client mutation, so no 
 - `service.getSpendingByCategory(userId, month)` → `{ categoryId: string; categoryName: string; amount: number }[]`
 - `service.getMonthlyTrends(userId, monthsBack: number)` → `{ month: string; income: number; expenses: number }[]`
 
-**Phase 2 update:** two more read functions are added, both thin pass-throughs to Budgeting's own service (Dashboard does not recompute budget aggregation itself — see the Budgeting section's "Dashboard integration" note):
-- `service.getRemainingBudgetCard(userId)` → calls `budgeting.service.getBudgetMonthSummary(userId, currentMonth)` and maps it to the stat card's `{ totalRemaining: number } | null` shape (`null` = show the "no budget set" placeholder, per Budgeting AC11).
-- `service.getBudgetHealthScoreCard(userId)` → calls `budgeting.service.getBudgetHealthScore(userId, currentMonth)` directly (already in the exact shape the card needs, per Budgeting AC12).
+**Phase 2 update:** two more read functions, both thin pass-throughs to Budgeting's own service:
+- `service.getRemainingBudgetCard(userId)` → maps `budgeting.service.getBudgetMonthSummary` to `{ totalRemaining: number } | null`.
+- `service.getBudgetHealthScoreCard(userId)` → calls `budgeting.service.getBudgetHealthScore(userId, currentMonth)` directly.
 
-These are intentionally not REST endpoints in Phase 1/2 since nothing client-side needs to refetch them independently of a full page load; promote to `/api/dashboard/*` routes only if a later phase needs client-side refresh (e.g. after a transaction is added without a full page reload).
+These are intentionally not REST endpoints in Phase 1/2 since nothing client-side needs to refetch them independently of a full page load; promote to `/api/dashboard/*` routes only if a later phase needs client-side refresh.
+
+**(Phase 3a) Net Worth Aggregation Update — see its own full section below**, immediately after Recurring Income, for the complete, double-count-safe formula and the new `service.getNetWorth` contract.
 
 ## Categories (`features/categories`)
-**Scope correction (CTO, 2026-07-19):** this section previously scoped Phase 1 Categories as seed-only/no-CRUD, which conflicted with the Roadmap's Phase 1 description ("seeded per user, user-editable") and with the Database Architect's own rationale for the `isSystem` flag (documented in `docs/database/er-diagram.md`), which exists specifically to let non-system categories be freely renamed/deleted while protecting the fixed 11. The Product Owner's spec (`docs/product/categories.md`) flagged this conflict rather than silently picking a side, and it's resolved as follows: **minimal custom-category CRUD ships in Phase 1.** "Full category management" (bulk merge, icons, custom ordering, org-wide admin controls) remains deferred to the Phase 4 admin feature — this is a small, scoped CRUD surface, not that.
+**Scope correction (CTO, 2026-07-19):** this section previously scoped Phase 1 Categories as seed-only/no-CRUD, which conflicted with the Roadmap's Phase 1 description. Resolved: **minimal custom-category CRUD ships in Phase 1.**
 
 The fixed 11-category list from the Charter is still seeded automatically at signup (`isSystem: true`, protected from rename/delete).
 
@@ -58,11 +64,11 @@ The fixed 11-category list from the Charter is still seeded automatically at sig
 | List categories | Server Component direct call to `service.getCategories(userId)` | — | `Category[]` (system + custom) |
 | Create custom category | Server Action `createCategory` | `CreateCategorySchema` (name, color?) — name unique per user, case-insensitive | `ApiResult<Category>` |
 | Rename/recolor category | Server Action `updateCategory` | `UpdateCategorySchema` (id, name?, color?) — server rejects a `name` change where `isSystem: true`; color changes are allowed on any category | `ApiResult<Category>` |
-| Delete custom category | Server Action `deleteCategory` | `{ id: string }` — server rejects if `isSystem: true`; transactions referencing the deleted category are left in place with `categoryId` set to `null` (matches the schema's `onDelete: SetNull`, i.e. Uncategorized), not deleted | `ApiResult<{ id: string }>` |
+| Delete custom category | Server Action `deleteCategory` | `{ id: string }` — server rejects if `isSystem: true`; transactions referencing the deleted category are left in place with `categoryId` set to `null` | `ApiResult<{ id: string }>` |
 
-New small feature module: `features/categories/{server/{service.ts, actions.ts, validation.ts}, types.ts, components/category-form.tsx, category-list.tsx}` per folder-tree.md's module boundary rules — not folded into `features/transactions`, since Categories is consumed by Transactions, Dashboard, and (from Phase 2 onward) Budgeting alike, and a single-owner domain shouldn't hold a concept three other domains depend on.
+New small feature module: `features/categories/{server/{service.ts, actions.ts, validation.ts}, types.ts, components/category-form.tsx, category-list.tsx}` per folder-tree.md's module boundary rules.
 
-**Phase 2 update (Categories deletion cascades into Budgeting):** per `docs/product/budgeting.md`'s "Category deleted mid-month" edge case, `deleteCategory`'s implementation must also remove that category's *current and future month* `BudgetCategory` allocation rows (past months' historical allocations are preserved as read-only history). Since Categories must not reach into Budgeting's tables directly (module boundary rule — no direct Prisma reach-through across domains), `deleteCategory`'s Server Action calls a new exported function `budgeting.service.removeCategoryFromCurrentAndFutureBudgets(userId, categoryId)` as an explicit cross-domain service call, same pattern as every other cross-domain read/write in this document.
+**Phase 2 update (Categories deletion cascades into Budgeting):** `deleteCategory`'s implementation must also remove that category's *current and future month* `BudgetCategory` allocation rows, via `budgeting.service.removeCategoryFromCurrentAndFutureBudgets(userId, categoryId)`.
 
 ---
 
@@ -73,39 +79,36 @@ Per `docs/product/budgeting.md`. Read paths are Server Component direct calls; t
 | Action | Mechanism | Input | Output |
 |---|---|---|---|
 | Get a month's budget | Server Component direct call to `service.getBudgetMonth(userId, month)` | `month: "YYYY-MM"` | `BudgetMonthView` — see shape below |
-| Set/update a category's allocation | Server Action `setCategoryAllocation` | `SetAllocationSchema { month: "YYYY-MM"; categoryId: string; amount: number }` (amount ≥ 0; every call creates-or-updates a row, which is how "set to zero" becomes distinguishable from "unset" — see Data model note) | `ApiResult<BudgetCategoryLine>` |
-| Get Budget Health Score | Server Component direct call to `service.getBudgetHealthScore(userId, month)` (also called by Dashboard, see above) | `month` | `{ score: number; label: "Good" \| "Fair" \| "Needs attention" } \| null` (`null` = zero allocations set this month, i.e. the undefined state in AC12) |
-| Get month summary (for Dashboard's Remaining Budget card) | Server Component direct call to `service.getBudgetMonthSummary(userId, month)` | `month` | `{ totalAllocated: number; totalSpent: number; totalRemaining: number } \| null` (`null` = zero allocations set, AC11's placeholder condition) |
+| Set/update a category's allocation | Server Action `setCategoryAllocation` | `SetAllocationSchema { month: "YYYY-MM"; categoryId: string; amount: number }` | `ApiResult<BudgetCategoryLine>` |
+| Get Budget Health Score | Server Component direct call to `service.getBudgetHealthScore(userId, month)` | `month` | `{ score: number; label: "Good" \| "Fair" \| "Needs attention" } \| null` |
+| Get month summary (for Dashboard's Remaining Budget card) | Server Component direct call to `service.getBudgetMonthSummary(userId, month)` | `month` | `{ totalAllocated: number; totalSpent: number; totalRemaining: number } \| null` |
 
 `BudgetMonthView` shape:
 ```ts
 {
   month: string                 // "YYYY-MM"
   isEditable: boolean           // false for past months (AC3)
-  hasAnyBudgetData: boolean     // false = "no budget was set this month" empty state (past-month edge case)
+  hasAnyBudgetData: boolean     // false = "no budget was set this month" empty state
   categories: {
     categoryId: string
     categoryName: string
     isSystem: boolean
     allocated: number | null    // null = unset (AC2) — never conflated with 0
-    spent: number                // sum of expense transactions/split line items for this category+month
-    remaining: number | null     // null when allocated is null (nothing to measure against, AC9)
-    percentUsed: number | null   // null when allocated is null
-    isOverBudget: boolean        // false when allocated is null
+    spent: number
+    remaining: number | null
+    percentUsed: number | null
+    isOverBudget: boolean
   }[]
-  totals: { totalAllocated: number; totalSpent: number; totalRemaining: number } // excludes unbudgeted categories, per AC10
-  uncategorizedSpent: number     // informational only, excluded from totals, per Edge Cases
+  totals: { totalAllocated: number; totalSpent: number; totalRemaining: number }
+  uncategorizedSpent: number
 }
 ```
 
-**Month materialization / carry-forward (AC3, AC4) — an explicit read-time rule, not a background job:**
-`service.getBudgetMonth(userId, month)`:
-- If `month` is the current month or a future month **and no `BudgetMonth` row exists yet**, it is lazily created at read time by copying the immediately preceding month's allocations (or left fully unallocated if there is no preceding month, e.g. a brand-new user) — this is the only place carry-forward logic lives.
-- If `month` is a **past** month with no existing row, nothing is created; the response has `hasAnyBudgetData: false` and `isEditable: false` — this is a pure, non-mutating read, satisfying the "no budget was set this month" edge case exactly (a past month must never be silently materialized just because someone viewed it).
+**Month materialization / carry-forward (AC3, AC4) — an explicit read-time rule, not a background job:** `service.getBudgetMonth` lazily creates the current/future month by copying the preceding month's allocations at read time; past months with no row return `hasAnyBudgetData: false` without mutating anything.
 
-**Data model recommendation for the Database Architect (not this Architect's file to edit, flagged here so the read/unset-vs-zero contract above is actually satisfiable):** "unset" vs "allocated $0" should be modeled as **row presence**, not a nullable `amount` column — i.e., no `BudgetCategory` row for a given month+category means unset; a row with `amount: 0` means deliberately zero. This avoids overloading a single nullable column with two different meanings (SQL `NULL` vs. business "unset") and keeps `setCategoryAllocation`'s upsert semantics simple (`amount ≥ 0` is the only validation needed; there is no separate "clear allocation" action in the spec).
+**Data model recommendation for the Database Architect:** "unset" vs "allocated $0" is modeled as row presence, not a nullable `amount` column.
 
-**Duplication note (Spent calculation):** "Spent" for a category+month is "the sum of that category's expense transactions for the month, including split line items" — the exact same aggregation Dashboard's Phase 1 `service.getSpendingByCategory` already computes. To avoid two independently-maintained copies of this logic drifting apart (a correctness risk explicitly called out in both the Dashboard and Budgeting specs' Definition of Done), this aggregation is extracted into `features/transactions/server/aggregations.ts`, exporting `getSpendingByCategoryForMonth(userId, month)` and `getUncategorizedSpendingForMonth(userId, month)`. Both `features/dashboard/server/service.ts` and `features/budgeting/server/service.ts` call these instead of each re-implementing the query — consistent with Transactions being the stated owner of "Spent is computed entirely from transaction data" per the Budgeting spec's own Dependencies section.
+**Duplication note (Spent calculation):** extracted into `features/transactions/server/aggregations.ts`, exporting `getSpendingByCategoryForMonth(userId, month)` and `getUncategorizedSpendingForMonth(userId, month)`.
 
 ## Savings Goals (`features/goals`) — Phase 2
 
@@ -116,122 +119,273 @@ Per `docs/product/savings-goals.md`. Follows the exact archive/unarchive CRUD sh
 | List goals | Server Component direct call to `service.getGoals(userId, { includeArchived? })` | — | `GoalWithProgress[]` |
 | Get goal detail | Server Component direct call to `service.getGoalById(userId, goalId)` | — | `GoalWithProgress & { contributions: GoalContribution[] }` |
 | Create goal | Server Action `createGoal` | `CreateGoalSchema` (name, targetAmount > 0, targetDate?, plannedMonthlyContribution?) | `ApiResult<Goal>` |
-| Update goal | Server Action `updateGoal` | `UpdateGoalSchema` (id + partial: name, targetAmount, targetDate, plannedMonthlyContribution) — never touches progress | `ApiResult<Goal>` |
+| Update goal | Server Action `updateGoal` | `UpdateGoalSchema` (id + partial) | `ApiResult<Goal>` |
 | Archive goal | Server Action `archiveGoal` | `GoalIdSchema` (`{ id: string }`) — idempotent | `ApiResult<Goal>` |
 | Unarchive goal | Server Action `unarchiveGoal` | `GoalIdSchema` — idempotent | `ApiResult<Goal>` |
 | Add contribution | Server Action `addContribution` | `AddContributionSchema { goalId: string; amount: number (> 0); date: Date }` | `ApiResult<GoalContribution>` |
 | Delete contribution | Server Action `deleteContribution` | `{ id: string }` | `ApiResult<{ id: string }>` |
-| List (client-side refetch) | `GET /api/goals?includeArchived=` — thin wrapper, used only by `features/goals/hooks/use-goals.ts`, mirrors `GET /api/accounts` exactly | — | `ApiResult<GoalWithProgress[]>` |
+| List (client-side refetch) | `GET /api/goals?includeArchived=` | — | `ApiResult<GoalWithProgress[]>` |
 
-`GoalWithProgress` — every derived field below is **computed at read time in `service.ts`, never stored**, for the same reason Budget Health Score is computed rather than persisted (AC's "editing a target amount can flip Completed↔Active" and "deleting a contribution recalculates progress" both fall out for free with no write-side sync logic if nothing is cached):
+`GoalWithProgress` — every derived field is computed at read time in `service.ts`, never stored:
 ```ts
 {
   ...Goal fields,
-  currentProgress: number       // sum of this goal's GoalContribution.amount
-  remainingAmount: number       // max(targetAmount - currentProgress, 0)
-  overageAmount: number         // max(currentProgress - targetAmount, 0), per the overshoot edge case
-  percentComplete: number       // currentProgress / targetAmount * 100, uncapped display-side (overshoot shown, not clamped)
-  isCompleted: boolean          // currentProgress >= targetAmount
-  isTargetDatePassed: boolean   // targetDate < today && !isCompleted
+  currentProgress: number
+  remainingAmount: number
+  overageAmount: number
+  percentComplete: number
+  isCompleted: boolean
+  isTargetDatePassed: boolean
   estimatedCompletion:
-    | { month: string }                         // AC7 case 1 or 2 (planned or average-rate estimate)
-    | { status: "not_enough_data" }              // AC7 case 3
+    | { month: string }
+    | { status: "not_enough_data" }
 }
 ```
 
-No functional dependency on Accounts or Transactions (confirmed resolved, CTO 2026-07-19) — `features/goals/server/` never imports from `features/accounts/` or `features/transactions/`, which also means Goals cannot introduce a circular dependency with any other Phase 2 module.
+No functional dependency on Accounts or Transactions (confirmed resolved, CTO 2026-07-19).
 
 ## Bills (`features/bills`) — Phase 2
 
-Per `docs/product/bills.md`. Includes the optional occurrence-to-Transaction link (AC7) and backs Calendar v1 (see its own section below).
+Per `docs/product/bills.md`. Includes the optional occurrence-to-Transaction link (AC7) and backs Calendar v1.
 
 | Action | Mechanism | Input | Output |
 |---|---|---|---|
-| List bills | Server Component direct call to `service.getBills(userId, { includeArchived? })` | — | `BillSummary[]` (name, expectedAmount, nextDueDate, nextStatus, schedule, categoryId) |
+| List bills | Server Component direct call to `service.getBills(userId, { includeArchived? })` | — | `BillSummary[]` |
 | Get bill detail + payment history | Server Component direct call to `service.getBillById(userId, billId)` | — | `Bill & { occurrences: BillOccurrence[] }` |
-| Create bill | Server Action `createBill` | `CreateBillSchema` (name, expectedAmount > 0, dueDate, schedule: weekly\|biweekly\|monthly\|quarterly\|annually, categoryId?) | `ApiResult<Bill>` |
-| Update bill | Server Action `updateBill` | `UpdateBillSchema` (id + partial) — amount/schedule changes apply to not-yet-generated occurrences only (AC4) | `ApiResult<Bill>` |
-| Archive bill | Server Action `archiveBill` | `BillIdSchema` — idempotent; stops future occurrence generation | `ApiResult<Bill>` |
-| Unarchive bill | Server Action `unarchiveBill` | `BillIdSchema` — idempotent; resumes generation forward from "today," does not backfill the archived gap | `ApiResult<Bill>` |
+| Create bill | Server Action `createBill` | `CreateBillSchema` (name, expectedAmount > 0, dueDate, schedule, categoryId?) | `ApiResult<Bill>` |
+| Update bill | Server Action `updateBill` | `UpdateBillSchema` (id + partial) | `ApiResult<Bill>` |
+| Archive bill | Server Action `archiveBill` | `BillIdSchema` — idempotent | `ApiResult<Bill>` |
+| Unarchive bill | Server Action `unarchiveBill` | `BillIdSchema` — idempotent | `ApiResult<Bill>` |
 | Mark occurrence paid (manual) | Server Action `markOccurrencePaid` | `{ occurrenceId: string; paidAmount: number; paidDate: Date }` | `ApiResult<BillOccurrence>` |
-| Mark occurrence paid (linked) | Server Action `linkOccurrenceToTransaction` | `{ occurrenceId: string; transactionId: string }` — rejects with a friendly error (not a raw constraint exception) if the Transaction is already linked to a different occurrence, or doesn't belong to the current user | `ApiResult<BillOccurrence>` |
-| Unmark occurrence | Server Action `unmarkOccurrencePaid` | `{ occurrenceId: string }` — clears both the manual paid fields and any link; reverts to computed status | `ApiResult<BillOccurrence>` |
-| Upcoming list | Server Component direct call to `service.getUpcomingOccurrences(userId)` | — | `{ billId; billName; occurrenceId; dueDate; expectedAmount; status }[]`, one entry per active bill (its next unpaid occurrence only), sorted by `dueDate` |
-| List (client-side refetch) | `GET /api/bills?includeArchived=` — mirrors `GET /api/accounts` | — | `ApiResult<BillSummary[]>` |
+| Mark occurrence paid (linked) | Server Action `linkOccurrenceToTransaction` | `{ occurrenceId: string; transactionId: string }` — **(Phase 3a update, see below)** | `ApiResult<BillOccurrence>` |
+| Unmark occurrence | Server Action `unmarkOccurrencePaid` | `{ occurrenceId: string }` | `ApiResult<BillOccurrence>` |
+| Upcoming list | Server Component direct call to `service.getUpcomingOccurrences(userId)` | — | `{ billId; billName; occurrenceId; dueDate; expectedAmount; status }[]` |
+| List (client-side refetch) | `GET /api/bills?includeArchived=` | — | `ApiResult<BillSummary[]>` |
 
-**Recurring-occurrence generation strategy — recommendation: lazy, on-read generation with persisted rows and a rolling horizon. Rejected alternative: eager generation of "all future occurrences" at create/edit time.**
+**Recurring-occurrence generation strategy: lazy, on-read generation with persisted rows and a rolling horizon.** `ensureOccurrencesGenerated(bill, throughDate)` runs at the top of every read function needing occurrence data.
 
-Justification:
-1. **Unbounded eager generation is a real problem, not a hypothetical one.** A weekly bill has no natural end date; generating "all future occurrences" at create time means generating forever, which is impossible, or picking an arbitrary cutoff that still produces hundreds of rows per bill up front for no read that needs them yet.
-2. **There is no background job infrastructure in this app** (confirmed absent — same constraint the task brief calls out for Notifications), so nothing can run on a schedule to keep "the next N occurrences" topped up over time even if a bounded window were chosen at create time.
-3. **Every read that needs occurrence data — bill list's "next due date," the upcoming list, the calendar, a bill's detail/history — already has to query the database anyway**, so piggybacking generation onto that same read is not extra infrastructure, just an extra step inside an existing query path.
+**Status is never a stored column — always computed**, via `occurrence.ts`'s `computeStatus(dueDate, paidState, today)`.
 
-Mechanism: `service.ts` calls an internal (not exported) `ensureOccurrencesGenerated(bill, throughDate)` at the top of every read function that needs occurrence data. It generates any `BillOccurrence` rows missing between the bill's latest already-generated occurrence and `throughDate` (default `throughDate = max(today, requested-range-end)`), using `occurrence.ts`'s pure schedule math. This single mechanism also correctly handles the "bill dormant for months" edge case for free: the next time *any* read happens, generation fills the entire gap up to today, and every occurrence in that gap correctly computes as Late (never silently skipped), with no separate backfill code path required.
+**(Phase 3a update to `occurrence.ts`):** its date-cadence math (next-due-date-per-schedule) is extracted to `lib/recurrence.ts` and shared with Recurring Income's own `occurrence.ts`; `computeStatus` (Bills-specific wording, incl. "Late") stays in `bills/server/occurrence.ts` unchanged. See Architecture.md's "Reusable utilities added in Phase 3a."
 
-Occurrence rows must be persisted (not computed ephemerally on every read with no DB row) because AC7/AC8 require **per-occurrence mutable state** — manual paid amount/date, an optional linked Transaction, un-mark — that has no other place to live.
+**(Phase 3a update to `linkOccurrenceToTransaction`):** before creating the link, it now also calls `lib/transaction-link-guard.ts`'s `assertTransactionNotAlreadyLinked(userId, transactionId, { excluding: { billOccurrenceId: occurrenceId } })`, so a Transaction already linked to a Recurring Income occurrence is rejected with the same friendly error it already gives for "already linked to a different Bill occurrence." This is an update to an existing Phase 2 file, flagged per this doc's established convention for touching prior-phase files — see Architecture.md's "Cross-feature exclusivity: Bills ↔ Recurring Income" for the full rationale.
 
-**Status is never a stored column — always computed.** `occurrence.ts` exports a pure `computeStatus(dueDate, paidState, today)` function; `BillOccurrence`'s "status" is derived at every read, not persisted. Storing it would create exactly the kind of stored/derived drift bug this app has otherwise avoided everywhere else in Phase 2 (Budget Health Score, Goal progress/completion) — an "Upcoming" row would silently become wrong the instant its due date passes if nothing else ever touched that row again.
+**Data model recommendation for the Database Architect:** `BillOccurrence.transactionId` should be a nullable, unique FK to `Transaction`, `onDelete: SetNull`.
 
-**Linked-Transaction paid amount is also never copied/duplicated onto `BillOccurrence`.** When an occurrence is linked, its paid amount/date are read via a join to the linked `Transaction` at read time, not stored redundantly — this is what makes AC7's "a linked occurrence's paid amount always reflects its linked Transaction's amount, live" true with zero write-side synchronization code (no event/webhook needed when a Transaction is edited). `paidAmount`/`paidDate` columns on `BillOccurrence` are used only for the manual (non-linked) path.
-
-**Data model recommendation for the Database Architect (flagged, not decided here):** `BillOccurrence.transactionId` should be a nullable, **unique** FK to `Transaction`, with `onDelete: SetNull` — this makes "a Transaction can back at most one occurrence" (Bills spec edge case) a database-enforced invariant rather than only an application check, and makes "the linked Transaction is later deleted → the occurrence reverts to its computed status" (Bills spec edge case) fall out automatically from the FK behavior with no Bills-side event handling required, the same `onDelete: SetNull` pattern already established for `Transaction.categoryId` in Phase 1.
-
-**Bills reads via other domains, explicit service calls only (module boundary rule):** the transaction-link picker in `mark-paid-dialog.tsx` needs to search the user's transactions — Bills' server code calls a small new exported function in `features/transactions/server/service.ts` (e.g. `searchTransactionsForLinking(userId, { query? })`) rather than querying the `Transaction` table directly from `features/bills/server/`.
+**Bills reads via other domains, explicit service calls only:** `searchTransactionsForLinking(userId, { query? })` on `features/transactions/server/service.ts`, now also reused by Recurring Income (see above).
 
 ## Calendar v1 — Phase 2
 
-Per `docs/product/calendar-and-notifications.md`. No new data, no mutations — entirely a read view over Bills (see folder-tree.md's rationale for why this lives inside `features/bills/` rather than its own module).
+Per `docs/product/calendar-and-notifications.md`. No new data, no mutations — entirely a read view over Bills.
 
 | Action | Mechanism | Input | Output |
 |---|---|---|---|
-| Get a month's calendar | Server Component direct call to `bills.service.getCalendarMonth(userId, month)` | `month: "YYYY-MM"` | `{ day: string /* "YYYY-MM-DD" */; occurrences: { billId; billOccurrenceId; billName; amount; status }[] }[]` |
+| Get a month's calendar | Server Component direct call to `bills.service.getCalendarMonth(userId, month)` | `month: "YYYY-MM"` | `{ day: string; occurrences: { billId; billOccurrenceId; billName; amount; status }[] }[]` |
 
-Scoped to bills only in this phase (paydays deferred to Phase 3, per the spec's own scope note) — `getCalendarMonth` has no payday-related parameters to design around yet, and adding any would be speculative ahead of Phase 3's Recurring Income model existing.
+Scoped to bills only in this phase (paydays deferred to Phase 3, per the spec's own scope note). **Still true as of Phase 3a**: no product spec in this phase requests extending Calendar v1 to show Recurring Income's expected occurrences — flagged here only to confirm it remains explicitly out of scope, not silently forgotten. If a future phase wants it, `getCalendarMonth` would need a second data source call into `recurring-income.service`, which is a small, additive change, not a redesign.
 
 ---
 
 ## Notifications v1 (`features/notifications`) — Phase 2
 
-Per `docs/product/calendar-and-notifications.md`. **Recommendation: lazy, on-read materialization into a dedicated `Notification` table, triggered by polling the notification inbox — not a background job, and not a fully-ephemeral "recompute every render with nothing stored" approach.** This is a deliberate refinement of the "computed at read time" default suggested in the task brief — read on for why a pure-ephemeral design does not actually satisfy this spec's acceptance criteria.
+Per `docs/product/calendar-and-notifications.md`. Lazy, on-read materialization into a dedicated `Notification` table, triggered by polling the notification inbox.
 
 | Action | Mechanism | Input | Output |
 |---|---|---|---|
-| Get inbox (list + unread count) | `GET /api/notifications` — calls `service.ensureNotifications(userId)` (materializes any newly-detected triggers as rows) and then `service.getNotifications(userId)` | — | `ApiResult<{ items: Notification[]; unreadCount: number }>` |
+| Get inbox (list + unread count) | `GET /api/notifications` — calls `service.ensureNotifications(userId)` then `service.getNotifications(userId)` | — | `ApiResult<{ items: Notification[]; unreadCount: number }>` |
 | Mark one read | Server Action `markNotificationRead` | `{ id: string }` | `ApiResult<Notification>` |
-| Dismiss one | Server Action `dismissNotification` | `{ id: string }` — sets `dismissedAt` on the `Notification` row only; per AC4, this never writes to Budgeting or Bills data | `ApiResult<Notification>` |
+| Dismiss one | Server Action `dismissNotification` | `{ id: string }` | `ApiResult<Notification>` |
 | Mark all read | Server Action `markAllNotificationsRead` | — | `ApiResult<{ count: number }>` |
 
-**Why not fully ephemeral (compute-only, no storage)?** AC4 requires dismissing a notification to be durable — reappearing on the next page load would be indistinguishable from "dismiss didn't work" from the user's perspective, and the underlying trigger condition (e.g. still over budget) does *not* go away just because the user dismissed the notification about it, so a purely-recomputed-every-render list would resurrect it immediately. Separately, the "one active over-budget notification per category per month" dedup requirement (Edge Cases) needs a stable identity to dedupe against across reads — there is nothing to dedupe against if nothing is ever stored. A small persisted table is the minimum structure that satisfies both requirements; it is not being added for its own sake.
+`service.ensureNotifications(userId)` reads from `budgeting.service.getOverBudgetCategories` and `bills.service.getDueSoonAndLateOccurrences`, upserting `Notification` rows; never writes to Budgeting/Bills.
 
-**Why not a background job?** No such infrastructure exists yet in this app (confirmed), and none is needed: `ensureNotifications(userId)` is a cheap, per-user, on-demand check (a handful of small queries against the current user's own Budgeting/Bills data) that only needs to run when that user's notification surface is actually being viewed. It is triggered opportunistically by `GET /api/notifications`, which `features/notifications/hooks/use-notifications.ts` polls (TanStack Query, short interval + refetch-on-window-focus) — this is the one Phase 2 module that genuinely needs a client-side query hook, for the same "ambient, needs to update without a full page navigation" reason Transactions' table needed one in Phase 1 (ordinary server-rendered data is otherwise preferred, per Architecture.md).
+**Not extended in Phase 3a.** No product spec in this phase requests a Debt/Investment/Recurring-Income-triggered notification type (e.g. "debt paid off," "income not yet received"). Flagged explicitly so this isn't assumed silently: if a future phase wants one, it follows the exact same one-directional read pattern already established here (Notifications reads a small new exported function from the relevant domain; that domain never imports Notifications).
 
-`service.ensureNotifications(userId)` algorithm (read-only into Budgeting/Bills, write-only into `Notification`):
-1. Calls `budgeting.service.getOverBudgetCategories(userId, currentMonth)` (small new exported read function) → for each result, `upsert`s a `Notification { type: "BUDGET_OVER", budgetCategoryId, userId }` row — a unique constraint on `(budgetCategoryId)` where `type = "BUDGET_OVER"` makes the one-per-category-per-month dedup a database guarantee, not just application logic.
-2. Calls `bills.service.getDueSoonAndLateOccurrences(userId)` (small new exported read function; the "few days out" advance window in AC2 is a Backend Engineer implementation default, not an architectural decision) → `upsert`s `Notification { type: "BILL_DUE_SOON" | "BILL_LATE", billOccurrenceId, userId }` rows, unique on `(billOccurrenceId, type)` (an occurrence can have at most one due-soon *and* at most one late notification, matching AC2's "and again if it becomes Late").
-3. Occurrences/categories that are no longer over-budget or that get paid simply stop being returned by the two read functions above, so no new rows are created for them — already-fired rows are left untouched (never retroactively deleted, per Edge Cases), matching "no further notifications fire for that already-resolved occurrence."
+**Data model recommendation for the Database Architect:** `id, userId, type (enum), budgetCategoryId (nullable FK), billOccurrenceId (nullable FK), createdAt, readAt, dismissedAt`, with unique constraints per steps 1–2 of the ensure-algorithm.
 
-**Data model recommendation for the Database Architect (flagged — this is a genuine gap, see the report below):** a `Notification` model is required and is **not currently listed** in `docs/database/migration-strategy.md`'s Phase 2 section (which lists `Budget`, `BudgetCategory`, `Goal`, `Bill` only). Suggested shape: `id, userId (FK), type (enum: BUDGET_OVER | BILL_DUE_SOON | BILL_LATE), budgetCategoryId (FK, nullable), billOccurrenceId (FK, nullable), createdAt, readAt (nullable), dismissedAt (nullable)`, with the two unique constraints described in steps 1–2 above. Ownership is entirely within `features/notifications/` — Budgeting and Bills are never written to by this module, only read from via their own service functions (see the two new read-only exports above), which is what keeps Notifications' cross-domain dependency one-directional and avoids a circular import between Notifications and either domain it reads from.
-
-**Notification bell placement:** `features/notifications/components/notification-bell.tsx` is composed into the existing `components/shared/top-nav.tsx` via a new optional `notificationSlot?: React.ReactNode` prop (additive, defaults to nothing rendered — does not change `TopNav`'s existing behavior for any current caller). `app/(dashboard)/layout.tsx` passes `<TopNav notificationSlot={<NotificationBell />} ... />`, keeping `TopNav` itself domain-agnostic (it renders whatever `ReactNode` it's given, same pattern as its existing `themeToggle` slot) while the domain-aware bell component lives inside the `notifications` feature module, per the existing `components/shared/` vs `features/*/components/` boundary.
+**Notification bell placement:** unchanged from Phase 2 — composed into `components/shared/top-nav.tsx` via the existing `notificationSlot` prop.
 
 ---
 
 ## Receipts — Phase 2 addendum to Transactions (`features/transactions/server/receipts.ts`)
 
-Per `docs/product/transactions.md`'s "Phase 2 Addendum: Receipt Attachment." File storage is UploadThing, wired up this phase; this is currently UploadThing's only consumer (Bills does not need its own storage feature per its spec's Dependencies section).
+Per `docs/product/transactions.md`'s "Phase 2 Addendum: Receipt Attachment." File storage is UploadThing.
 
 | Action | Mechanism | Input | Output |
 |---|---|---|---|
-| Upload endpoint (UploadThing's own integration surface) | `app/api/uploadthing/route.ts` — `GET`/`POST` handlers generated by UploadThing's `createRouteHandler(fileRouter)`, wired to the `receiptUploader` endpoint defined in `app/api/uploadthing/core.ts` | UploadThing's own request contract (not `ApiResult<T>` — this is third-party integration surface, not one of our own endpoints) | UploadThing's own response contract |
-| Upload from the browser | `features/transactions/components/receipt-uploader.tsx`, wrapping UploadThing's `<UploadButton endpoint="receiptUploader" />` React component | file (image or PDF; max size and accepted MIME types enforced in `core.ts`'s `.middleware()`/config, per AC5) | `onClientUploadComplete` callback fires client-side with `{ url, key, name, size }[]` — the browser uploads directly to UploadThing's storage, not through our own server as a proxy |
-| Persist receipt metadata | Server Action `attachReceipt` (defined in `receipts.ts`, re-exported from `actions.ts`) | `AttachReceiptSchema { transactionId: string; url: string; key: string; name: string; size: number; mimeType: string }` — server re-validates the transaction belongs to the current user before persisting (never trusts the client-supplied `transactionId` alone) | `ApiResult<Receipt>` |
-| List receipts for a transaction | Server Component direct call to `receipts.getReceiptsForTransaction(userId, transactionId)` — used in the transaction detail view only, **not** included in the paginated table-row shape (avoids an N+1-style receipt fetch on every row of a table that can have thousands of rows) | — | `Receipt[]` |
-| Remove a receipt | Server Action `removeReceipt` | `{ id: string }` | `ApiResult<{ id: string }>` — deletes the DB row **and** calls `lib/uploadthing.ts`'s `utapi.deleteFiles(key)` first, so no orphaned file is ever left in storage (AC/Edge Cases requirement) |
+| Upload endpoint | `app/api/uploadthing/route.ts` — `GET`/`POST` via UploadThing's `createRouteHandler(fileRouter)` | UploadThing's own request contract | UploadThing's own response contract |
+| Upload from the browser | `features/transactions/components/receipt-uploader.tsx`, wrapping `<UploadButton endpoint="receiptUploader" />` | file (image or PDF) | `{ url, key, name, size }[]` client-side callback |
+| Persist receipt metadata | Server Action `attachReceipt` | `AttachReceiptSchema { transactionId; url; key; name; size; mimeType }` | `ApiResult<Receipt>` |
+| List receipts for a transaction | Server Component direct call to `receipts.getReceiptsForTransaction(userId, transactionId)` | — | `Receipt[]` |
+| Remove a receipt | Server Action `removeReceipt` | `{ id: string }` | `ApiResult<{ id: string }>` — deletes the DB row and calls `utapi.deleteFiles(key)` |
 
-**Existing action updated, not a new endpoint:** `deleteTransaction` (`features/transactions/server/actions.ts`, Phase 1 file) must be updated to also call `utapi.deleteFiles(...)` for every receipt attached to the transaction being deleted, before or alongside removing the `Transaction` row — per the addendum's edge case ("deleting a transaction that has an attached receipt: the receipt is deleted along with it, no orphaned file left in storage"). This is flagged explicitly here because it is a behavioral change to a Phase 1 file being made as part of Phase 2 work, not a new contract entry.
+**Existing action updated, not a new endpoint:** `deleteTransaction` also calls `utapi.deleteFiles(...)` for every attached receipt before removing the `Transaction` row.
 
-**Split transactions:** no special-casing anywhere in this table — split line items are already their own `Transaction` rows (per Transactions AC14), so `attachReceipt`/`removeReceipt`/`getReceiptsForTransaction` work identically whether `transactionId` refers to an unsplit transaction or a split line item.
+**Schema note (resolved, Database Architect):** `Transaction.receiptUrl` was dropped, replaced by the one-to-many `Receipt` model.
 
-**Required dependency install (not performed by this Architect):** `uploadthing` and `@uploadthing/react` are absent from `package.json` as of this writing — whoever implements this addendum must `npm install` both, plus add the UploadThing environment variable(s) (e.g. `UPLOADTHING_TOKEN`) to `.env.example`.
+---
 
-**Schema conflict flagged for the Database Architect (see this Architect's final report):** `docs/database/er-diagram.md` already lists a single `Transaction.receiptUrl: string` field from Phase 1. That field cannot satisfy this addendum's requirement of **multiple** receipts per transaction (AC1, and the "transaction with multiple receipts attached... all individually removable" edge case) — a proper one-to-many `Receipt` model (as implied by the contract above: `id, userId, transactionId, url, key, name, size, mimeType, createdAt`) is required instead. Resolving whether `receiptUrl` is dropped outright (if genuinely unused since it was a Phase 1 placeholder never wired to any UI) or migrated is the Database Architect's call, following `docs/database/migration-strategy.md`'s additive-first / two-migration-rename rules as applicable — flagged here, not decided by this document.
+## Debt Tracker (`features/debt`) — Phase 3a
+
+Per `docs/product/debt-tracker.md`. Follows the archive/unarchive CRUD shape established by Accounts/Goals/Bills, plus a computed-at-read-time projection layer and a client-side-recomputable strategy comparison.
+
+**Account-linkage note (binding on this contract's shape, non-binding on the Database Architect's final schema call):** every row below is written assuming the Product Owner's/this Architect's recommended hybrid shape (Option C: standalone `Debt` record, optional nullable-unique link to `Account`). If the Database Architect instead chooses Option A (extend `Account`) or Option B (fully standalone, no link), only the `linkDebtToAccount`/`unlinkDebtFromAccount` rows and `debt.service`'s internal effective-balance helper change — every other row (create/update/archive, payoff projection, strategy comparison) is unaffected. See Architecture.md's "Phase 3a — the Account-linkage handoff."
+
+| Action | Mechanism | Input | Output |
+|---|---|---|---|
+| List debts | Server Component direct call to `service.getDebts(userId, { includeArchived? })` | — | `DebtWithProjection[]` |
+| Get debt detail | Server Component direct call to `service.getDebtById(userId, debtId)` | — | `DebtWithProjection` |
+| Create debt | Server Action `createDebt` | `CreateDebtSchema` (name, type: `DebtType`, balance > 0, interestRate ≥ 0 — required, unlike Accounts' optional `interestRate`, per AC1 — minimumPayment > 0) | `ApiResult<Debt>` |
+| Update debt | Server Action `updateDebt` | `UpdateDebtSchema` (id + partial: name, balance, interestRate, minimumPayment) — recalculates projections at next read only, never retroactively (AC3) | `ApiResult<Debt>` |
+| Archive debt (soft delete) | Server Action `archiveDebt` | `DebtIdSchema` (`{ id: string }`) — idempotent; allowed even with nonzero balance (AC10/Edge Cases) | `ApiResult<Debt>` |
+| Unarchive debt | Server Action `unarchiveDebt` | `DebtIdSchema` — idempotent | `ApiResult<Debt>` |
+| Link to an existing Account (Credit Card only, if the Database Architect adopts Option C) | Server Action `linkDebtToAccount` | `{ debtId: string; accountId: string }` — server rejects if the Account isn't the current user's, isn't `CREDIT_CARD` type, or is already linked to a different Debt | `ApiResult<Debt>` |
+| Unlink from Account | Server Action `unlinkDebtFromAccount` | `{ debtId: string }` — reverts the Debt to manually-maintained balance, seeded from the linked Account's last-known balance at the moment of unlinking (a one-time copy, not a live link from then on) | `ApiResult<Debt>` |
+| Compare snowball vs. avalanche | **No server call at all after initial load** — `features/debt/components/strategy-comparison.tsx` calls `features/debt/payoff-math.ts`'s `compareSnowballAndAvalanche(debts, extraPayment)` directly, client-side, on every extra-payment input change (AC6/AC7) | — | `StrategyComparisonResult` (see shape below), recomputed in-browser |
+| List (client-side refetch) | `GET /api/debts?includeArchived=` — mirrors `GET /api/accounts` | — | `ApiResult<DebtWithProjection[]>` |
+
+`DebtWithProjection` — every derived field computed at read time in `service.ts` (via `payoff-math.ts`), never stored, same rule as `GoalWithProgress`/`BudgetHealthScore`/Bill occurrence status:
+```ts
+{
+  ...Debt fields,                    // id, name, type, minimumPayment, interestRate, linkedAccountId (nullable)
+  effectiveBalance: number           // Debt.balance, OR the linked Account's live balance if linkedAccountId is set —
+                                      //   read via the join, never copied (same precedent as BillOccurrence)
+  payoffDate: string | null          // "YYYY-MM", assuming minimum-payment-only (AC4); null if isNegativeAmortization
+  totalInterestRemaining: number | null   // null if isNegativeAmortization
+  isNegativeAmortization: boolean    // minimum payment doesn't cover accruing interest (Edge Cases)
+  isPaidOff: boolean                 // effectiveBalance <= 0 (AC9) — auto-detected, never a manually-set flag
+  isEstimate: boolean                // true only for type === "CREDIT_CARD" (AC5's revolving-credit caveat)
+}
+```
+
+`StrategyComparisonResult` shape (pure output of `payoff-math.ts`, never persisted):
+```ts
+{
+  extraPayment: number
+  snowball: { monthsToDebtFree: number; totalInterestPaid: number; payoffOrder: string[] /* debt IDs */ }
+  avalanche: { monthsToDebtFree: number; totalInterestPaid: number; payoffOrder: string[] }
+  isIdentical: boolean   // true when extraPayment === 0 or only one active debt (Edge Cases) — drives the
+                         //   "add an extra payment amount to see how each strategy differs" messaging (AC/Edge Cases)
+}
+```
+
+**`payoff-math.ts` correctness requirements (binding on whoever implements it, verified by Integration Test Engineer against fixture data per the spec's Definition of Done):**
+- 0% interest rate: balance reduces by minimum payment alone, no division by zero (Edge Cases).
+- Negative amortization (minimum payment < accruing monthly interest): `payoffDate`/`totalInterestRemaining` return `null` with `isNegativeAmortization: true`, never an infinite loop or a nonsensical far-future date (Edge Cases).
+- `$0` extra payment: `snowball` and `avalanche` produce numerically identical results, and `isIdentical: true` (Edge Cases) — the UI must not imply one "wins" when they're mathematically forced to tie.
+- A debt paid off mid-projection correctly rolls its former minimum payment onto the next debt in that strategy's order for the remainder of the projection (Edge Cases).
+
+## Investments (`features/investments`) — Phase 3a
+
+Per `docs/product/investments.md`. Containers are existing Investment/Retirement/Crypto `Account` rows (this Architect's recommendation, matching the Product Owner's); `Holding` is a new child model.
+
+| Action | Mechanism | Input | Output |
+|---|---|---|---|
+| List containers | Server Component direct call to `service.getContainers(userId)` | — | `ContainerSummary[]` (Account fields + `holdingCount`, `hasHoldings: boolean` — drives the "balance now calculated from holdings" messaging, AC1) |
+| Get container detail (holdings list) | Server Component direct call to `service.getHoldingsForContainer(userId, accountId, { includeClosed? })` | — | `Holding[]` |
+| Get holding detail | Server Component direct call to `service.getHoldingById(userId, holdingId)` | — | `Holding & { valueHistory: HoldingValueHistoryEntry[]; dividends: DividendEntry[] }` |
+| Create holding (incl. inline container creation) | Server Action `createHolding` | `CreateHoldingSchema` (accountId **or** `newContainer: { name; type: "INVESTMENT" \| "RETIREMENT" \| "CRYPTO" }` — exactly one of the two, per AC1's "offers to create the appropriate container Account inline"; name, assetType, sector? (required unless assetType is Crypto/Bond/Other, AC2), costBasis ≥ 0, currentValue ≥ 0) | `ApiResult<Holding>` — if `newContainer` was supplied, internally calls `accounts.actions.createAccount` first, same as if the user had created the Account separately |
+| Update holding | Server Action `updateHolding` | `UpdateHoldingSchema` (id + partial: name, assetType, sector, costBasis, currentValue) — every `currentValue` change (including "unchanged" re-confirmations, per Edge Cases) appends a `HoldingValueHistoryEntry`; also triggers the derived-balance write-back onto the container Account (see Architecture.md) | `ApiResult<Holding>` |
+| Close holding | Server Action `closeHolding` | `HoldingIdSchema` (`{ id: string }`) — idempotent; drops out of active allocation/overview but retains full history (AC5) | `ApiResult<Holding>` |
+| Log dividend | Server Action `logDividend` | `LogDividendSchema { holdingId: string; amount: number (> 0); date: Date }` — allowed even on a Closed holding (Edge Cases) | `ApiResult<DividendEntry>` |
+| Get portfolio overview | Server Component direct call to `service.getPortfolioOverview(userId)` | — | `PortfolioOverview` (see shape below) |
+| Get allocation | Server Component direct call to `service.getAllocation(userId, { by: "assetType" \| "sector" })` | — | `{ label: string; value: number; percent: number }[]` — active holdings only (AC9) |
+| Get growth history | Server Component direct call to `service.getGrowthHistory(userId, { holdingId? })` (omit `holdingId` for portfolio-level aggregate) | — | `{ date: string; value: number }[]` |
+| List (client-side refetch) | `GET /api/investments?includeClosed=` | — | `ApiResult<ContainerSummary[]>` |
+
+`Holding` gain/loss (AC6) is computed at read time, never stored: `gainLossAmount = currentValue - costBasis`, `gainLossPercent = costBasis === 0 ? null : (gainLossAmount / costBasis) * 100` (guards the same divide-by-zero class of edge case `payoff-math.ts` guards for 0% interest).
+
+`PortfolioOverview` shape:
+```ts
+{
+  totalCurrentValue: number         // active holdings only, across all containers
+  totalGainLoss: number
+  totalDividendIncome: number
+  byContainer: { accountId: string; accountName: string; currentValue: number; gainLoss: number; dividendIncome: number }[]
+}
+```
+
+**Sector allocation's "Other/Not Applicable" bucket (AC9/Edge Cases):** holdings with `sector: null` (Crypto/Bond/Other asset types, or a Stock/ETF/Mutual Fund the user genuinely didn't set — validation should prevent that combination per AC2, but the read-side aggregation defensively buckets any `null` regardless) are grouped into a single `"Other / Not Applicable"` label rather than excluded from the total, so allocation percentages always sum to 100%.
+
+**Growth chart single-data-point state (AC7):** `getGrowthHistory` returning exactly one entry is a valid, expected response — `growth-chart.tsx` (Frontend Lead/UI territory) renders an explicit "not enough history yet" state for a one-entry array rather than attempting to draw a line chart with a single point.
+
+## Recurring Income (`features/recurring-income`) — Phase 3a
+
+Per `docs/product/recurring-income.md`. Mirrors Bills' proven lazy on-read occurrence generation exactly, with its own status vocabulary and an Irregular/One-off cadence Bills has no equivalent of.
+
+| Action | Mechanism | Input | Output |
+|---|---|---|---|
+| List income streams | Server Component direct call to `service.getIncomeStreams(userId, { includeArchived? })` | — | `IncomeStreamSummary[]` (name, type, schedule, expectedAmount?, nextExpectedDate?) |
+| Get stream detail + receipt history | Server Component direct call to `service.getStreamById(userId, streamId)` | — | `IncomeStream & { occurrences: IncomeOccurrence[] }` (or `{ events: IrregularIncomeEvent[] }` for Irregular streams) |
+| Create income stream | Server Action `createIncomeStream` | `CreateIncomeStreamSchema` (name, type: `IncomeType`, schedule: `IncomeSchedule`, expectedAmount — required unless schedule is `IRREGULAR`, per AC2) | `ApiResult<IncomeStream>` |
+| Update income stream | Server Action `updateIncomeStream` | `UpdateIncomeStreamSchema` (id + partial: name, type, schedule, expectedAmount) — applies to future occurrences only (AC5) | `ApiResult<IncomeStream>` |
+| Archive income stream | Server Action `archiveIncomeStream` | `IncomeStreamIdSchema` — idempotent; stops future occurrence generation | `ApiResult<IncomeStream>` |
+| Unarchive income stream | Server Action `unarchiveIncomeStream` | `IncomeStreamIdSchema` — idempotent; resumes generation forward from "today," no backfill of the archived gap (mirrors Bills' unarchive exactly) | `ApiResult<IncomeStream>` |
+| Mark occurrence received (manual) | Server Action `markOccurrenceReceived` | `{ occurrenceId: string; receivedAmount: number; receivedDate: Date }` | `ApiResult<IncomeOccurrence>` |
+| Mark occurrence received (linked) | Server Action `linkOccurrenceToTransaction` | `{ occurrenceId: string; transactionId: string }` — calls `lib/transaction-link-guard.ts` before linking (see Architecture.md); rejects with a friendly error if the Transaction is already linked to a Bill occurrence or a different Income occurrence | `ApiResult<IncomeOccurrence>` |
+| Unmark occurrence | Server Action `unmarkOccurrenceReceived` | `{ occurrenceId: string }` — clears manual fields and any link; reverts to computed status | `ApiResult<IncomeOccurrence>` |
+| Log an Irregular/One-off event | Server Action `logIrregularIncomeEvent` | `LogIrregularIncomeEventSchema { streamId: string; amount: number (> 0); date: Date; transactionId?: string }` — the optional link goes through the same `transaction-link-guard.ts` check (AC11) | `ApiResult<IrregularIncomeEvent>` |
+| Expected upcoming income total | Server Component direct call to `service.getExpectedUpcomingIncome(userId, { period })` | `period`, e.g. `"this-month"` | `{ total: number; byStream: { streamId: string; streamName: string; nextOccurrenceAmount: number }[] }` — clearly a distinct surface from Dashboard's Monthly Income (AC10); no shared code path with `dashboard.service.getMonthlySummary` |
+| List (client-side refetch) | `GET /api/income?includeArchived=` — mirrors `GET /api/bills` | — | `ApiResult<IncomeStreamSummary[]>` |
+
+`IncomeOccurrence.status` (`IncomeOccurrenceStatus`) is never a stored column — always computed at read time by `features/recurring-income/server/occurrence.ts`'s `computeStatus(expectedDate, receivedState, today)`, mirroring Bills' `computeStatus` exactly but with income's own vocabulary (`Upcoming | Expected Today | Not Yet Received | Received` — deliberately not "Late," per AC7's resolved product decision).
+
+**Occurrence generation:** identical mechanism to Bills — `ensureOccurrencesGenerated(stream, throughDate)` runs at the top of every read needing occurrence data, generating any missing rows using `lib/recurrence.ts`'s shared cadence math (see Architecture.md). **Irregular/One-off streams never call this** — they have no generated occurrences at all, only user-logged `IrregularIncomeEvent` rows (AC11), which is why `getStreamById`'s response shape branches on schedule type above rather than always returning `occurrences`.
+
+**Linked amount is read live, never copied** — same precedent as `BillOccurrence`: a linked `IncomeOccurrence`'s effective received amount/date are read via the join to `Transaction` at render time (AC8's "if that Transaction is later edited, the occurrence updates to match").
+
+**Data model recommendation for the Database Architect:** `IncomeOccurrence.transactionId` (and `IrregularIncomeEvent.transactionId`) should each be a nullable, unique FK to `Transaction`, `onDelete: SetNull` — same shape as `BillOccurrence.transactionId`. The cross-table "at most one of any kind" invariant these two unique constraints don't cover by themselves is `lib/transaction-link-guard.ts`'s job at the application layer — see Architecture.md's "Cross-feature exclusivity" section for the full reasoning and the flagged race-condition consideration.
+
+---
+
+## Net Worth Aggregation Update (`features/dashboard`) — Phase 3a
+
+Per `roadmap.md`'s Phase 3a milestone 5 and both `debt-tracker.md`'s and `investments.md`'s Dependencies sections. This is an update to the existing `service.getNetWorth(userId)` contract (Phase 1), not a new endpoint.
+
+**The double-counting risk this contract exists to prevent (this Architect's primary flag for the Database Architect and whoever implements this milestone):** per `accounts.md` AC6, a Credit Card `Account`'s balance is already a positive "amount owed" figure that Phase 1's Net Worth formula already subtracts. If a `Debt` record is linked to that same Credit Card Account (the hybrid Option C shape), that Debt's `effectiveBalance` is, by design, the exact same number, read live (see the Debt Tracker section above). Naively adding a second term — "subtract the sum of every active debt's balance" — to the existing formula would **subtract that one real-world liability twice**: once via the base Account-sum (already negative/subtracted for Credit Card type), and again via the new debt-liability term. This is a genuine, concrete correctness bug waiting to happen, not a hypothetical one, and it is exactly the class of risk Risk #9 and this feature's own success metric ("zero reported incidents of incorrect... math") are guarding against.
+
+**Required formula (binding on the implementation, regardless of which Account-linkage option the Database Architect ultimately chooses — the exclusion principle generalizes):**
+```
+totalAccountBalance   = sum of non-archived Account.balance, sign-adjusted per accounts.md AC6
+                         (Credit Card subtracted; unchanged from Phase 1. Investment/Retirement/Crypto
+                         accounts with active holdings already carry their derived, holdings-sum balance
+                         here via the write-back described in Architecture.md — no separate addition needed.)
+
+unlinkedDebtLiability = sum of active (non-archived, non-Paid-Off) Debt.effectiveBalance
+                         WHERE the Debt is NOT linked to an Account
+                         (i.e., every Personal Loan/Auto Loan/Student Loan/Mortgage — which have no
+                         Account counterpart at all — plus any Credit Card debt the user chose to
+                         track manually rather than link)
+
+netWorth = totalAccountBalance - unlinkedDebtLiability
+```
+
+`debt.service` exports the second term directly — `getTotalActiveDebtBalanceForNetWorth(userId): Promise<number>` — so Dashboard never has to know about linkage internals; it just calls this one function and subtracts the result. This keeps Dashboard a pure downstream consumer (unchanged architectural role from Phase 1/2) and keeps the exclusion logic owned entirely by the one module (`debt`) that actually knows which debts are linked.
+
+**Updated contract:**
+- `service.getNetWorth(userId)` → `{ total: number; byAccount: { accountId: string; balance: number }[]; totalUnlinkedDebtLiability: number }` — the new field is additive and surfaced (not hidden inside `total`) specifically so the Dashboard UI can, if the Frontend Lead/Product Owner want it later, show "$X in accounts, −$Y in tracked debt" as two line items instead of one opaque number; nothing requires that UI split this phase, but the data shape supports it without another backend change.
+
+**If the Database Architect chooses Option A or B instead of the recommended hybrid (Option C):** this exclusion term simplifies (Option B: every Debt is unlinked by definition, so the whole formula is just "subtract every active Debt's balance," no exclusion needed at all; Option A: there is no separate `Debt` model to subtract — the Credit Card's debt-specific fields live on `Account` itself, so Phase 1's existing Account-sum formula requires no change beyond whatever new loan/mortgage `Account.type` values are added to the enum). Flagged here so the Backend Engineer implementing this milestone knows the formula's complexity is a direct function of the Database Architect's decision, not an independent design choice of this Architect's.
+
+**Investments requires no separate addition to this formula**, only the derived-balance write-back described in Architecture.md — Investment/Retirement/Crypto `Account.balance` already reflects the holdings sum by the time Net Worth reads it, since Investments keeps it in sync rather than Net Worth computing it fresh. This is a direct, deliberate simplification this Architect's design achieves versus a naive "call `investments.service` separately and add its total" approach, which would have needed its own exclusion logic (don't double-count an Account's stored balance *and* its holdings sum) mirroring the Debt case above. One exclusion problem in this phase, not two.
+
+## Net Worth Snapshot job (`features/dashboard/server/snapshot.ts`) — Phase 3a
+
+Per `roadmap.md`'s Phase 3a milestone 6 and Risk #10 ("begin periodically recording net worth... backend only, no UI... does not wait for 3b's chart"). This is the first scheduled/cron-triggered surface in the codebase; no comparable Phase 1/2 precedent exists, so its design is spelled out in full here.
+
+**Why not lazy, on-read materialization (the pattern Bills/Notifications both use)?** Both prior lazy-generation patterns work because the thing being generated is *read* immediately after — a bill's occurrence is generated because the bill list needs to display it right now. A net worth snapshot has no such natural read trigger: nothing in this phase reads historical net worth data (the chart that will is Phase 3b's, explicitly deferred, per Risk #10's own reasoning — "if snapshotting only starts when the chart is built, the chart launches with an empty history"). Snapshots must be captured on a *time* cadence (e.g. daily), independent of any user visiting any particular page, which is a genuinely different requirement from every other "generate on read" mechanism in this app.
+
+**Recommended mechanism: an authenticated Route Handler, triggered by an external scheduler.**
+| Action | Mechanism | Input | Output |
+|---|---|---|---|
+| Capture a snapshot for every user | `POST /api/cron/net-worth-snapshot` — authenticated via a shared secret (`Authorization: Bearer <CRON_SECRET>` header, compared against a server-only env var), **not** a user session — there is no calling user, it acts on all users | none (no request body) | `{ processed: number }`, plain JSON, HTTP 200 — **not** `ApiResult<T>`, per naming-standards.md's documented exception (system-to-system call, no client to interpret an `ApiResult` shape) |
+
+Internally, this route calls `dashboard.service.captureAllUsersNetWorthSnapshots()`, which loops every user and calls `dashboard.service.captureNetWorthSnapshot(userId)` — itself just `getNetWorth(userId)` plus its Debt/Investment component breakdown, persisted as one new row. No new calculation logic is introduced by the snapshot job; it purely persists a timestamped copy of numbers `getNetWorth` already computes.
+
+**What this Architect is explicitly NOT deciding:**
+- **Which scheduler actually calls this route, and how often.** Options include Vercel Cron (`vercel.json`'s `crons` array, if Vercel is the confirmed Phase 0 deployment target), a GitHub Actions scheduled workflow hitting the route over HTTPS, or any other external trigger. This depends on the deployment target decided in Phase 0 — **required artifact from DevOps/Backend Engineer before this job can go live**: confirmation of the deployment platform's scheduling mechanism, and the actual cadence (daily is the natural default given "net worth history," but is a product/ops call, not an architecture one).
+- **Where `CRON_SECRET` is generated/stored** (`.env.example` + the hosting platform's secret store) — Backend/DevOps territory, same category of exclusion already established for UploadThing's env vars in Phase 2.
+
+**Data model recommendation for the Database Architect (flagged, not decided here):** a new model, e.g. `NetWorthSnapshot { id, userId (FK), capturedAt, totalNetWorth, totalAccountBalance, totalUnlinkedDebtLiability }`, indexed on `(userId, capturedAt)` for the Phase 3b chart's eventual range queries. Not currently listed anywhere in `docs/database/`, same category of gap as Phase 2's `Notification` model was when it was first flagged.
+
+**Performance note for the Performance Engineer's Phase 3a review:** `captureAllUsersNetWorthSnapshots()` runs `getNetWorth` once per user in the whole system on every invocation — at this app's current scale this is fine, but if the user base grows large enough for a single cron invocation to run long, the fix is batching/pagination within that function (process N users per invocation, track a cursor), not a redesign of the mechanism above.

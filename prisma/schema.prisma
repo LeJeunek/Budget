@@ -1,13 +1,16 @@
-// FinanceOS — Prisma schema (Phase 0 + Phase 1 + Phase 2)
+// FinanceOS — Prisma schema (Phase 0 + Phase 1 + Phase 2 + Phase 3a)
 // Scope: auth (Better Auth), Accounts, Transactions, Categories, Tags (Phase 1);
 // Budgeting, Savings Goals, Bills, Notifications, and a multi-file Receipt model
-// for Transactions (Phase 2). Modeled per docs/product/{budgeting,savings-goals,
-// bills,calendar-and-notifications}.md and the Transactions receipt-attachment
-// addendum, all resolved by the CTO on 2026-07-19, plus docs/architecture/
-// api-contracts.md and Architecture.md's Phase 2 module-boundary sections.
-// Later-phase domains (Debt, Investment, Recurring Income) remain deferred to
-// Phase 3 — do not pre-model them here to avoid guessing business rules the
-// Product Owner hasn't specified yet.
+// for Transactions (Phase 2); Debt Tracker, Investments (Holding), Recurring
+// Income, and the Net Worth Snapshot job (Phase 3a). Modeled per docs/product/
+// {budgeting,savings-goals,bills,calendar-and-notifications,debt-tracker,
+// investments,recurring-income}.md and docs/architecture/{api-contracts.md,
+// Architecture.md}'s Phase 2/3a module-boundary sections. See
+// docs/database/{er-diagram,migration-strategy,performance-considerations}.md
+// for the full rationale behind every Phase 3a modeling decision below.
+// Later-phase domains (Phase 3b Financial Goals extension, Analytics, AI)
+// remain deferred — do not pre-model them here to avoid guessing business
+// rules the Product Owner hasn't specified yet.
 
 generator client {
   provider = "prisma-client-js"
@@ -24,13 +27,13 @@ datasource db {
 // ---------------------------------------------------------------------------
 
 model User {
-  id            String    @id @default(cuid())
+  id            String   @id @default(cuid())
   name          String
-  email         String    @unique
-  emailVerified Boolean   @default(false)
+  email         String   @unique
+  emailVerified Boolean  @default(false)
   image         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   sessions Session[]
   accounts AuthAccount[]
@@ -50,6 +53,16 @@ model User {
   billOccurrences   BillOccurrence[]
   notifications     Notification[]
   receipts          Receipt[]
+
+  // FinanceOS domain data (Phase 3a)
+  debts                 Debt[]
+  holdings              Holding[]
+  holdingValueHistory   HoldingValueHistoryEntry[]
+  dividendEntries       DividendEntry[]
+  incomeStreams         IncomeStream[]
+  incomeOccurrences     IncomeOccurrence[]
+  irregularIncomeEvents IrregularIncomeEvent[]
+  netWorthSnapshots     NetWorthSnapshot[]
 
   @@map("user")
 }
@@ -122,22 +135,43 @@ enum AccountType {
 }
 
 model Account {
-  id            String      @id @default(cuid())
-  userId        String
-  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name          String
-  type          AccountType
-  institution   String?
-  balance       Decimal     @default(0) @db.Decimal(14, 2)
-  interestRate  Decimal?    @db.Decimal(5, 2)
-  color         String      @default("#6366f1") // hex, user-chosen — see naming-standards.md
+  id           String      @id @default(cuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  type         AccountType
+  institution  String?
+  // Phase 1/2 meaning: manually-entered current balance for every type.
+  // Phase 3a addition (Investments, see Holding below): once an Investment/
+  // Retirement/Crypto Account has one or more active (non-closed) Holding
+  // rows, this column's *meaning* changes to a derived, read-only value — the
+  // sum of those holdings' currentValue — kept in sync by
+  // features/investments/server/actions.ts writing it back in the same
+  // transaction as any holding mutation (create/update/close), never
+  // computed fresh by Accounts itself. This is a deliberate, narrow exception
+  // to "never store what's derived" — see docs/database/er-diagram.md's
+  // Phase 3a design notes for the full reasoning (Accounts must not gain a
+  // forward dependency on Investments, and Account.balance already has
+  // pre-existing consumers — the Accounts list, the Transaction form's
+  // account picker, Dashboard's Net Worth sum — that must keep working
+  // unmodified). The column type/constraints are unchanged either way.
+  balance      Decimal     @default(0) @db.Decimal(14, 2)
+  interestRate Decimal?    @db.Decimal(5, 2)
+  color        String      @default("#6366f1") // hex, user-chosen — see naming-standards.md
   // Soft delete: transaction history must survive account removal for
   // analytics/reports in later phases. Never hard-delete an Account.
-  archivedAt    DateTime?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  archivedAt   DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
 
   transactions Transaction[]
+
+  // Phase 3a: an Account may optionally be the one Account a Debt links to
+  // (Credit Card case, hybrid Option C — see Debt below) and/or the container
+  // for zero or more Holdings (Investment/Retirement/Crypto case). Both are
+  // optional and independent — an Account is never required to have either.
+  debt     Debt?
+  holdings Holding[]
 
   @@index([userId])
   // Better Auth's own OAuth-link model (AuthAccount, above) owns the
@@ -186,17 +220,17 @@ model Tag {
 }
 
 model Transaction {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  accountId   String
-  account     Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
-  categoryId  String?
-  category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  merchant    String
-  amount      Decimal  @db.Decimal(14, 2) // positive = income/credit, negative = expense/debit
-  date        DateTime @db.Date // UTC calendar date; see risk-register.md #8 on timezone handling
-  notes       String?
+  id                  String        @id @default(cuid())
+  userId              String
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId           String
+  account             Account       @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  categoryId          String?
+  category            Category?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  merchant            String
+  amount              Decimal       @db.Decimal(14, 2) // positive = income/credit, negative = expense/debit
+  date                DateTime      @db.Date // UTC calendar date; see risk-register.md #8 on timezone handling
+  notes               String?
   // Split transactions: a parent transaction's amount is divided across
   // categories. parentTransactionId is null for normal/parent transactions;
   // set for the generated split "child" rows, which together must sum to the
@@ -205,8 +239,8 @@ model Transaction {
   parentTransactionId String?
   parentTransaction   Transaction?  @relation("TransactionSplits", fields: [parentTransactionId], references: [id], onDelete: Cascade)
   splits              Transaction[] @relation("TransactionSplits")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
   tags TransactionTag[]
 
@@ -222,6 +256,21 @@ model Transaction {
   // unique transactionId below). Nullable/optional from this side since most
   // transactions never link to a bill.
   billOccurrence BillOccurrence?
+
+  // Phase 3a: the optional Recurring Income occurrence/event this transaction
+  // backs, if any (see IncomeOccurrence/IrregularIncomeEvent below). A single
+  // Transaction may back at most one occurrence of *any* kind across the
+  // whole product — Bill occurrence, income occurrence, or irregular income
+  // event, never more than one of these three. Each target table enforces its
+  // own uniqueness independently (billOccurrence above, incomeOccurrence and
+  // irregularIncomeEvent below all use @unique transactionId FKs); the
+  // cross-table "at most one of any kind" invariant that spans all three is
+  // an application-level guard (lib/transaction-link-guard.ts), not
+  // expressible as a single database constraint — see this schema's Phase 3a
+  // design notes in docs/database/er-diagram.md for why a DB trigger was
+  // considered and not added in this phase.
+  incomeOccurrence     IncomeOccurrence?
+  irregularIncomeEvent IrregularIncomeEvent?
 
   @@index([userId, date])
   @@index([accountId])
@@ -269,9 +318,9 @@ model TransactionTag {
 // stored, to avoid a stored/derived-drift bug the app otherwise avoids
 // everywhere else in Phase 2 (Budget Health Score, Goal progress, bill status).
 model Budget {
-  id     String @id @default(cuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   // First-of-month UTC calendar date representing "YYYY-MM" (e.g. 2026-07-01
   // for July 2026), mirroring Transaction.date's @db.Date + UTC convention
   // (risk-register.md #8) rather than introducing a second date representation
@@ -289,16 +338,16 @@ model Budget {
 }
 
 model BudgetCategory {
-  id       String @id @default(cuid())
-  budgetId String
-  budget   Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  id         String    @id @default(cuid())
+  budgetId   String
+  budget     Budget    @relation(fields: [budgetId], references: [id], onDelete: Cascade)
   // Denormalized alongside budgetId (not reached via a Budget join) per this
   // schema's established convention of a direct userId FK + index on every
   // user-owned model (mirrors Transaction.userId despite Transaction.accountId
   // already implying ownership) — keeps user-scoped queries and row-level
   // security checks a single-column lookup, no join required.
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   // Nullable + onDelete: SetNull, the same pattern already established for
   // Transaction.categoryId: a hard-deleted custom category (categories.md AC6)
   // must not cascade-delete this row, since budgeting.md's edge case requires
@@ -311,9 +360,9 @@ model BudgetCategory {
   category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   // Row presence is the "unset vs. set" signal (see Budgeting's modeling
   // decision above) — this column itself is never nullable.
-  amount    Decimal  @db.Decimal(14, 2)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  amount     Decimal   @db.Decimal(14, 2)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   notifications Notification[]
 
@@ -337,24 +386,24 @@ model BudgetCategory {
 // contribution recalculates progress" (both spec'd behaviors) fall out for
 // free with zero write-side sync logic.
 model Goal {
-  id     String @id @default(cuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name   String
-  targetAmount Decimal @db.Decimal(14, 2)
+  id                         String    @id @default(cuid())
+  userId                     String
+  user                       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                       String
+  targetAmount               Decimal   @db.Decimal(14, 2)
   // Optional per savings-goals.md AC1.
-  targetDate DateTime? @db.Date
+  targetDate                 DateTime? @db.Date
   // Optional per savings-goals.md AC1; used by the read-time estimated-
   // completion calculation (AC7, case 1) when present.
-  plannedMonthlyContribution Decimal? @db.Decimal(14, 2)
+  plannedMonthlyContribution Decimal?  @db.Decimal(14, 2)
   // Archive-only (savings-goals.md AC6, resolved CTO 2026-07-19) — matches
   // Account's soft-delete pattern exactly, never a hard delete. Archiving is
   // purely a visibility action; it has no effect on contribution history or
   // completion status (both remain fully computable from GoalContribution
   // regardless of archivedAt).
-  archivedAt DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  archivedAt                 DateTime?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
 
   contributions GoalContribution[]
 
@@ -363,19 +412,19 @@ model Goal {
 }
 
 model GoalContribution {
-  id     String @id @default(cuid())
-  goalId String
-  goal   Goal   @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  id        String   @id @default(cuid())
+  goalId    String
+  goal      Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
   // Direct userId FK + index, same rationale as BudgetCategory.userId above.
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   // Validated > 0 in application code (savings-goals.md Edge Cases: "negative
   // or non-numeric... contribution amount: rejected"); no DB CHECK constraint,
   // consistent with this schema's existing precedent of leaving numeric-range
   // validation to Zod (e.g. Transaction.amount has no DB-level sign constraint
   // either, despite its own sign convention).
-  amount Decimal @db.Decimal(14, 2)
-  date   DateTime @db.Date
+  amount    Decimal  @db.Decimal(14, 2)
+  date      DateTime @db.Date
   // No updatedAt: contributions are an append/delete-only ledger per the spec
   // (AC5 — delete a mis-logged contribution; there is no "edit contribution"
   // action), so there is nothing to track a modification timestamp for.
@@ -397,34 +446,34 @@ enum BillSchedule {
 }
 
 model Bill {
-  id     String @id @default(cuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name   String
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
   // The typical/planned amount (bills.md AC1) — a planning estimate only; the
   // actual amount paid for a given occurrence may differ (variable bills like
   // Electric/Water) and lives on BillOccurrence instead, never overwritten
   // here by an actual payment.
-  expectedAmount Decimal @db.Decimal(14, 2)
+  expectedAmount Decimal      @db.Decimal(14, 2)
   // The anchor date for occurrence generation — the bill's next/first
   // occurrence at creation time (bills.md AC1), NOT a live "next due date"
   // figure (that is always computed at read time from BillOccurrence rows in
   // features/bills/server/service.ts, per api-contracts.md's lazy-generation
   // design, to avoid a second stored/derived date that could drift from the
   // generated occurrences).
-  dueDate  DateTime     @db.Date
-  schedule BillSchedule
+  dueDate        DateTime     @db.Date
+  schedule       BillSchedule
   // Optional (bills.md AC1) — a bill with no category assigned simply doesn't
   // participate in category-level reporting until one is set (Edge Cases).
-  categoryId String?
-  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  categoryId     String?
+  category       Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   // Archive-only (bills.md AC5 / Edge Cases) — matches Account's pattern.
   // Archiving stops future occurrence generation without deleting payment
   // history; reactivating resumes generation forward from "today" and does
   // not backfill the archived gap (api-contracts.md's unarchiveBill contract).
-  archivedAt DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  archivedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   occurrences BillOccurrence[]
 
@@ -433,15 +482,15 @@ model Bill {
 }
 
 model BillOccurrence {
-  id     String @id @default(cuid())
-  billId String
-  bill   Bill   @relation(fields: [billId], references: [id], onDelete: Cascade)
+  id            String       @id @default(cuid())
+  billId        String
+  bill          Bill         @relation(fields: [billId], references: [id], onDelete: Cascade)
   // Direct userId FK + index, same rationale as BudgetCategory.userId above —
   // also lets the upcoming-list/calendar queries (getUpcomingOccurrences,
   // getCalendarMonth) scope and range-query by userId without a Bill join.
-  userId  String
-  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  dueDate DateTime @db.Date
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dueDate       DateTime     @db.Date
   // Manual (non-linked) paid path only (bills.md AC7). When transactionId is
   // set below, the occurrence's *effective* paid amount/date are read live via
   // a join to the linked Transaction at read time instead — never copied onto
@@ -449,8 +498,8 @@ model BillOccurrence {
   // always reflects its linked Transaction's amount, live" true with zero
   // write-side sync code. These columns are simply unused/null whenever
   // transactionId is set.
-  paidAmount Decimal?  @db.Decimal(14, 2)
-  paidDate   DateTime? @db.Date
+  paidAmount    Decimal?     @db.Decimal(14, 2)
+  paidDate      DateTime?    @db.Date
   // At most one Transaction may back one occurrence (bills.md Edge Cases: "a
   // Transaction can back at most one bill occurrence") — enforced here via
   // @unique as a database-level invariant, not just an application check.
@@ -501,10 +550,10 @@ enum NotificationType {
 }
 
 model Notification {
-  id     String           @id @default(cuid())
-  userId String
-  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type   NotificationType
+  id               String           @id @default(cuid())
+  userId           String
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type             NotificationType
   // Exactly one of these two is set, matching whichever domain triggered this
   // notification (BUDGET_OVER -> budgetCategoryId; BILL_DUE_SOON/BILL_LATE ->
   // billOccurrenceId). Enforced in features/notifications/server/service.ts,
@@ -514,12 +563,12 @@ model Notification {
   // a notification never outlives the row it refers to (e.g. Budgeting or
   // Bills data cascading away with its owning User).
   budgetCategoryId String?
-  budgetCategory   BudgetCategory? @relation(fields: [budgetCategoryId], references: [id], onDelete: Cascade)
+  budgetCategory   BudgetCategory?  @relation(fields: [budgetCategoryId], references: [id], onDelete: Cascade)
   billOccurrenceId String?
-  billOccurrence   BillOccurrence? @relation(fields: [billOccurrenceId], references: [id], onDelete: Cascade)
+  billOccurrence   BillOccurrence?  @relation(fields: [billOccurrenceId], references: [id], onDelete: Cascade)
   readAt           DateTime?
   dismissedAt      DateTime?
-  createdAt        DateTime        @default(now())
+  createdAt        DateTime         @default(now())
 
   // Dedup guarantees per api-contracts.md's ensureNotifications algorithm: at
   // most one BUDGET_OVER notification per BudgetCategory row (a category going
@@ -549,19 +598,438 @@ model Notification {
 // corresponding storage object must be deleted by application code in the same
 // operation (per api-contracts.md's removeReceipt / deleteTransaction contract).
 model Receipt {
-  id     String @id @default(cuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactionId String
   transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  url      String // UploadThing-hosted file URL
-  key      String // UploadThing file key — required to call utapi.deleteFiles(key) on removal
-  name     String // original filename, for display
-  size     Int // bytes
-  mimeType String
-  createdAt DateTime @default(now())
+  url           String // UploadThing-hosted file URL
+  key           String // UploadThing file key — required to call utapi.deleteFiles(key) on removal
+  name          String // original filename, for display
+  size          Int // bytes
+  mimeType      String
+  createdAt     DateTime    @default(now())
 
   @@index([userId])
   @@index([transactionId])
   @@map("receipt")
+}
+
+// ---------------------------------------------------------------------------
+// FinanceOS domain (Phase 3a) — Debt Tracker, Investments (Holding), Recurring
+// Income, and the Net Worth Snapshot job.
+// ---------------------------------------------------------------------------
+
+// ---- Debt Tracker -----------------------------------------------------------
+//
+// Modeling decision (docs/product/debt-tracker.md, Database Architect's call,
+// per Architecture.md's "Phase 3a — the Account-linkage handoff"): **hybrid,
+// optional linking (Option C)**, matching the Product Owner's and Solution
+// Architect's recommendation. A standalone `Debt` row is the primary object
+// for every debt type — required regardless of this decision, since three of
+// the four non-credit-card types (Personal Loan, Auto Loan, Student Loan,
+// Mortgage) have no existing `Account` counterpart at all today. For the one
+// type that does (Credit Card), `accountId` is an optional, nullable + unique
+// FK to `Account`, `onDelete: SetNull` — the exact same shape already
+// approved for `BillOccurrence.transactionId`. When linked, the Debt's
+// *effective* balance is read live via the join to the linked Account in
+// features/debt/server/service.ts (never copied onto `Debt.balance`), the
+// same "read live via the join, never copied" precedent `BillOccurrence`
+// already established; `Debt.balance` itself is simply unused/stale-ignored
+// whenever `accountId` is set, and becomes the authoritative,
+// manually-maintained figure again the moment a user unlinks (seeded from the
+// Account's last-known balance at the moment of unlinking, a one-time copy —
+// application logic, not a schema concern).
+enum DebtType {
+  CREDIT_CARD
+  PERSONAL_LOAN
+  AUTO_LOAN
+  STUDENT_LOAN
+  MORTGAGE
+  OTHER
+}
+
+model Debt {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  type           DebtType
+  // Manually-maintained balance (debt-tracker.md AC1) — the authoritative
+  // figure whenever accountId is null; superseded (read live, never
+  // overwritten) by the linked Account's balance whenever accountId is set.
+  // Kept as a real column (not made nullable) so a Debt always has a
+  // sensible balance to fall back to immediately after an unlink, with no
+  // separate migration or backfill step.
+  balance        Decimal   @db.Decimal(14, 2)
+  // Required here, unlike Account.interestRate (nullable) — every payoff
+  // calculation in this feature (payoff-math.ts) depends on it, per AC1's
+  // explicit note that this field's requiredness differs from Account's.
+  interestRate   Decimal   @db.Decimal(5, 2)
+  // The minimum monthly payment currently due (AC1); the sole write-side
+  // input payoff-math.ts needs alongside balance/interestRate — no other
+  // persisted field is required for the amortization/snowball/avalanche math
+  // (payoff date, total interest, negative-amortization detection are all
+  // computed at read time, never stored, same rule as Goals/Bills).
+  minimumPayment Decimal   @db.Decimal(14, 2)
+  // Optional, nullable + unique FK to Account (Credit Card case only,
+  // enforced in application validation per linkDebtToAccount's contract, not
+  // a DB-level type check — Prisma can't express "only if Account.type =
+  // CREDIT_CARD" declaratively). Unique so an Account can back at most one
+  // Debt, mirroring BillOccurrence.transactionId's uniqueness rationale.
+  // onDelete: SetNull: if the linked Account is ever hard-deleted (it never
+  // is in normal use — Accounts are soft-deleted only — but Prisma requires
+  // an explicit policy), the Debt survives as a standalone record rather
+  // than being cascade-deleted, since a Debt's own history/edits must
+  // outlive the accident of its optional link disappearing.
+  accountId      String?   @unique
+  account        Account?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  // Archive-only (AC10), matches Account/Bill/Goal exactly. Explicitly
+  // allowed even with a nonzero balance (AC10/Edge Cases) — archiving is a
+  // visibility action, distinct from Paid Off (which is never a stored flag;
+  // isPaidOff is computed at read time as effectiveBalance <= 0, the same
+  // "never store what's derived" rule as everywhere else in this schema).
+  archivedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([userId])
+  // accountId's own @unique already gives Postgres an index for the
+  // link/unlink point-lookup; no additional composite index is needed at
+  // this feature's expected per-user debt volume (per debt-tracker.md's own
+  // "very high number of debts... a dozen" framing — this is a small,
+  // per-user, non-paginated list, not a Transaction-scale table).
+  @@map("debt")
+}
+
+// ---- Investments (Holding) --------------------------------------------------
+//
+// Modeling decision (docs/product/investments.md, Database Architect's call):
+// **grow the existing Account as the container**, matching the Product
+// Owner's/Solution Architect's recommendation — no parallel "Investment"
+// container model. Investment/Retirement/Crypto `Account` types already exist
+// and already carry a balance; a new child `Holding` model is required
+// regardless, since no single `Account.balance` figure can represent
+// per-holding allocation/gain-loss/dividend detail (investments.md's own
+// framing: "the real decision here is narrower than link or don't link").
+// Deliberately excludes share count/per-share price (investments.md AC3) —
+// costBasis and currentValue alone drive every calculation this feature needs.
+enum AssetType {
+  STOCK
+  ETF
+  MUTUAL_FUND
+  BOND
+  CRYPTO
+  RETIREMENT_FUND
+  OTHER
+}
+
+enum Sector {
+  TECHNOLOGY
+  HEALTHCARE
+  FINANCIALS
+  ENERGY
+  CONSUMER
+  REAL_ESTATE
+  INDUSTRIALS
+  OTHER
+}
+
+model Holding {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Required, non-nullable — a Holding always belongs to exactly one
+  // container Account (an Investment/Retirement/Crypto row). Unlike Debt's
+  // accountId, this is not optional: investments.md AC1 has no "standalone,
+  // unlinked holding" concept at all, and AC1's inline-container-creation
+  // flow (create the Account first, then the Holding) guarantees one always
+  // exists by the time this row is written.
+  accountId    String
+  // onDelete: Restrict (mirrors Transaction.account's policy): Accounts are
+  // soft-deleted only (archivedAt) in normal product use, so this never
+  // fires in practice, but if a hard delete were ever attempted on a
+  // container with active holdings, it must fail loudly rather than silently
+  // orphaning gain/loss and dividend history.
+  account      Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  // Free text (investments.md AC2) — deliberately not validated against a
+  // real ticker symbol, since there is no live market data in this app (v1
+  // scope decision, binding per the spec's own "do not relitigate" note).
+  name         String
+  assetType    AssetType
+  // Nullable — required for Stock/ETF/Mutual Fund, not applicable for
+  // Crypto/Bond/Other (AC2/AC9), enforced in Zod validation (application
+  // layer), not a DB CHECK constraint (Prisma can't express a conditional
+  // "required unless assetType is X" rule declaratively) — same precedent as
+  // IncomeStream.expectedAmount below. A null sector buckets into the
+  // "Other / Not Applicable" allocation bucket at read time (AC9/Edge Cases).
+  sector       Sector?
+  costBasis    Decimal   @db.Decimal(14, 2)
+  currentValue Decimal   @db.Decimal(14, 2)
+  // "Closed" (AC5) — this domain's own product term for the archive-only
+  // soft-delete pattern already established by Account/Bill/Goal/Debt above;
+  // named closedAt rather than archivedAt purely to match this feature's own
+  // vocabulary (investments.md never uses the word "archive"), not a
+  // different mechanism. A Closed holding keeps its full value-history and
+  // dividend history reachable (AC5) and drops out of active
+  // allocation/overview aggregations.
+  closedAt     DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  valueHistory HoldingValueHistoryEntry[]
+  dividends    DividendEntry[]
+
+  @@index([userId])
+  @@index([accountId])
+  @@map("holding")
+}
+
+// Timestamped current-value update history (AC4) — this is what populates the
+// historical growth chart (AC7), and is explicitly a *different* mechanism
+// from the backend-only NetWorthSnapshot below (per-holding detail vs.
+// aggregate net worth only). Every currentValue edit appends a row here,
+// including a "confirmed no change" edit (Edge Cases: re-saving the same
+// value is still a real data point proving the user checked in on that date,
+// not a gap in history) — enforced in features/investments/server/actions.ts
+// (always insert, never conditionally skip on previousValue === newValue).
+model HoldingValueHistoryEntry {
+  id            String   @id @default(cuid())
+  holdingId     String
+  holding       Holding  @relation(fields: [holdingId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  previousValue Decimal  @db.Decimal(14, 2)
+  newValue      Decimal  @db.Decimal(14, 2)
+  recordedAt    DateTime @default(now())
+
+  @@index([holdingId, recordedAt])
+  @@index([userId])
+  @@map("holding_value_history")
+}
+
+// Dividend income logged against a specific holding (AC8) — deliberately not
+// merged/auto-linked with the separate IncomeStream "Dividend" type below;
+// see investments.md's resolved Boundary note and this schema's own Phase 3a
+// design notes in er-diagram.md for the full reasoning. Allowed even on a
+// Closed holding (Edge Cases: a final distribution can arrive after a
+// position is closed) — no constraint here prevents logging against a
+// closedAt holding, matching that resolved product behavior.
+model DividendEntry {
+  id        String   @id @default(cuid())
+  holdingId String
+  holding   Holding  @relation(fields: [holdingId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount    Decimal  @db.Decimal(14, 2)
+  date      DateTime @db.Date
+  createdAt DateTime @default(now())
+
+  @@index([holdingId, date])
+  @@index([userId])
+  @@map("dividend_entry")
+}
+
+// ---- Recurring Income --------------------------------------------------------
+//
+// Modeling decision (docs/product/recurring-income.md, Database Architect's
+// call — left open by the spec's own Dependencies note as "an implementation
+// consideration, not a product requirement"): mirror Bills' `Bill`/
+// `BillOccurrence` split with a **parallel, independent** `IncomeStream` /
+// `IncomeOccurrence` pair, rather than sharing or generalizing Bills' models.
+// Only the pure date-cadence math is shared (lib/recurrence.ts, a Backend
+// Engineer/Architecture concern, not a schema one) — the status vocabularies
+// genuinely differ (`Late` vs. deliberately-not-`Late` "Not Yet Received",
+// per AC7's resolved product decision) and are never stored as columns on
+// either model, computed at read time exactly like BillOccurrence's status.
+// A third model, `IrregularIncomeEvent`, covers AC11's Irregular/One-off
+// cadence, which has no generated-occurrence concept at all.
+enum IncomeType {
+  SALARY
+  SIDE_HUSTLE
+  DIVIDEND
+  RENTAL
+  BONUS
+  OTHER
+}
+
+// Deliberately a distinct enum from Bills' BillSchedule (naming-standards.md
+// is explicit on this point), not a shared/reused one — IRREGULAR has no
+// Bills equivalent and no generated-occurrence behavior at all (AC1/AC11).
+enum IncomeSchedule {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  QUARTERLY
+  ANNUALLY
+  IRREGULAR
+}
+
+model IncomeStream {
+  id             String         @id @default(cuid())
+  userId         String
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  type           IncomeType
+  schedule       IncomeSchedule
+  // Required for every schedule except IRREGULAR (AC2) — nullable here and
+  // enforced conditionally in Zod validation, the same "conditional
+  // requirement is an application-layer concern, not a DB CHECK constraint"
+  // precedent already established throughout this schema (e.g.
+  // Holding.sector above, Budget's row-presence pattern).
+  expectedAmount Decimal?       @db.Decimal(14, 2)
+  // Anchor date for occurrence generation, mirrors Bill.dueDate — the
+  // stream's next/first occurrence at creation time, not a live "next
+  // expected date" (always computed at read time from IncomeOccurrence rows,
+  // per api-contracts.md's lazy-generation design). Nullable because an
+  // IRREGULAR stream has no cadence to anchor at all (AC2/AC11) — for every
+  // other schedule value this is required, enforced in Zod.
+  anchorDate     DateTime?      @db.Date
+  // Archive-only (AC6), matches Account/Bill/Goal/Debt exactly. Stops future
+  // occurrence generation without deleting receipt history; unarchiving
+  // resumes generation forward from "today" with no backfill of the
+  // archived gap (AC6, mirrors Bills' unarchiveBill contract exactly).
+  archivedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  occurrences     IncomeOccurrence[]
+  irregularEvents IrregularIncomeEvent[]
+
+  @@index([userId])
+  @@map("income_stream")
+}
+
+model IncomeOccurrence {
+  id             String       @id @default(cuid())
+  streamId       String
+  stream         IncomeStream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  // Direct userId FK + index, same rationale as BillOccurrence.userId
+  // (already established in Phase 2) — lets getExpectedUpcomingIncome and
+  // receipt-history queries scope/range-query by userId without a stream join.
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expectedDate   DateTime     @db.Date
+  // Manual (non-linked) received path only (AC8). When transactionId is set
+  // below, the occurrence's *effective* received amount/date are read live
+  // via a join to the linked Transaction at read time instead — never copied
+  // onto these two columns — identical precedent to BillOccurrence.paidAmount/
+  // paidDate. These columns are simply unused/null whenever transactionId is set.
+  receivedAmount Decimal?     @db.Decimal(14, 2)
+  receivedDate   DateTime?    @db.Date
+  // At most one Transaction may back one IncomeOccurrence (AC8's own linking
+  // rule) — enforced via @unique, same DB-level-invariant shape as
+  // BillOccurrence.transactionId. The additional cross-table rule ("...and
+  // not also a BillOccurrence, or a different IncomeOccurrence, or an
+  // IrregularIncomeEvent") is enforced by lib/transaction-link-guard.ts at
+  // the application layer — see this schema's Phase 3a design notes in
+  // er-diagram.md for why a single database constraint can't express an
+  // invariant spanning three separate tables, and why a DB trigger was
+  // considered and not added this phase. onDelete: SetNull reverts the
+  // occurrence to its computed Upcoming/Not Yet Received status if its linked
+  // Transaction is later deleted (AC8's own "reverts to computed status"
+  // requirement), identical to BillOccurrence's policy.
+  transactionId  String?      @unique
+  transaction    Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  // Status (Upcoming/Expected Today/Not Yet Received/Received) is never a
+  // stored column — always computed at read time from expectedDate/
+  // receivedAmount/receivedDate/transactionId, per
+  // features/recurring-income/server/occurrence.ts's computeStatus, the same
+  // rule BillOccurrence's status already follows.
+
+  // Prevents the lazy on-read generator from ever creating two occurrence
+  // rows for the same stream+expected-date, making generation naturally
+  // idempotent across repeated reads, identical to
+  // BillOccurrence.@@unique([billId, dueDate]).
+  @@unique([streamId, expectedDate])
+  @@index([userId, expectedDate])
+  @@index([streamId])
+  @@map("income_occurrence")
+}
+
+// Irregular/One-off logged income events (AC11) — streams with
+// schedule: IRREGULAR never generate IncomeOccurrence rows at all; a user
+// logs each event directly instead. Kept as its own model rather than
+// shoehorned into IncomeOccurrence (which always has an expectedDate driving
+// its status computation — a concept Irregular events have no equivalent of)
+// to avoid a nullable-field-sprawl "one model, two very different meanings"
+// design, mirroring Budget's own "row presence over overloaded nullable
+// column" precedent.
+model IrregularIncomeEvent {
+  id            String       @id @default(cuid())
+  streamId      String
+  stream        IncomeStream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount        Decimal      @db.Decimal(14, 2)
+  date          DateTime     @db.Date
+  // Same optional-link shape and same cross-table exclusivity rule as
+  // IncomeOccurrence.transactionId above (AC11: "each logged event can
+  // optionally link to an existing Transaction, same as scheduled streams'
+  // occurrences") — guarded by the same lib/transaction-link-guard.ts call.
+  transactionId String?      @unique
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  createdAt     DateTime     @default(now())
+
+  @@index([userId, date])
+  @@index([streamId])
+  @@map("irregular_income_event")
+}
+
+// ---- Net Worth Snapshot (backend-only, cron-triggered) ----------------------
+//
+// Per roadmap.md's Phase 3a milestone 6 / Risk #10 and api-contracts.md's
+// "Net Worth Snapshot job" section — the first cron/scheduled write path in
+// this codebase. Unlike every other model above, rows here are not written as
+// a side effect of an authenticated user's own request; a single invocation
+// of app/api/cron/net-worth-snapshot/route.ts iterates *every* user and
+// writes one row per user. userId is still a required, direct FK (this is
+// still fundamentally user-owned data, read by that user's own future Net
+// Worth History chart in Phase 3b) — only the *write trigger* is different,
+// which is a service-layer/Route-Handler concern (shared-secret auth instead
+// of a session), not a schema concern. No new calculation logic lives here:
+// every column is a persisted copy of numbers dashboard.service.getNetWorth
+// already computes at the moment of capture.
+model NetWorthSnapshot {
+  id                         String   @id @default(cuid())
+  userId                     String
+  user                       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Precise capture timestamp, for display/ordering.
+  capturedAt                 DateTime @default(now())
+  // UTC calendar date derived from capturedAt at write time (same @db.Date +
+  // UTC convention as Transaction.date/Budget.month, per risk-register.md
+  // #8) — this is the idempotency key: if the external scheduler invokes the
+  // cron route more than once on the same day (e.g. a retry after a timeout),
+  // capturing a snapshot is an upsert on (userId, capturedDate), not a second
+  // duplicate row, mirroring BillOccurrence's @@unique([billId, dueDate])
+  // idempotency precedent for a different kind of "don't double-generate on
+  // re-invocation" problem.
+  capturedDate               DateTime @db.Date
+  // Persisted copies of getNetWorth's own numbers at capture time (see
+  // api-contracts.md's Net Worth Aggregation Update section for the formula):
+  // totalAccountBalance is the sign-adjusted sum of non-archived Account
+  // balances; totalUnlinkedDebtLiability is debt.service's own
+  // getTotalActiveDebtBalanceForNetWorth(userId) result (already excludes
+  // any Debt linked to an Account, so it is never double-subtracted against
+  // totalAccountBalance — see this schema's Phase 3a design notes in
+  // er-diagram.md for the full query-shape explanation); totalNetWorth is
+  // their difference, stored explicitly (not recomputed from the other two
+  // columns at read time) so a future schema change to the formula itself
+  // never silently rewrites *historical* snapshots.
+  totalAccountBalance        Decimal  @db.Decimal(14, 2)
+  totalUnlinkedDebtLiability Decimal  @db.Decimal(14, 2)
+  totalNetWorth              Decimal  @db.Decimal(14, 2)
+
+  // (userId, capturedDate) is both the idempotency guard and the natural
+  // point-lookup for "did we already snapshot this user today"; (userId,
+  // capturedAt) separately supports the Phase 3b chart's eventual ordered
+  // range queries ("net worth over the last N months") without forcing that
+  // future read to filter on the truncated-date column instead of the
+  // precise timestamp.
+  @@unique([userId, capturedDate])
+  @@index([userId, capturedAt])
+  @@map("net_worth_snapshot")
 }

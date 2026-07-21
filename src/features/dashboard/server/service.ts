@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client"
 import { AccountType } from "@prisma/client"
 
 import { db } from "@/lib/db"
+import { getTotalActiveDebtBalanceForNetWorth } from "@/features/debt/server/service"
 
 import type {
   CategorySpending,
@@ -182,7 +183,10 @@ function computeSavingsRate(income: number, expenses: number): number | null {
  * Net Worth: sum of every non-archived account's balance, with
  * `CREDIT_CARD` balances subtracted (liability) and every other account
  * type added (asset), per docs/product/accounts.md's sign convention and
- * dashboard-overview.md AC1.
+ * dashboard-overview.md AC1 — minus the Net Worth liability term
+ * contributed by active Debts that are *not* linked to an Account
+ * (`debt.service.getTotalActiveDebtBalanceForNetWorth`), per the **Phase
+ * 3a** "Net Worth Aggregation Update" in docs/architecture/api-contracts.md.
  *
  * Archived accounts are excluded entirely (`archivedAt: null`) — AC11:
  * archiving only removes an account from *current* Net Worth, it does not
@@ -195,13 +199,30 @@ function computeSavingsRate(income: number, expenses: number): number | null {
  * user's account count is small (tens, not thousands) unlike the
  * transaction table this performance guidance targets — see
  * docs/database/performance-considerations.md.
+ *
+ * Investment/Retirement/Crypto accounts require no separate addition to
+ * this formula: their `Account.balance` is already kept in sync with the
+ * sum of their active Holdings by Investments' write-back path (see
+ * er-diagram.md's Phase 3a design note #4), so the plain `findMany` above
+ * already reads the correct, current number with zero Investments-specific
+ * logic here — this function stays a pure downstream consumer of
+ * `Account.balance`, unchanged in that respect from Phase 1.
+ *
+ * The debt-liability term is subtracted exactly once, never per-account:
+ * `getTotalActiveDebtBalanceForNetWorth` only sums Debts with `accountId:
+ * null` (see that function's own doc for the full double-counting
+ * explanation), so a linked Credit Card's balance — already negated above
+ * via `byAccount` — is never subtracted a second time here.
  */
 export async function getNetWorth(userId: string): Promise<NetWorth> {
-  const accounts = await db.account.findMany({
-    where: { userId, archivedAt: null },
-    select: { id: true, type: true, balance: true },
-    orderBy: { createdAt: "asc" },
-  })
+  const [accounts, totalUnlinkedDebtLiability] = await Promise.all([
+    db.account.findMany({
+      where: { userId, archivedAt: null },
+      select: { id: true, type: true, balance: true },
+      orderBy: { createdAt: "asc" },
+    }),
+    getTotalActiveDebtBalanceForNetWorth(userId),
+  ])
 
   const byAccount = accounts.map((account) => {
     const rawBalance = account.balance.toNumber()
@@ -211,9 +232,13 @@ export async function getNetWorth(userId: string): Promise<NetWorth> {
     return { accountId: account.id, balance }
   })
 
-  const total = byAccount.reduce((sum, account) => sum + account.balance, 0)
+  const totalAccountBalance = byAccount.reduce(
+    (sum, account) => sum + account.balance,
+    0,
+  )
+  const total = totalAccountBalance - totalUnlinkedDebtLiability
 
-  return { total, byAccount }
+  return { total, byAccount, totalUnlinkedDebtLiability }
 }
 
 /**

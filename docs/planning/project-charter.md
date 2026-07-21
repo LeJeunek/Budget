@@ -29,7 +29,9 @@ The full feature list (dashboard, accounts, transactions, budgeting, goals, bill
 - Multi-user / shared household accounts
 - Native mobile apps (responsive web only)
 
-## Success definition for v1 (end of Phase 3)
-A single user can: sign in, add accounts, log/import transactions, set a monthly budget, track savings goals and bills, see a real dashboard and analytics built from their own data, and receive at least one AI-generated insight — all on a deployed, secured, tested build.
+## Success definition for v1 (end of Phase 3b)
+A single user can: sign in, add accounts, log/import transactions, set a monthly budget, track savings goals and bills, track debt and investments, view recurring income, and see a real dashboard with full analytics and Net Worth history — all built from their own data, on a deployed, secured, tested build.
+
+**Correction (CTO, 2026-07-20):** this section previously read "...and receive at least one AI-generated insight" as part of the v1 bar. That was inconsistent with `roadmap.md`, which has always placed AI features in Phase 4 — after the phase this section calls "end of v1." Rather than let that ambiguity stand into Phase 3 planning (the same pattern of catching stale cross-doc conflicts that's come up in every phase so far), it's resolved here: AI-generated insights are a Phase 4 differentiator, not a v1 requirement. The wording above now also names Phase 3a's debt/investment/recurring-income tracking explicitly, since the roadmap's Phase 3 was split into 3a/3b (see `roadmap.md`) and "end of Phase 3" needed disambiguating to "end of Phase 3b" — that is the point at which the roadmap's Phase 3b section states v1 ships.
 
 See [roadmap.md](roadmap.md) for phase breakdown and [risk-register.md](risk-register.md) for tracked risks.

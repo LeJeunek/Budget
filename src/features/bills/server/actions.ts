@@ -5,6 +5,10 @@ import { Prisma } from "@prisma/client"
 import { getCurrentUser } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { ok, fail, type ApiResult } from "@/lib/api-response"
+import {
+  assertTransactionNotAlreadyLinked,
+  TransactionAlreadyLinkedError,
+} from "@/lib/transaction-link-guard"
 import type { Bill, BillOccurrence } from "@/features/bills/types"
 import {
   CreateBillSchema,
@@ -78,10 +82,14 @@ async function assertOwnedCategory(userId: string, categoryId: string): Promise<
  * Rejects (bills.md AC7/Edge Cases):
  *   - the occurrence doesn't exist or isn't owned by `userId`.
  *   - the transaction doesn't exist or isn't owned by `userId`.
- *   - the transaction is already linked to a *different* bill occurrence
- *     ("a Transaction can back at most one bill occurrence"). Re-linking the
- *     same transaction to the same occurrence it's already linked to is a
- *     harmless no-op, allowed through rather than rejected.
+ *   - the transaction is already linked to a *different* bill occurrence, a
+ *     Recurring Income occurrence, or an Irregular Income event ("a
+ *     Transaction can back at most one recurring-item occurrence across the
+ *     whole product" — see `@/lib/transaction-link-guard.ts`, added Phase 3a
+ *     per api-contracts.md's "(Phase 3a update to linkOccurrenceToTransaction)"
+ *     note). Re-linking the same transaction to the same occurrence it's
+ *     already linked to is a harmless no-op, allowed through rather than
+ *     rejected.
  *
  * On success, clears the manual `paidAmount`/`paidDate` columns (per the
  * schema comment on `BillOccurrence.paidAmount`/`paidDate`: "simply
@@ -89,15 +97,17 @@ async function assertOwnedCategory(userId: string, categoryId: string): Promise<
  * amount/date are read live from the linked Transaction by `toBillOccurrence`
  * from here on.
  *
- * The `try/catch` around the final `update` is a defense-in-depth backstop
- * for the narrow race window between the "not already linked" check above
- * and the write (two concurrent requests linking the same transaction to two
- * different occurrences): `BillOccurrence.transactionId`'s `@unique`
- * constraint (prisma/schema.prisma) is the actual guarantee that at most one
- * occurrence ever ends up linked, but a raw Postgres unique-violation error
- * is not an acceptable user-facing message — api-contracts.md's Bills
- * section is explicit this must surface as "a friendly error ... not a raw
- * constraint-violation error."
+ * (Phase 3a) The guard check and the write now run inside one
+ * `db.$transaction`, per docs/database/er-diagram.md's Phase 3a design note
+ * #5 ("the narrow cross-domain race is closed at the application layer by
+ * having lib/transaction-link-guard.ts's check-then-link run inside a single
+ * Prisma $transaction") — this closes the window between "not already
+ * linked" and the write that the previous (Phase 2) separate-statements
+ * version left open. `BillOccurrence.transactionId`'s own `@unique`
+ * constraint remains the backstop for the same-table case (two concurrent
+ * requests linking the same transaction to two different bill occurrences);
+ * the `catch` below still translates that raw P2002 into the same friendly
+ * message, never surfacing a raw constraint-violation error to the caller.
  */
 async function linkOccurrenceToTransactionInternal(
   userId: string,
@@ -113,26 +123,28 @@ async function linkOccurrenceToTransactionInternal(
 
   const transaction = await db.transaction.findFirst({
     where: { id: transactionId, userId },
-    include: { billOccurrence: { select: { id: true } } },
   })
   if (!transaction) {
     return fail("Transaction not found")
   }
 
-  if (transaction.billOccurrence && transaction.billOccurrence.id !== occurrenceId) {
-    return fail(
-      "This transaction is already linked to a different bill occurrence",
-    )
-  }
-
   try {
-    const updated = await db.billOccurrence.update({
-      where: { id: occurrenceId },
-      data: { transactionId, paidAmount: null, paidDate: null },
-      include: OCCURRENCE_TRANSACTION_INCLUDE,
+    const updated = await db.$transaction(async (tx) => {
+      await assertTransactionNotAlreadyLinked(tx, userId, transactionId, {
+        excluding: { billOccurrenceId: occurrenceId },
+      })
+
+      return tx.billOccurrence.update({
+        where: { id: occurrenceId },
+        data: { transactionId, paidAmount: null, paidDate: null },
+        include: OCCURRENCE_TRANSACTION_INCLUDE,
+      })
     })
     return ok(toBillOccurrence(updated, new Date()))
   } catch (error) {
+    if (error instanceof TransactionAlreadyLinkedError) {
+      return fail(error.message)
+    }
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"

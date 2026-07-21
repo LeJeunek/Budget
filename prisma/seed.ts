@@ -10,8 +10,15 @@
 // file runs main() unconditionally at import time — importing it from
 // application/runtime code, not just other scripts, would re-run the demo
 // seed on every server start).
+//
+// Phase 3a addition: a small amount of Debt/Holding/IncomeStream demo data,
+// enough to exercise every new model at least once (including the optional
+// Debt<->Account link and a HoldingValueHistoryEntry/DividendEntry pair) —
+// deliberately not exhaustive fixture data for payoff-math.ts/allocation
+// correctness (that is Integration Test Engineer's job, against dedicated
+// test fixtures, not this dev/demo seed).
 
-import { PrismaClient, AccountType } from "@prisma/client";
+import { PrismaClient, AccountType, DebtType, AssetType, Sector, IncomeType, IncomeSchedule } from "@prisma/client";
 import { DEFAULT_CATEGORIES } from "../src/features/categories/default-categories";
 
 const prisma = new PrismaClient();
@@ -72,6 +79,115 @@ async function main() {
       merchant: "Demo Coffee Shop",
       amount: -6.5,
       date: new Date(),
+    },
+  });
+
+  // ---- Phase 3a: Debt Tracker -----------------------------------------------
+  // One linked Debt (Credit Card, hybrid Option C) and one standalone Debt
+  // (Student Loan, no Account counterpart exists for this type at all) —
+  // exercises both branches of the accountId-nullable design.
+  const creditCard = await prisma.account.create({
+    data: {
+      userId: demoUser.id,
+      name: "Demo Rewards Card",
+      type: AccountType.CREDIT_CARD,
+      institution: "Demo Bank",
+      balance: 1850.0,
+      interestRate: 22.99,
+      color: "#f97316",
+    },
+  });
+
+  await prisma.debt.create({
+    data: {
+      userId: demoUser.id,
+      name: "Demo Rewards Card",
+      type: DebtType.CREDIT_CARD,
+      balance: 1850.0, // unused/ignored at read time while accountId is set;
+      // kept in sync manually here only because this is static seed data, not
+      // a live app write path — see Debt.balance's schema comment.
+      interestRate: 22.99,
+      minimumPayment: 55.0,
+      accountId: creditCard.id,
+    },
+  });
+
+  await prisma.debt.create({
+    data: {
+      userId: demoUser.id,
+      name: "Federal Direct Loan",
+      type: DebtType.STUDENT_LOAN,
+      balance: 18500.0,
+      interestRate: 5.5,
+      minimumPayment: 210.0,
+    },
+  });
+
+  // ---- Phase 3a: Investments -------------------------------------------------
+  // One container Account with one active Holding, a value-history entry
+  // (simulating a prior current-value edit), and a logged dividend.
+  const brokerage = await prisma.account.create({
+    data: {
+      userId: demoUser.id,
+      name: "Demo Brokerage",
+      type: AccountType.INVESTMENT,
+      institution: "Demo Invest Co.",
+      balance: 5200.0, // derived-from-holdings once the Holding below exists;
+      // seeded to match it directly since there is no live write-back path
+      // running in this static seed script.
+      color: "#22c55e",
+    },
+  });
+
+  const etfHolding = await prisma.holding.create({
+    data: {
+      userId: demoUser.id,
+      accountId: brokerage.id,
+      name: "Demo Total Market ETF",
+      assetType: AssetType.ETF,
+      sector: Sector.OTHER,
+      costBasis: 4500.0,
+      currentValue: 5200.0,
+    },
+  });
+
+  await prisma.holdingValueHistoryEntry.create({
+    data: {
+      userId: demoUser.id,
+      holdingId: etfHolding.id,
+      previousValue: 4800.0,
+      newValue: 5200.0,
+    },
+  });
+
+  await prisma.dividendEntry.create({
+    data: {
+      userId: demoUser.id,
+      holdingId: etfHolding.id,
+      amount: 42.5,
+      date: new Date(),
+    },
+  });
+
+  // ---- Phase 3a: Recurring Income --------------------------------------------
+  // One scheduled (Monthly) stream with a generated occurrence, mirroring
+  // what ensureOccurrencesGenerated would produce lazily on first read.
+  const salaryStream = await prisma.incomeStream.create({
+    data: {
+      userId: demoUser.id,
+      name: "Acme Corp Salary",
+      type: IncomeType.SALARY,
+      schedule: IncomeSchedule.MONTHLY,
+      expectedAmount: 4800.0,
+      anchorDate: new Date(),
+    },
+  });
+
+  await prisma.incomeOccurrence.create({
+    data: {
+      userId: demoUser.id,
+      streamId: salaryStream.id,
+      expectedDate: new Date(),
     },
   });
 

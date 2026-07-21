@@ -1,9 +1,11 @@
 import type { BillSchedule } from "@prisma/client"
 
+import { addUtcDays, addUtcMonths, computeNextRecurrenceDate, toUtcMidnight } from "@/lib/recurrence"
+
 import type { OccurrenceStatus } from "../types"
 
 /**
- * PURE schedule/status math for the Bills module — no Prisma calls, no
+ * PURE status math for the Bills module — no Prisma calls, no
  * `getCurrentUser()`, no I/O of any kind. Per docs/architecture/folder-tree.md's
  * Phase 2 section, this split exists specifically so the recurrence-generation
  * and status-computation logic (the two easiest things to get subtly wrong in
@@ -12,73 +14,30 @@ import type { OccurrenceStatus } from "../types"
  * recurrence-correctness test matrix (docs/product/bills.md's Definition of
  * Done).
  *
+ * (Phase 3a) The date-cadence math this file used to own directly
+ * (`toUtcMidnight`/`addUtcDays`/`addUtcMonths`/next-due-date generation) is
+ * now imported from `@/lib/recurrence.ts`, shared with Recurring Income's own
+ * `features/recurring-income/server/occurrence.ts`, per
+ * docs/architecture/api-contracts.md's Bills section ("its date-cadence math
+ * ... is extracted to lib/recurrence.ts ... computeStatus (Bills-specific
+ * wording, incl. 'Late') stays in bills/server/occurrence.ts unchanged").
+ * This file re-exports those three date helpers under their original names
+ * so every existing external caller (`server/service.ts`, `server/
+ * actions.ts`) is unaffected by the extraction — a pure refactor, not a
+ * behavior change. `computeNextDueDate` keeps its Bills-specific name/
+ * signature as a thin wrapper around the shared `computeNextRecurrenceDate`.
+ * `computeOccurrenceStatus`/`isOccurrencePaid` (Bills' own status vocabulary)
+ * are unchanged below.
+ *
  * `server/service.ts` is the only caller — it supplies real `Date`s read from
  * (or about to be written to) Postgres and interprets the results; this file
  * never touches the database itself.
  */
 
-// ---------------------------------------------------------------------------
-// Date helpers (UTC only)
-// ---------------------------------------------------------------------------
-
-/**
- * Normalizes to UTC midnight for the given `Date`'s UTC calendar date.
- * Every comparison/generation function below funnels through this (or
- * constructs dates via `Date.UTC` directly) so nothing here is ever sensitive
- * to the host process's local timezone — matches the `@db.Date` + UTC
- * convention already established by `Transaction.date` (risk-register.md #8)
- * and `features/dashboard/server/service.ts`'s `utcMonthStart`, which this
- * module's callers must not diverge from.
- */
-export function toUtcMidnight(date: Date): Date {
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
-  )
-}
-
-/** Adds `days` (may be negative) to `date`'s UTC calendar date. */
-function addUtcDays(date: Date, days: number): Date {
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days),
-  )
-}
-
-/** The number of days in the given UTC year/0-indexed-month — `day 0` of the
- * following month is, by `Date.UTC`'s own overflow rules, the last day of
- * the requested month. */
-function daysInUtcMonth(year: number, monthIndex: number): number {
-  return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate()
-}
-
-/**
- * Adds `months` (may be negative) to `date`'s UTC calendar date, clamping the
- * day-of-month to the target month's actual last day when it would otherwise
- * overflow (e.g. Jan 31 + 1 month -> Feb 28/29, never "Mar 3").
- *
- * This clamp-don't-overflow behavior is the entire reason this helper exists
- * rather than a naive `Date.UTC(year, month + n, day)` call: `Date.UTC`
- * silently rolls an out-of-range day into the *next* month (Feb 31 -> Mar 3),
- * which is wrong for a monthly/quarterly/annual bill schedule — a bill due
- * the 31st must land on Feb's actual last day, not slide into March.
- */
-function addUtcMonths(date: Date, months: number): Date {
-  const year = date.getUTCFullYear()
-  const month = date.getUTCMonth()
-  const day = date.getUTCDate()
-
-  const targetMonthIndexRaw = month + months
-  const targetYear = year + Math.floor(targetMonthIndexRaw / 12)
-  const targetMonthIndex = ((targetMonthIndexRaw % 12) + 12) % 12
-
-  const clampedDay = Math.min(day, daysInUtcMonth(targetYear, targetMonthIndex))
-
-  return new Date(Date.UTC(targetYear, targetMonthIndex, clampedDay))
-}
-
-// Exported for `server/service.ts`'s bounded-horizon math (the lazy
-// generator needs "today + N months" too, not just "one occurrence forward"),
-// so the same clamp-safe month arithmetic is used in exactly one place.
-export { addUtcDays, addUtcMonths }
+// Re-exported so existing imports of `toUtcMidnight`/`addUtcDays`/
+// `addUtcMonths` from "./occurrence" keep working unchanged after the Phase
+// 3a extraction to `@/lib/recurrence.ts`.
+export { toUtcMidnight, addUtcDays, addUtcMonths }
 
 // ---------------------------------------------------------------------------
 // Next-due-date generation
@@ -87,34 +46,17 @@ export { addUtcDays, addUtcMonths }
 /**
  * Computes the next occurrence's due date given the current one and the
  * bill's recurring schedule, per docs/product/bills.md AC1/AC2's five
- * supported schedules. All math is calendar-based (weeks/months/years), never
- * a fixed day-count approximation for the month-based schedules — see
- * `addUtcMonths` above for why day-of-month clamping matters.
+ * supported schedules. Thin, Bills-named wrapper around
+ * `@/lib/recurrence.ts`'s shared `computeNextRecurrenceDate` — `BillSchedule`
+ * (a Prisma-generated 5-member string-literal union) is structurally
+ * identical to that shared function's `RecurrenceSchedule` parameter type, so
+ * no mapping/translation step is needed here beyond the pass-through itself.
  */
 export function computeNextDueDate(
   currentDueDate: Date,
   schedule: BillSchedule,
 ): Date {
-  switch (schedule) {
-    case "WEEKLY":
-      return addUtcDays(currentDueDate, 7)
-    case "BIWEEKLY":
-      return addUtcDays(currentDueDate, 14)
-    case "MONTHLY":
-      return addUtcMonths(currentDueDate, 1)
-    case "QUARTERLY":
-      return addUtcMonths(currentDueDate, 3)
-    case "ANNUALLY":
-      return addUtcMonths(currentDueDate, 12)
-    default: {
-      // Exhaustiveness guard: if a new BillSchedule enum member is ever added
-      // to prisma/schema.prisma without updating this switch, this throws a
-      // loud, specific error at generation time instead of silently
-      // generating no further occurrences for that schedule type.
-      const exhaustiveCheck: never = schedule
-      throw new Error(`Unsupported bill schedule: ${String(exhaustiveCheck)}`)
-    }
-  }
+  return computeNextRecurrenceDate(currentDueDate, schedule)
 }
 
 // ---------------------------------------------------------------------------

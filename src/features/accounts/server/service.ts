@@ -1,4 +1,4 @@
-import type { Account as PrismaAccountRow } from "@prisma/client"
+import type { Account as PrismaAccountRow, Prisma } from "@prisma/client"
 
 import { db } from "@/lib/db"
 
@@ -69,4 +69,50 @@ export async function getAccountById(
   })
 
   return row ? toAccount(row) : null
+}
+
+/**
+ * Writes the derived, holdings-sum `balance` onto an Investment/Retirement/
+ * Crypto container Account.
+ *
+ * **(Phase 3a) narrow, internal function — not a client-facing action.** Per
+ * docs/architecture/api-contracts.md's "(Phase 3a) `setDerivedBalance`" note
+ * and docs/database/er-diagram.md's Phase 3a design note #4 ("Investments'
+ * derived balance write-back: accepted as a deliberate exception"), this
+ * function's only legitimate caller is
+ * `features/investments/server/actions.ts`, and only from inside the exact
+ * same `$transaction` as whatever Holding mutation (create/update/close)
+ * changed the sum. Accepting a Prisma transaction client (`tx`) rather than
+ * reaching for the top-level `db` singleton is what makes that atomicity
+ * guarantee real: a holding write that succeeds with a failed balance
+ * write-back can never happen, because both live in one transaction that
+ * commits or rolls back together.
+ *
+ * Deliberately does not compute the sum itself — the caller already knows
+ * it (having just aggregated its own holdings) — keeping this function's
+ * only responsibility the write itself. This is what keeps Accounts
+ * ignorant of Investments' domain rules (what counts as "active," how the
+ * sum is derived): Accounts is never given a forward dependency on
+ * Investments, it simply persists whatever number it's told, exactly as the
+ * architecture note requires.
+ *
+ * `where: { id: accountId, userId }` combines the unique `id` field with a
+ * non-unique ownership filter — Prisma's extended-where-unique input
+ * supports this (a uniquely-identifying field plus additional filters ANDed
+ * in), so a mismatched `userId` fails closed with Prisma's standard
+ * "record not found" error (P2025) instead of silently updating another
+ * user's row.
+ */
+export async function setDerivedBalance(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  accountId: string,
+  balance: number,
+): Promise<Account> {
+  const row = await tx.account.update({
+    where: { id: accountId, userId },
+    data: { balance },
+  })
+
+  return toAccount(row)
 }

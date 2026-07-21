@@ -41,17 +41,39 @@ export interface NetWorthByAccount {
   balance: number
 }
 
-/** Return shape of `service.getNetWorth`. */
+/**
+ * Return shape of `service.getNetWorth`.
+ *
+ * **Phase 3a update** (docs/architecture/api-contracts.md's "Net Worth
+ * Aggregation Update" section): `total` now also subtracts
+ * `totalUnlinkedDebtLiability`, so it reflects `debt.service`'s active,
+ * not-already-counted debt as a liability. The subtraction happens once,
+ * inside `total` — it is never applied a second time to any `byAccount`
+ * entry, since `byAccount` only ever reflects Account rows, and debt not
+ * linked to an Account has no corresponding entry there.
+ */
 export interface NetWorth {
-  /** Sum of every non-archived account's signed contribution (see
-   * `NetWorthByAccount.balance`). Archived accounts are excluded entirely —
-   * per dashboard-overview.md AC11, archiving removes an account from
+  /** `totalAccountBalance - totalUnlinkedDebtLiability` — see this file's
+   * module doc above and api-contracts.md's binding formula. Archived
+   * accounts are excluded entirely from the account side — per
+   * dashboard-overview.md AC11, archiving removes an account from
    * *current* Net Worth without rewriting the historical months it
    * occurred in (those are handled separately by the monthly aggregations,
    * which are not account-archival-aware since they key off transaction
    * date, not account state). */
   total: number
   byAccount: NetWorthByAccount[]
+  /**
+   * The Net Worth liability term contributed by active Debts that are
+   * *not* linked to an Account — i.e. `debt.service.
+   * getTotalActiveDebtBalanceForNetWorth(userId)`'s own result, surfaced
+   * additively (not hidden inside `total`) per api-contracts.md, so a
+   * future UI can show "$X in accounts, -$Y in tracked debt" as two line
+   * items instead of one opaque number. Nothing this phase requires that
+   * split; the field exists so it doesn't need another backend change if a
+   * future UI wants it.
+   */
+  totalUnlinkedDebtLiability: number
 }
 
 /**

@@ -1,6 +1,6 @@
-# FinanceOS — Folder Tree (Phase 0 + Phase 1 + Phase 2)
+# FinanceOS — Folder Tree (Phase 0 + Phase 1 + Phase 2 + Phase 3a)
 
-Phase 0/1 files are listed concretely below, unchanged from the original design. Phase 2 additions are listed in their own section further down, in the same style, now that `docs/product/{budgeting,savings-goals,bills,calendar-and-notifications}.md` and the Transactions receipt-attachment addendum are resolved. Phase 3+ folders remain reserved placeholders (Solution Architect will detail them when that phase is designed).
+Phase 0/1 files are listed concretely below, unchanged from the original design. Phase 2 additions are listed in their own section. Phase 3a additions (Debt Tracker, Investments, Recurring Income, Net Worth aggregation update, Net Worth Snapshot job) are listed in their own section further down, now that `docs/product/{debt-tracker,investments,recurring-income}.md` are resolved. Phase 3b folders remain reserved placeholders (Solution Architect will detail them when that phase is designed).
 
 ```
 Budget/
@@ -78,7 +78,7 @@ Budget/
 │   │   │       ├── spending-by-category-chart.tsx
 │   │   │       └── income-vs-expense-chart.tsx
 │   │   ├── categories/               # small module: consumed by transactions, dashboard,
-│   │   │   ├── server/                # and (Phase 2+) budgeting — not owned by any one of them.
+│   │   │   ├── server/                # and budgeting — not owned by any one of them.
 │   │   │   │   ├── service.ts        # See api-contracts.md's 2026-07-19 CTO scope correction.
 │   │   │   │   ├── actions.ts
 │   │   │   │   └── validation.ts
@@ -88,10 +88,12 @@ Budget/
 │   │   │       └── category-list.tsx
 │   │   ├── budgeting/                 # Phase 2 — see "Phase 2 additions" below
 │   │   ├── goals/                     # Phase 2 — see "Phase 2 additions" below
-│   │   ├── bills/                     # Phase 2 — see "Phase 2 additions" below
+│   │   ├── bills/                     # Phase 2 — see "Phase 2 additions" below (Phase 3a touches
+│   │   │                              # occurrence.ts and actions.ts — see "Phase 3a additions" below)
 │   │   ├── notifications/             # Phase 2 — see "Phase 2 additions" below
-│   │   ├── debt/                      # Phase 3 — reserved, empty
-│   │   └── investments/               # Phase 3 — reserved, empty
+│   │   ├── debt/                      # Phase 3a — see "Phase 3a additions" below
+│   │   ├── investments/               # Phase 3a — see "Phase 3a additions" below
+│   │   └── recurring-income/          # Phase 3a — see "Phase 3a additions" below
 │   │
 │   ├── lib/
 │   │   ├── db.ts                     # Prisma singleton
@@ -116,26 +118,26 @@ Budget/
 
 - `src/` is used (not root-level `app/`) to keep config files uncluttered at the repo root as the project grows.
 - Route groups `(auth)` and `(dashboard)` split layouts without affecting URL structure.
-- `features/<domain>/components/` holds domain-aware composed UI (knows about Account/Transaction types, may call hooks); `components/shared/` holds domain-agnostic building blocks only — this is the boundary between Frontend Lead/UI Component Engineer ownership and where Backend Engineer's types leak into presentation.
+- `features/<domain>/components/` holds domain-aware composed UI (knows about Account/Transaction types, may call hooks); `components/shared/` holds domain-agnostic building blocks only.
 - Every `features/<domain>/server/*.ts` file must call `getCurrentUser()` from `lib/auth.ts` and scope every Prisma query by that user's ID — this is the concrete implementation of risk register item #4.
 
 ---
 
 ## Phase 2 additions
 
-Four new feature modules (`budgeting`, `goals`, `bills`, `notifications`), three route placeholders replaced (`app/(dashboard)/{budgeting,goals,bills}/page.tsx` already exist per the Phase 0 tree above and get their real implementation now, same pattern as Phase 1's `accounts`/`transactions` pages replacing their own placeholders), one small addendum to the existing `transactions` module (receipts), and one new piece of shared infra (`lib/uploadthing.ts` + its Route Handler).
+Four new feature modules (`budgeting`, `goals`, `bills`, `notifications`), plus a receipts addendum to `transactions`, and `lib/uploadthing.ts` + its Route Handler.
 
 ```
 src/
 ├── app/
 │   ├── (dashboard)/
 │   │   ├── budgeting/
-│   │   │   └── page.tsx              # replaces Phase 0 placeholder; ?month=YYYY-MM searchParam
+│   │   │   └── page.tsx              # ?month=YYYY-MM searchParam
 │   │   ├── goals/
-│   │   │   ├── page.tsx              # replaces Phase 0 placeholder; list (active + completed + archived toggle)
+│   │   │   ├── page.tsx              # list (active + completed + archived toggle)
 │   │   │   └── [goalId]/page.tsx     # goal detail: progress, edit, contribution history (AC9)
 │   │   └── bills/
-│   │       ├── page.tsx              # replaces Phase 0 placeholder; ?view=list|calendar&month=YYYY-MM
+│   │       ├── page.tsx              # ?view=list|calendar&month=YYYY-MM
 │   │       └── [billId]/page.tsx     # bill detail: edit, occurrence/payment history (AC10)
 │   │
 │   └── api/
@@ -148,112 +150,221 @@ src/
 │
 ├── components/
 │   └── shared/
-│       └── month-navigator.tsx       # NEW: domain-agnostic prev/current/next month control,
-│                                     # shared by Budgeting's planner and Bills' calendar (see rationale below)
+│       └── month-navigator.tsx       # domain-agnostic prev/current/next month control
 │
 ├── features/
 │   ├── transactions/                 # existing Phase 1 module — Phase 2 adds receipts only
 │   │   ├── server/
-│   │   │   ├── receipts.ts           # NEW: attachReceipt, removeReceipt, getReceiptsForTransaction
-│   │   │   └── actions.ts            # UPDATED: deleteTransaction now also purges attached receipt
-│   │   │                             #   files via utapi.deleteFiles before removing the row (see
-│   │   │                             #   api-contracts.md's Receipts section — this is a behavior
-│   │   │                             #   change to an existing Phase 1 file, flagged explicitly)
-│   │   ├── types.ts                  # UPDATED: adds `Receipt` type, `receipts: Receipt[]` on
-│   │   │                             #   the transaction-detail shape (NOT on the table-row shape —
-│   │   │                             #   see api-contracts.md; avoids fetching receipts for every row)
+│   │   │   ├── receipts.ts           # attachReceipt, removeReceipt, getReceiptsForTransaction
+│   │   │   └── actions.ts            # UPDATED: deleteTransaction now also purges attached receipt files
+│   │   ├── types.ts                  # UPDATED: adds `Receipt` type on the transaction-detail shape
 │   │   └── components/
-│   │       ├── receipt-uploader.tsx  # NEW: wraps UploadThing's <UploadButton endpoint="receiptUploader">
-│   │       └── receipt-list.tsx      # NEW: list + download + remove, used in transaction detail view
+│   │       ├── receipt-uploader.tsx
+│   │       └── receipt-list.tsx
 │   │
 │   ├── budgeting/
 │   │   ├── server/
-│   │   │   ├── service.ts            # getBudgetMonth (carry-forward + read-only-history logic),
-│   │   │   │                         #   setCategoryAllocation's read-side helpers, getBudgetHealthScore,
-│   │   │   │                         #   getBudgetMonthSummary (consumed by features/dashboard/server/service.ts)
+│   │   │   ├── service.ts            # getBudgetMonth, getBudgetHealthScore, getBudgetMonthSummary
 │   │   │   ├── actions.ts            # setCategoryAllocation
-│   │   │   └── validation.ts         # SetAllocationSchema, MonthSchema (shared "YYYY-MM" validator)
-│   │   ├── types.ts                  # BudgetMonthView, BudgetCategoryLine, BudgetHealthScore
+│   │   │   └── validation.ts
+│   │   ├── types.ts
 │   │   └── components/
 │   │       ├── budget-planner-table.tsx
-│   │       ├── budget-category-row.tsx     # inline allocation input, Server Action + revalidatePath
-│   │       ├── budget-summary-cards.tsx    # Total Allocated/Spent/Remaining + Uncategorized line
+│   │       ├── budget-category-row.tsx
+│   │       ├── budget-summary-cards.tsx
 │   │       └── budget-health-score-badge.tsx
-│   │       # No hooks/ dir: allocation edits use Server Action + revalidatePath (Accounts-form
-│   │       # pattern), not TanStack Query — there is no pagination/filtering need like Transactions'
-│   │       # table, so the added complexity of a query hook isn't justified here.
 │   │
 │   ├── goals/
 │   │   ├── server/
 │   │   │   ├── service.ts            # getGoals, getGoalById, progress/estimate calc (read-time derived)
-│   │   │   ├── actions.ts            # createGoal, updateGoal, archiveGoal, unarchiveGoal,
-│   │   │   │                         #   addContribution, deleteContribution
-│   │   │   └── validation.ts         # CreateGoalSchema, UpdateGoalSchema, AddContributionSchema
-│   │   ├── types.ts                  # Goal, GoalContribution, GoalWithProgress (computed fields)
+│   │   │   ├── actions.ts            # createGoal, updateGoal, archiveGoal, unarchiveGoal, addContribution, deleteContribution
+│   │   │   └── validation.ts
+│   │   ├── types.ts
 │   │   ├── hooks/
-│   │   │   └── use-goals.ts          # mirrors use-accounts.ts exactly (includeArchived toggle refetch)
+│   │   │   └── use-goals.ts
 │   │   └── components/
 │   │       ├── goal-form.tsx
-│   │       ├── goal-card.tsx         # reuses components/shared/progress-ring.tsx — do not fork it
+│   │       ├── goal-card.tsx
 │   │       ├── contribution-form.tsx
 │   │       └── contribution-history-list.tsx
 │   │
 │   ├── bills/
 │   │   ├── server/
-│   │   │   ├── service.ts            # bill CRUD, getUpcomingOccurrences, getBillById (+history),
-│   │   │   │                         #   markOccurrencePaid, linkOccurrenceToTransaction,
-│   │   │   │                         #   unmarkOccurrencePaid, getCalendarMonth (backs Calendar v1)
-│   │   │   ├── occurrence.ts         # PURE functions: next-due-date math per schedule, status
-│   │   │   │                         #   computation (Upcoming/DueToday/Late/Paid) — no Prisma calls,
-│   │   │   │                         #   unit-testable in isolation (Integration Test Engineer will
-│   │   │   │                         #   want this split for the recurrence-correctness test matrix
-│   │   │   │                         #   the Bills spec's Definition of Done calls for)
-│   │   │   ├── actions.ts            # createBill, updateBill, archiveBill, unarchiveBill,
-│   │   │   │                         #   markOccurrencePaid, linkOccurrenceToTransaction,
+│   │   │   ├── service.ts            # bill CRUD, getUpcomingOccurrences, getBillById, markOccurrencePaid,
+│   │   │   │                         #   linkOccurrenceToTransaction, unmarkOccurrencePaid, getCalendarMonth
+│   │   │   ├── occurrence.ts         # PURE: status computation. UPDATED in Phase 3a — its cadence-math
+│   │   │   │                         #   (next-due-date-per-schedule) is extracted out to lib/recurrence.ts;
+│   │   │   │                         #   this file keeps only computeStatus and calls the shared functions.
+│   │   │   ├── actions.ts            # createBill, updateBill, archiveBill, unarchiveBill, markOccurrencePaid,
+│   │   │   │                         #   linkOccurrenceToTransaction (UPDATED in Phase 3a — now also calls
+│   │   │   │                         #   lib/transaction-link-guard.ts before creating the link),
 │   │   │   │                         #   unmarkOccurrencePaid
-│   │   │   └── validation.ts         # CreateBillSchema, UpdateBillSchema, MarkPaidSchema, LinkSchema
+│   │   │   └── validation.ts
 │   │   ├── types.ts                  # Bill, BillOccurrence, OccurrenceStatus
 │   │   ├── hooks/
-│   │   │   └── use-bills.ts          # mirrors use-accounts.ts exactly (includeArchived toggle refetch)
+│   │   │   └── use-bills.ts
 │   │   └── components/
 │   │       ├── bill-form.tsx
 │   │       ├── bill-list.tsx
 │   │       ├── upcoming-bills-list.tsx
-│   │       ├── occurrence-history-table.tsx   # composes components/shared/data-table (per
-│   │       │                                  #   Architecture.md's reusable-utilities note)
-│   │       ├── mark-paid-dialog.tsx           # includes the optional transaction-link picker
-│   │       └── bill-calendar.tsx              # Calendar v1's view — lives here, not a separate
-│   │                                          #   `features/calendar/` module; see rationale below
+│   │       ├── occurrence-history-table.tsx
+│   │       ├── mark-paid-dialog.tsx
+│   │       └── bill-calendar.tsx
 │   │
-│   └── notifications/                # NEW small shared module — see rationale below
+│   └── notifications/
 │       ├── server/
-│       │   ├── service.ts            # ensureNotifications (lazy materialize), getNotifications,
-│       │   │                         #   reads budgeting.service + bills.service; writes only to
-│       │   │                         #   its own Notification rows, never into Budget*/Bill* tables
+│       │   ├── service.ts            # ensureNotifications, getNotifications
 │       │   ├── actions.ts            # dismissNotification, markNotificationRead, markAllRead
 │       │   └── validation.ts
-│       ├── types.ts                  # Notification, NotificationType
+│       ├── types.ts
 │       ├── hooks/
-│       │   └── use-notifications.ts  # TanStack Query, short poll + refetch-on-focus — see
-│       │                             #   api-contracts.md for why this is the one Phase 2 module
-│       │                             #   that does need a query hook
+│       │   └── use-notifications.ts
 │       └── components/
-│           └── notification-bell.tsx # composed into TopNav via a new `notificationSlot` prop
-│                                     #   (small, additive prop on the existing shared component —
-│                                     #   see Architecture.md's Phase 2 notes)
+│           └── notification-bell.tsx
 │
 └── lib/
-    └── uploadthing.ts                # NEW: `utapi` (UploadThing server SDK) singleton, mirrors
-                                       #   lib/db.ts's singleton-export pattern; also re-exports the
-                                       #   FileRouter type used by app/api/uploadthing/core.ts
+    └── uploadthing.ts
+```
+
+---
+
+## Phase 3a additions
+
+Three new feature modules (`debt`, `investments`, `recurring-income`), two new shared `lib/` utilities (`recurrence.ts`, `transaction-link-guard.ts`), two touched Phase 2 files (`bills/server/occurrence.ts`, `bills/server/actions.ts` — see the inline notes above), one addition to the existing `dashboard` module (`snapshot.ts` + the extended `getNetWorth`), and one new kind of Route Handler (`api/cron/net-worth-snapshot`).
+
+```
+src/
+├── app/
+│   ├── (dashboard)/
+│   │   ├── debts/
+│   │   │   ├── page.tsx              # list + snowball/avalanche strategy comparison
+│   │   │   └── [debtId]/page.tsx     # debt detail: edit, projection detail
+│   │   ├── investments/
+│   │   │   ├── page.tsx              # portfolio overview + container list
+│   │   │   └── [accountId]/page.tsx  # container detail: holdings list, allocation, growth chart
+│   │   └── income/
+│   │       ├── page.tsx              # income stream list + expected-upcoming-income total
+│   │       └── [streamId]/page.tsx   # stream detail: edit, occurrence/receipt history
+│   │
+│   └── api/
+│       ├── debts/route.ts            # GET only — client refetch wrapper, mirrors api/accounts/route.ts
+│       ├── investments/route.ts      # GET only — client refetch wrapper (includeClosed toggle)
+│       ├── income/route.ts           # GET only — client refetch wrapper (includeArchived toggle)
+│       └── cron/
+│           └── net-worth-snapshot/
+│               └── route.ts          # POST — shared-secret-authenticated, called by an external
+│                                      #   scheduler (Vercel Cron/GitHub Actions/equivalent — a
+│                                      #   DevOps/deployment-target decision, not made here). See
+│                                      #   api-contracts.md's Net Worth Snapshot section for the
+│                                      #   auth contract; this is the first Route Handler in the
+│                                      #   codebase not gated by an authenticated browser session.
+│
+├── features/
+│   ├── debt/
+│   │   ├── server/
+│   │   │   ├── service.ts            # getDebts, getDebtById, getTotalActiveDebtBalanceForNetWorth
+│   │   │   │                         #   (excludes debts linked to an Account — see Architecture.md's
+│   │   │   │                         #   Net Worth double-counting note)
+│   │   │   ├── actions.ts            # createDebt, updateDebt, archiveDebt, unarchiveDebt,
+│   │   │   │                         #   linkDebtToAccount / unlinkDebtFromAccount (present only if
+│   │   │   │                         #   the Database Architect's chosen shape supports linking)
+│   │   │   └── validation.ts         # CreateDebtSchema, UpdateDebtSchema, ExtraPaymentSchema
+│   │   ├── payoff-math.ts            # PURE, isomorphic (no Prisma, no "use server"/"use client" —
+│   │   │                             #   safe to import from either a Server Component or a Client
+│   │   │                             #   Component): computeAmortization, compareSnowballAndAvalanche.
+│   │   │                             #   Lives at the feature root, not under server/, specifically so
+│   │   │                             #   strategy-comparison.tsx (below) can call it directly for
+│   │   │                             #   instant client-side recompute — see Architecture.md's
+│   │   │                             #   isomorphic pure-calculation-file convention.
+│   │   ├── types.ts                  # Debt, DebtType, DebtWithProjection, StrategyComparisonResult
+│   │   ├── hooks/
+│   │   │   └── use-debts.ts          # mirrors use-accounts.ts exactly (includeArchived toggle refetch)
+│   │   └── components/
+│   │       ├── debt-form.tsx
+│   │       ├── debt-list.tsx
+│   │       ├── debt-card.tsx         # shows Paid Off state distinctly (AC9)
+│   │       ├── extra-payment-input.tsx
+│   │       └── strategy-comparison.tsx  # Client Component; imports ../payoff-math.ts directly,
+│   │                                    #   recomputes on every extra-payment keystroke, no round-trip
+│   │
+│   ├── investments/
+│   │   ├── server/
+│   │   │   ├── service.ts            # getContainers (reads Accounts), getHoldingsForContainer,
+│   │   │   │                         #   getHoldingById, getPortfolioOverview, getAllocation
+│   │   │   │                         #   (asset-type + sector), getGrowthHistory
+│   │   │   ├── actions.ts            # createHolding (offers inline container creation via
+│   │   │   │                         #   accounts.actions.createAccount — AC1), updateHolding
+│   │   │   │                         #   (records a value-history entry on every current-value
+│   │   │   │                         #   edit, AC4; also triggers the derived-balance write-back
+│   │   │   │                         #   onto the container Account — see Architecture.md),
+│   │   │   │                         #   closeHolding, logDividend
+│   │   │   └── validation.ts         # CreateHoldingSchema, UpdateHoldingSchema, LogDividendSchema
+│   │   ├── types.ts                  # Holding, AssetType, Sector, HoldingValueHistoryEntry,
+│   │   │                             #   DividendEntry, PortfolioOverview, AllocationBreakdown
+│   │   ├── hooks/
+│   │   │   └── use-holdings.ts       # includeClosed toggle refetch, same shape as use-accounts.ts
+│   │   └── components/
+│   │       ├── holding-form.tsx
+│   │       ├── holding-list.tsx
+│   │       ├── container-card.tsx    # shows "this account's balance is now calculated from its
+│   │       │                         #   holdings below" messaging once a container has ≥1 holding
+│   │       ├── allocation-chart.tsx  # asset-type + sector, composes Recharts (same lib as Dashboard)
+│   │       ├── growth-chart.tsx      # per-holding + portfolio-level, handles single-data-point state
+│   │       ├── dividend-log-form.tsx
+│   │       └── portfolio-overview-cards.tsx  # composes components/shared/stat-card.tsx
+│   │
+│   └── recurring-income/
+│       ├── server/
+│       │   ├── service.ts            # getIncomeStreams, getStreamById (+ history),
+│       │   │                         #   getExpectedUpcomingIncome
+│       │   ├── occurrence.ts         # PURE: computeStatus (Upcoming/Expected Today/Not Yet
+│       │   │                         #   Received/Received) + ensureOccurrencesGenerated, mirroring
+│       │   │                         #   Bills' proven lazy on-read generation exactly; imports its
+│       │   │                         #   cadence math from lib/recurrence.ts (shared, not duplicated).
+│       │   │                         #   Irregular/One-off streams skip generation entirely (AC11).
+│       │   ├── actions.ts            # createIncomeStream, updateIncomeStream, archiveIncomeStream,
+│       │   │                         #   unarchiveIncomeStream, markOccurrenceReceived,
+│       │   │                         #   linkOccurrenceToTransaction (calls
+│       │   │                         #   lib/transaction-link-guard.ts before linking — see
+│       │   │                         #   Architecture.md's cross-feature exclusivity note),
+│       │   │                         #   unmarkOccurrenceReceived, logIrregularIncomeEvent
+│       │   └── validation.ts
+│       ├── types.ts                  # IncomeStream, IncomeType, IncomeSchedule, IncomeOccurrence,
+│       │                             #   IncomeOccurrenceStatus, IrregularIncomeEvent
+│       ├── hooks/
+│       │   └── use-income-streams.ts # includeArchived toggle refetch, same shape as use-bills.ts
+│       └── components/
+│           ├── income-stream-form.tsx
+│           ├── income-stream-list.tsx
+│           ├── upcoming-income-list.tsx
+│           ├── mark-received-dialog.tsx      # includes the optional transaction-link picker
+│           └── occurrence-history-table.tsx  # composes components/shared/data-table
+│
+├── features/dashboard/                # existing Phase 1 module — Phase 3a adds Net Worth
+│   ├── server/                        #   aggregation calls and the snapshot writer
+│   │   ├── service.ts                 # UPDATED: getNetWorth now also calls
+│   │   │                              #   debt.service.getTotalActiveDebtBalanceForNetWorth —
+│   │   │                              #   see api-contracts.md for the full, double-count-safe formula
+│   │   └── snapshot.ts                # NEW: captureNetWorthSnapshot(userId),
+│   │                                  #   captureAllUsersNetWorthSnapshots() — called by
+│   │                                  #   app/api/cron/net-worth-snapshot/route.ts. No UI this phase
+│   │                                  #   (per roadmap.md's explicit "backend only, no UI" scope).
+│   └── (types.ts, components/ unchanged this phase — Net Worth History chart is Phase 3b)
+│
+└── lib/
+    ├── recurrence.ts                  # NEW: shared pure cadence math, extracted from
+    │                                  #   bills/server/occurrence.ts — see Architecture.md
+    └── transaction-link-guard.ts      # NEW: assertTransactionNotAlreadyLinked(...) — narrow,
+                                       #   documented exception to "no cross-domain Prisma
+                                       #   reach-through," see Architecture.md
 ```
 
 ### Rationale notes
 
-- **Calendar v1 lives inside `features/bills/`, not its own `features/calendar/` module.** Contrast with why `features/categories/` became its own shared module in Phase 1: Categories is depended on by three domains (Transactions, Dashboard, and now Budgeting) that each need to *read and reference* it independently, so no single owner made sense. Calendar v1 has exactly one dependency, in one direction (`docs/product/calendar-and-notifications.md`: "Calendar v1 has no data of its own; it is entirely a view over Bills' due dates and statuses") and introduces no data model of its own. Folding it into Bills as one more read function (`getCalendarMonth`) plus one more component (`bill-calendar.tsx`) avoids a placeholder module that would exist solely to re-export Bills' own data.
-- **`features/notifications/` is its own module**, unlike Calendar, because it genuinely reads from two independently-owned domains (Budgeting and Bills) and has its own durable state (read/dismissed) that belongs to neither. Giving Budgeting or Bills ownership of that state would mean one domain's server code mutates rows that conceptually belong to a different concern, and would force whichever domain didn't "win" ownership to reach into the other's module anyway. See `api-contracts.md` and `Architecture.md`'s Phase 2 section for the full read/write boundary.
-- **`components/shared/month-navigator.tsx` is new domain-agnostic shared UI**, not duplicated per-feature, because both Budgeting's planner and Bills' calendar need the identical "prev / current label / next" month-stepping control. It takes `{ month: string; onMonthChange: (month: string) => void }` and nothing else — no domain knowledge, same boundary rule as `components/shared/progress-ring.tsx`.
-- **Receipts are an addendum to `features/transactions/`, not a new module** — per the Transactions spec's own addendum framing ("ships now as a small addition to the existing Transactions feature — not a new top-level domain or document"). `lib/uploadthing.ts` and `app/api/uploadthing/` are the only genuinely new pieces of infrastructure; everything else is new files inside the existing `transactions` module boundary.
-- **`uploadthing` and `@uploadthing/react` are not currently installed** (checked `package.json` — absent from `dependencies`). Whoever implements this addendum must run `npm install uploadthing @uploadthing/react` and add the relevant UploadThing env var(s) (e.g. `UPLOADTHING_TOKEN`) to `.env.example`; this Architect does not install dependencies or touch `.env.example` (Backend/DevOps territory).
-- **`app/(dashboard)/bills/page.tsx` hosts both the list and calendar views** via a `?view=list|calendar` search param rather than a separate `/bills/calendar` route, since no nav item for a standalone Calendar page is requested anywhere in the resolved specs or the current sidebar (`components/shared/sidebar.tsx`'s `NAV_SECTIONS`). If Frontend Lead later prefers a dedicated URL for shareability/bookmarking, splitting into `bills/calendar/page.tsx` is a small, backward-compatible follow-up (both would call the same `bills.service.getCalendarMonth`), not a redesign.
-- **Budgeting, Goals, and Bills do not get their own Route Handlers for list reads beyond the thin `GET` wrappers noted above** (and Budgeting gets none at all) — Server Components call `service.ts` functions directly for first render, consistent with Architecture.md's existing preference for server-rendered data over client-side duplication. Goals and Bills get a thin `GET` route + hook *only* because both have an `includeArchived` toggle exactly like Accounts (precedent: `features/accounts/hooks/use-accounts.ts`), not because they need pagination/sorting like Transactions.
+- **`debt`, `investments`, `recurring-income` are three separate feature modules, not folded into one "Phase 3a" module.** Same reasoning as Phase 2's Budgeting/Goals/Bills split: each is an independently-ownable domain with its own data, its own CRUD surface, and (per the Roadmap's own build-order note) its own dedicated backend implementation pass. Folding them together would recreate the exact "too large for one clean review cycle" problem the Phase 3/3a split itself was designed to avoid at the phase level — no reason to reintroduce it at the module level.
+- **`payoff-math.ts` breaks the "pure logic lives under `server/`" precedent Bills' `occurrence.ts` set**, and that break is deliberate, not an inconsistency — see Architecture.md's isomorphic pure-calculation-file convention for the full justification (client-side instant recompute requirement, AC6/AC7).
+- **`recurring-income/server/occurrence.ts` is a new, small, parallel file to `bills/server/occurrence.ts`, not a shared/merged model.** Per `recurring-income.md`'s own Dependencies note, sharing the underlying schedule/occurrence *model* between Bills and Recurring Income was left as "an implementation consideration, not a product requirement" for the Database Architect. This Architect's recommendation: keep the two Prisma models parallel (`BillOccurrence`, `IncomeOccurrence`), since their status vocabularies and paid/received semantics genuinely differ (Late vs. Not Yet Received is a deliberate, resolved product distinction, not an oversight) — but do not duplicate the underlying cadence math, hence `lib/recurrence.ts`.
+- **`lib/transaction-link-guard.ts` exists specifically to avoid a circular feature-level dependency between `bills` and `recurring-income`** — see Architecture.md's "Cross-feature exclusivity" section for the two designs considered and why the shared-`lib/`-utility shape was chosen over either domain importing the other.
+- **The Net Worth Snapshot job is added to the existing `features/dashboard/` module, not a new `features/net-worth-snapshot/` module.** It has no data of its own beyond a snapshot row of numbers Dashboard's own `getNetWorth` already computes, and no UI this phase (`roadmap.md`: "backend only, no UI... does not wait for 3b's Net Worth History chart"). This mirrors the reasoning that kept Calendar v1 inside `features/bills/` in Phase 2 rather than spinning up a placeholder module: a single dependency, in one direction, with no independent data model of its own beyond "a timestamped copy of a number Dashboard already knows how to compute."
+- **`app/(dashboard)/investments/[accountId]/page.tsx` is keyed by the container's `accountId`, not a separate "investment ID"** — consistent with the Product Owner's/this Architect's recommendation that the Account row itself is the container, not a new parallel entity.
+- **No standalone `app/(dashboard)/debts/[debtId]/holdings` or similar nested route is introduced for Debt** — Debt's optional Account link (if the Database Architect adopts it) is surfaced as an action within the debt detail page (e.g. "Link to an existing account"), not a separate route, matching how Bills' transaction-linking is a dialog within the bill detail view, not its own page.
