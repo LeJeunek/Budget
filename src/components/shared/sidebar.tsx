@@ -32,6 +32,7 @@ import { usePathname } from "next/navigation"
 import {
   ArrowLeftRight,
   BarChart3,
+  Banknote,
   CalendarClock,
   ChevronsLeft,
   ChevronsRight,
@@ -77,6 +78,20 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Budgeting", href: "/budgeting", icon: PiggyBank },
       { label: "Goals", href: "/goals", icon: Target },
       { label: "Bills", href: "/bills", icon: CalendarClock },
+      // (Phase 3a) Recurring Income placement decision, made by the Frontend
+      // Lead per docs/architecture/api-contracts.md's Recurring Income
+      // section (no nav placement was specified there — this call was left
+      // to frontend composition). Placed in "Planning" alongside Bills, not
+      // "Wealth" alongside Debt/Investments: Debt/Investments are
+      // balance-sheet/net-worth surfaces (a snapshot of what you owe/own),
+      // while Recurring Income — like Budgeting/Bills — is a forward-looking
+      // cash-flow planning surface (what's expected to come in, on what
+      // schedule). recurring-income.md's own Business Value section frames
+      // this feature explicitly as "Bills' direct mirror on the income
+      // side," reusing Bills' recurring-schedule pattern — grouping it next
+      // to Bills keeps that mirrored relationship visible in the nav, not
+      // just in the code.
+      { label: "Income", href: "/income", icon: Banknote },
     ],
   },
   {
