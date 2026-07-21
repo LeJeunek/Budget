@@ -37,6 +37,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   CreditCard,
+  Flag,
   LayoutDashboard,
   PiggyBank,
   Target,
@@ -100,6 +101,20 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Debt", href: "/debt", icon: CreditCard },
       { label: "Investments", href: "/investments", icon: TrendingUp },
       { label: "Analytics", href: "/analytics", icon: BarChart3 },
+      // (Phase 3b) Financial Goals placement decision, made by the Frontend
+      // Lead — docs/architecture/api-contracts.md's Financial Goals section
+      // specifies the route (`/financial-goals`) but, like Recurring
+      // Income before it, leaves nav placement to frontend composition.
+      // Placed in "Wealth" alongside Debt/Investments/Analytics, not
+      // "Planning" alongside the existing Goals (Savings Goals): every
+      // Financial Goal type reads a balance-sheet/insight figure this
+      // section already owns (a Debt's balance, Net Worth, the Savings
+      // Rate Analytics/Dashboard compute) rather than a forward-looking
+      // cash-flow plan the user actively allocates toward — grouping it
+      // here, visually apart from "Goals," reinforces financial-goals.md's
+      // own Boundary section: the two "goal" concepts must never read as
+      // the same interaction model, even in the nav.
+      { label: "Financial Goals", href: "/financial-goals", icon: Flag },
     ],
   },
 ]
