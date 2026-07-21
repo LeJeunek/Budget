@@ -1,4 +1,4 @@
-# FinanceOS — ER Diagram (Phase 0 + Phase 1 + Phase 2 + Phase 3a)
+# FinanceOS — ER Diagram (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b)
 
 ```mermaid
 erDiagram
@@ -54,6 +54,13 @@ erDiagram
 
     Transaction ||--o| IncomeOccurrence : "optionally backs"
     Transaction ||--o| IrregularIncomeEvent : "optionally backs"
+
+    User ||--o{ FinancialGoal : owns
+    User ||--o{ DismissedSubscriptionMerchant : owns
+
+    Debt ||--o{ FinancialGoal : "optionally targeted by (DEBT_PAYOFF)"
+    FinancialGoal ||--o{ FinancialGoalAccount : "optionally scoped to (ACCOUNT_SUBSET)"
+    Account ||--o{ FinancialGoalAccount : "optionally included in"
 
     User {
         string id PK
@@ -259,6 +266,32 @@ erDiagram
         decimal totalUnlinkedDebtLiability
         decimal totalNetWorth
     }
+
+    DismissedSubscriptionMerchant {
+        string id PK
+        string userId FK
+        string normalizedMerchantName
+        datetime dismissedAt
+    }
+
+    FinancialGoal {
+        string id PK
+        string userId FK
+        string linkedDebtId FK "nullable, DEBT_PAYOFF only"
+        string name
+        enum type
+        decimal startingBalance "nullable, DEBT_PAYOFF only"
+        decimal targetAmount "nullable, NET_WORTH_SAVINGS_TARGET only"
+        enum measurementBasis "nullable, NET_WORTH_SAVINGS_TARGET only"
+        decimal targetPercent "nullable, SAVINGS_RATE_TARGET only"
+        date targetDate "nullable, SAVINGS_RATE_TARGET only"
+        datetime archivedAt
+    }
+
+    FinancialGoalAccount {
+        string financialGoalId FK
+        string accountId FK
+    }
 ```
 
 ## Design notes (Phase 0/1)
@@ -340,3 +373,31 @@ Both represent user-entered records with history the user might want to hide wit
 ### Debt payoff math: schema fields confirmed sufficient
 
 `payoff-math.ts`'s `computeAmortization`/`compareSnowballAndAvalanche` need exactly three numeric inputs per debt — `balance`, `interestRate`, `minimumPayment` — all three present and required (non-nullable) on `Debt`. Nothing else needs to be persisted: payoff date, total interest remaining, negative-amortization detection, and the snowball/avalanche comparison are all pure functions of these three fields (plus a client-supplied, never-persisted `extraPayment` for the comparison view) and are never stored, matching this schema's rule everywhere else (Goal progress, Budget Health Score, Bill/Income occurrence status). Nothing is flagged as missing.
+
+## Design notes (Phase 3b)
+
+Two schema requirements were handed off from Architecture.md for this phase (Subscription Cost Detection's dismissal-tracking, and Financial Goals) — Net Worth History and Analytics' other 11 metrics require no schema changes at all (pure read layers over `NetWorthSnapshot`, `Transaction`, `Category`, `Budget`, `HoldingValueHistoryEntry`, `IncomeOccurrence`/`IrregularIncomeEvent`, all already shipped). Both requirements were prescribed in near-final shape by the Solution Architect's handoff; the modeling work here is mostly a straight implementation, with two decisions left explicitly to this Architect's judgment (`normalizedMerchantName`'s column width, and the Debt Payoff exclusivity enforcement mechanism), both resolved below.
+
+### 1. `DismissedSubscriptionMerchant`: this schema's first exclusion-rule-over-a-computed-concept model
+
+Implemented exactly as specified in Architecture.md's handoff: `{ id, userId, normalizedMerchantName, dismissedAt }`, `@@unique([userId, normalizedMerchantName])`, `@@index([userId])`, `onDelete: Cascade` on the `User` FK (this codebase's standard for every user-owned model). No `undismiss`/soft-delete column — a future "undo" is a plain row delete against this table, not a schema concern.
+
+**Column-width decision (this Architect's call, as flagged in the handoff): `normalizedMerchantName` is a plain `String` with no `@db.VarChar(n)` cap, matching `Transaction.merchant`'s own definition exactly.** `Transaction.merchant` carries no native-type annotation at all, which means Prisma maps it to Postgres's unbounded `text` type (not a length-capped `varchar`) — there was nothing to "match a length" against beyond matching that same choice: no cap. This is also the only choice that's actually safe here: `normalizedMerchantName` is *derived from* `Transaction.merchant` (via `lib/merchant-normalization.ts`'s `normalizeMerchantName()`, which trims/case-folds/strips suffixes but never *lengthens* the input), so it can never exceed whatever `Transaction.merchant` itself already allows — capping the derived column more tightly than its own source column would risk silently truncating (and thereby corrupting the lookup key for) a merchant name Transactions already accepted without complaint.
+
+### 2. `FinancialGoal`/`FinancialGoalAccount`: implemented per the Solution Architect's handoff, as specified
+
+A flat table, one `FinancialGoalType` discriminator (`DEBT_PAYOFF | NET_WORTH_SAVINGS_TARGET | SAVINGS_RATE_TARGET`), nullable type-specific columns — mirrors `Debt`/`IncomeStream`'s existing precedent exactly, per the handoff's own reasoning (see this schema's `prisma/schema.prisma` comments on `FinancialGoal` for the full column-by-column rationale, restated there rather than duplicated here verbatim). No `completedAt`/progress column of any kind — every type's progress and completion state is computed at read time in `features/financial-goals/server/service.ts` from live `Debt`/`getNetWorth`/`getMonthlySummary` data, per financial-goals.md's own resolved Boundary section (this is the feature's entire reason for existing as a model distinct from `SavingsGoal`, and the spec explicitly closes this as a non-relitigatable decision).
+
+**`measurementBasis` design (Type 2 — NET_WORTH_SAVINGS_TARGET):** a persisted `MeasurementBasis` enum column (`TOTAL_NET_WORTH | ACCOUNT_SUBSET`) on `FinancialGoal` itself, plus a separate `FinancialGoalAccount` join table that only holds rows when the basis is `ACCOUNT_SUBSET`. This is a discriminated **either/or**, not a "both simultaneously" design, per financial-goals.md's own AC ("chooses what that target is measured against: either (a) Total Net Worth... or (b) a user-selected subset of their non-archived Accounts") — a goal is never measured against both at once, and the join table is simply empty for every `TOTAL_NET_WORTH` goal (no wasted/ambiguous rows, no need for a `NULL`-vs-`empty-set` distinction the way `BudgetCategory`'s row-presence pattern needed one). The enum column is the single source of truth for *which* basis is active; the join table is purely the data for the one basis that needs more than a boolean. This also directly supports the spec's stated asymmetry between the two bases: a `TOTAL_NET_WORTH` goal may show a historical mini trend line (reusing `NetWorthSnapshot` via `getNetWorthHistory`), while an `ACCOUNT_SUBSET` goal never can (`NetWorthSnapshot` only ever stored the aggregate total, never a per-user-chosen subset) — the schema shape makes that constraint fall out naturally rather than needing a special case: `getNetWorthHistory` is only ever called when `measurementBasis === TOTAL_NET_WORTH`, and there is no equivalent historical table to call for the subset case at all.
+
+**Debt Payoff exclusivity — this Architect's decision: application-level guard, not a database partial-unique index.** The Solution Architect flagged this as open, with a non-binding lean toward the application-level guard (their own "Option 2"). Adopted, for the following reasons:
+
+1. **Direct structural precedent, already decided once in this exact codebase.** The Bills ↔ Recurring Income cross-table exclusivity (Phase 3a, er-diagram.md design note #5 above) faced the identical shape of problem — "at most one of X across a set of rows, with an allowed exception for archived/inactive rows" — and was resolved with an application-level guard specifically because the realistic race window is a single authenticated user, in their own session, potentially double-clicking "create" within milliseconds of themselves, not a genuine concurrent-multi-actor write path. Nothing about Financial Goals' version of this problem changes that risk profile: it is, if anything, an even narrower window (one user creating one goal against one of their own Debts), so the precedent that already accepted this tradeoff for a *harder* case (three tables, not one) applies at least as strongly here.
+2. **A partial unique index would be this schema's first hand-edited migration.** Prisma's schema DSL has no first-class syntax for a conditional `@@unique` (`WHERE archivedAt IS NULL`); getting one would require manually editing a `prisma migrate dev`-generated SQL file after the fact, which this project's `migration-strategy.md` process (schema authored in `prisma/schema.prisma`, migrations generated, never hand-edited except for genuinely irreversible data backfills) treats as a deliberate exception, not the default path. Introducing that exception here, for a narrow race window the Phase 3a precedent already judged not worth a comparable cost, isn't justified by anything specific to Financial Goals that wasn't already true of the Bills/Recurring-Income case.
+3. **The check is fully self-contained, unlike Phase 3a's cross-table case.** Bills↔Recurring-Income needed a shared `lib/transaction-link-guard.ts` specifically because *two independent feature modules* each had to check the *other's* table — a genuine circular-import risk if either imported the other directly. Financial Goals' exclusivity check only ever queries `FinancialGoal`'s own table (`WHERE linkedDebtId = ? AND archivedAt IS NULL`, run inside the same Prisma `$transaction` as the create) — no other domain ever needs to perform or share this check, so it can live as a private helper directly inside `features/financial-goals/server/service.ts` with no `lib/`-level file and no cross-feature import at all, which is a strictly simpler version of a problem the application-level approach already handles well.
+
+`FinancialGoal.@@index([linkedDebtId])` (a plain, non-unique index) supports this guard's lookup efficiently without being the enforcement mechanism itself — flagged as a monitored risk in `docs/database/performance-considerations.md`'s Phase 3b additions, consistent with how the Bills/Recurring-Income guard was flagged in Phase 3a, not silently assumed safe.
+
+### 3. `debt.service.getDebtById`'s archived-inclusive-by-id behavior: confirmed already satisfied, no follow-up needed
+
+Checked against the actual current implementation (`src/features/debt/server/service.ts`): `getDebtById(userId, id)` calls `db.debt.findFirst({ where: { id, userId }, include: LINKED_ACCOUNT_BALANCE_INCLUDE })` — no `archivedAt` filter of any kind. This already returns archived Debts by id exactly as Financial Goals' "linked Debt was later archived, goal progress freezes" edge case requires (only `getDebts`' *list* query correctly excludes archived rows by default, via its own explicit `archivedAt: includeArchived ? { not: null } : null` filter, which is the intentional difference between a list read and a by-id read this codebase has followed since Phase 3a). **No Backend Engineer follow-up is required for this specific confirmation** — flagged here as verified, not left open.

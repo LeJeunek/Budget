@@ -154,3 +154,18 @@ export interface GrowthPoint {
   date: string
   value: number
 }
+
+/**
+ * Options for `service.getGainLossForPeriod` — **(Phase 3b)**, per
+ * docs/architecture/api-contracts.md's Investments section: "sums
+ * `(HoldingValueHistoryEntry.newValue - previousValue)` across every entry
+ * recorded within `[start, end]`." Both bounds are required (unlike
+ * `features/analytics/server/types.ts`'s `ReportingPeriodRange`, whose
+ * `start` may be `null` for "All Time") — this function's only caller,
+ * `features/analytics/server/savings-growth.ts`, always resolves a concrete
+ * per-month `[start, end]` before calling it.
+ */
+export interface GetGainLossForPeriodOptions {
+  start: Date
+  end: Date
+}

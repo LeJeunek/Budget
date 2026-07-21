@@ -182,3 +182,37 @@ export interface ExpectedUpcomingIncome {
     nextOccurrenceAmount: number
   }[]
 }
+
+/**
+ * Options for `service.getActualReceivedIncomeBySource` — **(Phase 3b)**,
+ * per docs/architecture/api-contracts.md's Recurring Income section (the
+ * cross-domain read this feature exposes for Analytics' Income Growth/
+ * Income Sources metrics, analytics.md AC13/AC14). `start: null` means "All
+ * Time, open-ended" — mirrors
+ * `features/analytics/server/types.ts`'s `ReportingPeriodRange` exactly,
+ * since every caller of this function already has one of those in hand and
+ * shouldn't need to resolve a separate concrete floor just to call it.
+ */
+export interface GetActualReceivedIncomeOptions {
+  start: Date | null
+  end: Date
+}
+
+/**
+ * One actual-received income record, per
+ * `service.getActualReceivedIncomeBySource`'s return shape — a flat,
+ * ungrouped list rather than pre-bucketed-by-month or pre-summed, so this
+ * one query can back both Income Growth (bucketed by month) and Income
+ * Sources (summed across the whole period) without two near-duplicate
+ * queries. `amount`/`date` are always the *effective* received figures
+ * (never `IncomeOccurrence`'s "expected" figures, per recurring-income.md's
+ * own already-established live-join convention) — see
+ * `server/service.ts`'s JSDoc on this function for exactly how each source
+ * row (`IncomeOccurrence` vs. `IrregularIncomeEvent`) resolves its
+ * `amount`/`date`.
+ */
+export interface ActualReceivedIncomeRecord {
+  type: IncomeType
+  amount: number
+  date: Date
+}

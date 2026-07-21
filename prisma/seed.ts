@@ -17,8 +17,29 @@
 // deliberately not exhaustive fixture data for payoff-math.ts/allocation
 // correctness (that is Integration Test Engineer's job, against dedicated
 // test fixtures, not this dev/demo seed).
+//
+// Phase 3b addition: one FinancialGoal of each of the three types (DEBT_PAYOFF
+// linked to the Student Loan seeded below, NET_WORTH_SAVINGS_TARGET against
+// the Total Net Worth basis, SAVINGS_RATE_TARGET) and one
+// DismissedSubscriptionMerchant row — enough to exercise every new Phase 3b
+// model at least once. The ACCOUNT_SUBSET measurement basis and
+// FinancialGoalAccount are deliberately not seeded here: exercising that path
+// meaningfully would require a second NET_WORTH_SAVINGS_TARGET goal purely to
+// demonstrate a join-table row, which doesn't earn its place in a minimal dev
+// seed — Integration Test Engineer's dedicated fixtures are the right place
+// for that case, not this script.
 
-import { PrismaClient, AccountType, DebtType, AssetType, Sector, IncomeType, IncomeSchedule } from "@prisma/client";
+import {
+  PrismaClient,
+  AccountType,
+  DebtType,
+  AssetType,
+  Sector,
+  IncomeType,
+  IncomeSchedule,
+  FinancialGoalType,
+  MeasurementBasis,
+} from "@prisma/client";
 import { DEFAULT_CATEGORIES } from "../src/features/categories/default-categories";
 
 const prisma = new PrismaClient();
@@ -112,7 +133,7 @@ async function main() {
     },
   });
 
-  await prisma.debt.create({
+  const studentLoan = await prisma.debt.create({
     data: {
       userId: demoUser.id,
       name: "Federal Direct Loan",
@@ -188,6 +209,57 @@ async function main() {
       userId: demoUser.id,
       streamId: salaryStream.id,
       expectedDate: new Date(),
+    },
+  });
+
+  // ---- Phase 3b: Financial Goals ---------------------------------------------
+  // One goal per type, exercising each type's own nullable-column shape.
+  await prisma.financialGoal.create({
+    data: {
+      userId: demoUser.id,
+      name: "Pay Off Federal Direct Loan",
+      type: FinancialGoalType.DEBT_PAYOFF,
+      linkedDebtId: studentLoan.id,
+      // Anchored to the Debt's balance at seed time (financial-goals.md's
+      // "fixed anchor, not recomputed later" — see FinancialGoal.
+      // startingBalance's schema comment); a live app write path always
+      // reads this from Debt's effectiveBalance at creation, not a literal
+      // like this static seed script uses.
+      startingBalance: 18500.0,
+    },
+  });
+
+  await prisma.financialGoal.create({
+    data: {
+      userId: demoUser.id,
+      name: "Reach $50k Net Worth",
+      type: FinancialGoalType.NET_WORTH_SAVINGS_TARGET,
+      targetAmount: 50000.0,
+      measurementBasis: MeasurementBasis.TOTAL_NET_WORTH,
+    },
+  });
+
+  await prisma.financialGoal.create({
+    data: {
+      userId: demoUser.id,
+      name: "Save 20% of Income",
+      type: FinancialGoalType.SAVINGS_RATE_TARGET,
+      targetPercent: 20.0,
+    },
+  });
+
+  // ---- Phase 3b: Subscription Cost Detection's dismissal-tracking -----------
+  // One dismissed merchant, exercising the exclusion-rule table's one write
+  // path (a user dismissing a detected false positive, e.g. a recurring
+  // coffee-shop habit that pattern-matched like a subscription). The value
+  // below is a reasonable trim/case-fold guess consistent with
+  // lib/merchant-normalization.ts's documented behavior (Backend Engineer's
+  // file, not yet written at schema-authoring time) — it is illustrative
+  // seed data only, not a substitute for that utility's own unit tests.
+  await prisma.dismissedSubscriptionMerchant.create({
+    data: {
+      userId: demoUser.id,
+      normalizedMerchantName: "demo coffee shop",
     },
   });
 

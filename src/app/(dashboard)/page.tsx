@@ -22,12 +22,17 @@ import {
   getSpendingByCategory,
 } from "@/features/dashboard/server/service"
 import {
+  getNetWorthHistory,
+  resolveDefaultRange,
+} from "@/features/dashboard/server/net-worth-history"
+import {
   getBudgetHealthScore,
   getBudgetMonthSummary,
 } from "@/features/budgeting/server/service"
 import { BudgetHealthScoreBadge } from "@/features/budgeting/components/budget-health-score-badge"
 import { IncomeVsExpenseChart } from "@/features/dashboard/components/income-vs-expense-chart"
 import { MonthlyTrendsChart } from "@/features/dashboard/components/monthly-trends-chart"
+import { NetWorthHistoryChart } from "@/features/dashboard/components/net-worth-history-chart"
 import { SpendingByCategoryChart } from "@/features/dashboard/components/spending-by-category-chart"
 
 /**
@@ -56,6 +61,17 @@ import { SpendingByCategoryChart } from "@/features/dashboard/components/spendin
  * route/TanStack Query hook" contract `budgeting/page.tsx` relies on), so
  * they join the existing `Promise.all` batch below rather than needing a
  * separate fetch waterfall.
+ *
+ * **Phase 3b addition (docs/product/net-worth-history.md):** the Net Worth
+ * History chart's *initial* range/data are resolved here too, via
+ * `resolveDefaultRange` (AC3) then `getNetWorthHistory` for that resolved
+ * range — the one dependent fetch in this file (the range has to be known
+ * before the history for it can be requested), so it's issued as a second
+ * `await` after the independent `Promise.all` batch below rather than inside
+ * it. Every range change *after* this initial render is handled entirely
+ * client-side by `NetWorthHistoryChart` itself (TanStack Query, via
+ * `features/dashboard/hooks/use-net-worth-history.ts`) — this page never
+ * re-renders for a range switch.
  */
 export default async function DashboardPage() {
   const user = await getCurrentUser()
@@ -78,6 +94,7 @@ export default async function DashboardPage() {
     monthlyTrends,
     budgetSummary,
     budgetHealthScore,
+    defaultRangeResolution,
   ] = await Promise.all([
     getNetWorth(user.id),
     getMonthlySummary(user.id, new Date()),
@@ -85,7 +102,17 @@ export default async function DashboardPage() {
     getMonthlyTrends(user.id, 6),
     getBudgetMonthSummary(user.id, currentMonth),
     getBudgetHealthScore(user.id, currentMonth),
+    resolveDefaultRange(user.id),
   ])
+
+  // Dependent on `defaultRangeResolution` above, so it can't join the
+  // `Promise.all` batch — everything independent of the chosen range is
+  // still fetched in parallel with it, keeping this to exactly one extra
+  // sequential round-trip rather than the whole page waiting on it twice.
+  const netWorthHistory = await getNetWorthHistory(
+    user.id,
+    defaultRangeResolution.defaultRange,
+  )
 
   // dashboard-overview.md's "brand-new user, zero accounts" edge case: every
   // number below (income, expenses, cash flow, savings rate, all three
@@ -194,6 +221,14 @@ export default async function DashboardPage() {
           </div>
 
           <MonthlyTrendsChart data={monthlyTrends} />
+
+          {/* Phase 3b: net-worth-history.md's companion chart to the Net
+              Worth stat card above — see this page's module doc for how its
+              initial range/data are resolved. */}
+          <NetWorthHistoryChart
+            initialRange={defaultRangeResolution.defaultRange}
+            initialData={netWorthHistory}
+          />
         </>
       )}
     </div>

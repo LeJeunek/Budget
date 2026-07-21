@@ -13,6 +13,7 @@ import type {
   AllocationEntry,
   ContainerSummary,
   DividendEntry,
+  GetGainLossForPeriodOptions,
   GetGrowthHistoryOptions,
   GetHoldingsOptions,
   GrowthPoint,
@@ -530,4 +531,67 @@ export async function getGrowthHistory(
       })),
     })),
   )
+}
+
+// ---------------------------------------------------------------------------
+// Period-scoped gain/loss (Phase 3b — Analytics' Savings Growth metric)
+// ---------------------------------------------------------------------------
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+/**
+ * `HoldingValueHistoryEntry.recordedAt` is a full `DateTime` (unlike
+ * `Transaction.date`'s `@db.Date` column), so a caller-supplied `end` that is
+ * a UTC-midnight calendar-date boundary (every caller in this codebase's
+ * convention — see `features/analytics/server/period.ts`) would otherwise
+ * exclude every entry recorded later that same day. Advancing by one full day
+ * and comparing with `lt` makes `end`'s entire calendar day inclusive without
+ * the caller needing to know or care that this column is timestamp-grained.
+ */
+function endOfCalendarDayExclusive(end: Date): Date {
+  return new Date(end.getTime() + MS_PER_DAY)
+}
+
+/**
+ * **(Phase 3b)** Period-scoped investment gain/loss, per
+ * docs/architecture/api-contracts.md's Investments section: "sums
+ * `(HoldingValueHistoryEntry.newValue - previousValue)` across every entry
+ * recorded within `[start, end]`, across both active and closed holdings."
+ *
+ * Consumed by `features/analytics/server/savings-growth.ts` (analytics.md
+ * AC15's "netting out" requirement) — **deliberately not** the same figure as
+ * `getPortfolioOverview`'s lifetime `totalGainLoss` (a point-in-time
+ * cumulative total, `currentValue - costBasis`, scoped to active holdings
+ * only). This is a period-scoped *delta*, scoped to no holding-state at all
+ * (a Closed holding's value-history entries still fully count — closing a
+ * holding never erases what its market value did while it was open), per
+ * this function's own explicit "both active and closed holdings" contract.
+ *
+ * Computed via two `_sum` aggregations pushed to Postgres (never a `findMany`
+ * reduced in application code): `sum(newValue) - sum(previousValue)` across
+ * the matching rows is arithmetically identical to
+ * `sum(newValue - previousValue)` per row, since summation is linear — this
+ * lets Postgres do the reduction instead of pulling every row into the
+ * Node process, per docs/database/performance-considerations.md.
+ *
+ * Edge Case (analytics.md's "Investments' gain/loss data unavailable for a
+ * given period"): a user with no `HoldingValueHistoryEntry` rows in range
+ * (no holdings at all, or holdings never edited during the period) simply
+ * yields `0` via `?? 0` below — never an error, never `null`.
+ */
+export async function getGainLossForPeriod(
+  userId: string,
+  options: GetGainLossForPeriodOptions,
+): Promise<number> {
+  const { start, end } = options
+
+  const result = await db.holdingValueHistoryEntry.aggregate({
+    where: { userId, recordedAt: { gte: start, lt: endOfCalendarDayExclusive(end) } },
+    _sum: { previousValue: true, newValue: true },
+  })
+
+  const previousTotal = result._sum.previousValue?.toNumber() ?? 0
+  const newTotal = result._sum.newValue?.toNumber() ?? 0
+
+  return newTotal - previousTotal
 }

@@ -1,6 +1,6 @@
-# FinanceOS — Folder Tree (Phase 0 + Phase 1 + Phase 2 + Phase 3a)
+# FinanceOS — Folder Tree (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b)
 
-Phase 0/1 files are listed concretely below, unchanged from the original design. Phase 2 additions are listed in their own section. Phase 3a additions (Debt Tracker, Investments, Recurring Income, Net Worth aggregation update, Net Worth Snapshot job) are listed in their own section further down, now that `docs/product/{debt-tracker,investments,recurring-income}.md` are resolved. Phase 3b folders remain reserved placeholders (Solution Architect will detail them when that phase is designed).
+Phase 0/1 files are listed concretely below, unchanged from the original design. Phase 2 additions are listed in their own section. Phase 3a additions (Debt Tracker, Investments, Recurring Income, Net Worth aggregation update, Net Worth Snapshot job) are listed in their own section further down. Phase 3b additions (Net Worth History chart, Analytics, Financial Goals) are listed in the final section, now that `docs/product/{net-worth-history,analytics,financial-goals}.md` are resolved.
 
 ```
 Budget/
@@ -45,55 +45,11 @@ Budget/
 │   │       └── loading-skeleton.tsx
 │   │
 │   ├── features/
-│   │   ├── accounts/
-│   │   │   ├── server/
-│   │   │   │   ├── service.ts
-│   │   │   │   ├── actions.ts
-│   │   │   │   └── validation.ts     # Zod schemas
-│   │   │   ├── types.ts
-│   │   │   ├── hooks/
-│   │   │   │   └── use-accounts.ts   # TanStack Query hook
-│   │   │   └── components/           # domain-specific composed UI (account card, account form)
-│   │   │       ├── account-form.tsx
-│   │   │       └── account-card.tsx
-│   │   ├── transactions/
-│   │   │   ├── server/
-│   │   │   │   ├── service.ts
-│   │   │   │   ├── actions.ts
-│   │   │   │   ├── import.ts         # CSV parsing/dedup logic
-│   │   │   │   └── validation.ts
-│   │   │   ├── types.ts
-│   │   │   ├── hooks/
-│   │   │   │   └── use-transactions.ts
-│   │   │   └── components/
-│   │   │       ├── transaction-table.tsx
-│   │   │       ├── transaction-form.tsx
-│   │   │       └── import-dialog.tsx
-│   │   ├── dashboard/
-│   │   │   ├── server/
-│   │   │   │   └── service.ts        # aggregation queries: net worth, income/expense, cash flow
-│   │   │   ├── types.ts
-│   │   │   └── components/
-│   │   │       ├── net-worth-chart.tsx
-│   │   │       ├── spending-by-category-chart.tsx
-│   │   │       └── income-vs-expense-chart.tsx
-│   │   ├── categories/               # small module: consumed by transactions, dashboard,
-│   │   │   ├── server/                # and budgeting — not owned by any one of them.
-│   │   │   │   ├── service.ts        # See api-contracts.md's 2026-07-19 CTO scope correction.
-│   │   │   │   ├── actions.ts
-│   │   │   │   └── validation.ts
-│   │   │   ├── types.ts
-│   │   │   └── components/
-│   │   │       ├── category-form.tsx
-│   │   │       └── category-list.tsx
-│   │   ├── budgeting/                 # Phase 2 — see "Phase 2 additions" below
-│   │   ├── goals/                     # Phase 2 — see "Phase 2 additions" below
-│   │   ├── bills/                     # Phase 2 — see "Phase 2 additions" below (Phase 3a touches
-│   │   │                              # occurrence.ts and actions.ts — see "Phase 3a additions" below)
-│   │   ├── notifications/             # Phase 2 — see "Phase 2 additions" below
-│   │   ├── debt/                      # Phase 3a — see "Phase 3a additions" below
-│   │   ├── investments/               # Phase 3a — see "Phase 3a additions" below
-│   │   └── recurring-income/          # Phase 3a — see "Phase 3a additions" below
+│   │   ├── accounts/ … transactions/ … dashboard/ … categories/    # Phase 1 — unchanged
+│   │   ├── budgeting/ … goals/ … bills/ … notifications/           # Phase 2 — see below
+│   │   ├── debt/ … investments/ … recurring-income/                # Phase 3a — see below
+│   │   ├── analytics/                 # Phase 3b — see below
+│   │   └── financial-goals/           # Phase 3b — see below
 │   │
 │   ├── lib/
 │   │   ├── db.ts                     # Prisma singleton
@@ -131,240 +87,206 @@ Four new feature modules (`budgeting`, `goals`, `bills`, `notifications`), plus 
 src/
 ├── app/
 │   ├── (dashboard)/
-│   │   ├── budgeting/
-│   │   │   └── page.tsx              # ?month=YYYY-MM searchParam
+│   │   ├── budgeting/page.tsx        # ?month=YYYY-MM searchParam
 │   │   ├── goals/
-│   │   │   ├── page.tsx              # list (active + completed + archived toggle)
-│   │   │   └── [goalId]/page.tsx     # goal detail: progress, edit, contribution history (AC9)
+│   │   │   ├── page.tsx
+│   │   │   └── [goalId]/page.tsx
 │   │   └── bills/
-│   │       ├── page.tsx              # ?view=list|calendar&month=YYYY-MM
-│   │       └── [billId]/page.tsx     # bill detail: edit, occurrence/payment history (AC10)
+│   │       ├── page.tsx
+│   │       └── [billId]/page.tsx
 │   │
 │   └── api/
-│       ├── goals/route.ts            # GET only — client refetch wrapper, mirrors api/accounts/route.ts
-│       ├── bills/route.ts            # GET only — client refetch wrapper, mirrors api/accounts/route.ts
-│       ├── notifications/route.ts    # GET only — list + unread count; triggers ensureNotifications()
+│       ├── goals/route.ts
+│       ├── bills/route.ts
+│       ├── notifications/route.ts
 │       └── uploadthing/
-│           ├── core.ts               # FileRouter definition (the `receiptUploader` endpoint)
-│           └── route.ts              # GET/POST handlers via UploadThing's createRouteHandler(core)
+│           ├── core.ts
+│           └── route.ts
 │
-├── components/
-│   └── shared/
-│       └── month-navigator.tsx       # domain-agnostic prev/current/next month control
+├── components/shared/month-navigator.tsx
 │
 ├── features/
-│   ├── transactions/                 # existing Phase 1 module — Phase 2 adds receipts only
-│   │   ├── server/
-│   │   │   ├── receipts.ts           # attachReceipt, removeReceipt, getReceiptsForTransaction
-│   │   │   └── actions.ts            # UPDATED: deleteTransaction now also purges attached receipt files
-│   │   ├── types.ts                  # UPDATED: adds `Receipt` type on the transaction-detail shape
-│   │   └── components/
-│   │       ├── receipt-uploader.tsx
-│   │       └── receipt-list.tsx
-│   │
-│   ├── budgeting/
-│   │   ├── server/
-│   │   │   ├── service.ts            # getBudgetMonth, getBudgetHealthScore, getBudgetMonthSummary
-│   │   │   ├── actions.ts            # setCategoryAllocation
-│   │   │   └── validation.ts
-│   │   ├── types.ts
-│   │   └── components/
-│   │       ├── budget-planner-table.tsx
-│   │       ├── budget-category-row.tsx
-│   │       ├── budget-summary-cards.tsx
-│   │       └── budget-health-score-badge.tsx
-│   │
-│   ├── goals/
-│   │   ├── server/
-│   │   │   ├── service.ts            # getGoals, getGoalById, progress/estimate calc (read-time derived)
-│   │   │   ├── actions.ts            # createGoal, updateGoal, archiveGoal, unarchiveGoal, addContribution, deleteContribution
-│   │   │   └── validation.ts
-│   │   ├── types.ts
-│   │   ├── hooks/
-│   │   │   └── use-goals.ts
-│   │   └── components/
-│   │       ├── goal-form.tsx
-│   │       ├── goal-card.tsx
-│   │       ├── contribution-form.tsx
-│   │       └── contribution-history-list.tsx
-│   │
-│   ├── bills/
-│   │   ├── server/
-│   │   │   ├── service.ts            # bill CRUD, getUpcomingOccurrences, getBillById, markOccurrencePaid,
-│   │   │   │                         #   linkOccurrenceToTransaction, unmarkOccurrencePaid, getCalendarMonth
-│   │   │   ├── occurrence.ts         # PURE: status computation. UPDATED in Phase 3a — its cadence-math
-│   │   │   │                         #   (next-due-date-per-schedule) is extracted out to lib/recurrence.ts;
-│   │   │   │                         #   this file keeps only computeStatus and calls the shared functions.
-│   │   │   ├── actions.ts            # createBill, updateBill, archiveBill, unarchiveBill, markOccurrencePaid,
-│   │   │   │                         #   linkOccurrenceToTransaction (UPDATED in Phase 3a — now also calls
-│   │   │   │                         #   lib/transaction-link-guard.ts before creating the link),
-│   │   │   │                         #   unmarkOccurrencePaid
-│   │   │   └── validation.ts
-│   │   ├── types.ts                  # Bill, BillOccurrence, OccurrenceStatus
-│   │   ├── hooks/
-│   │   │   └── use-bills.ts
-│   │   └── components/
-│   │       ├── bill-form.tsx
-│   │       ├── bill-list.tsx
-│   │       ├── upcoming-bills-list.tsx
-│   │       ├── occurrence-history-table.tsx
-│   │       ├── mark-paid-dialog.tsx
-│   │       └── bill-calendar.tsx
-│   │
-│   └── notifications/
-│       ├── server/
-│       │   ├── service.ts            # ensureNotifications, getNotifications
-│       │   ├── actions.ts            # dismissNotification, markNotificationRead, markAllRead
-│       │   └── validation.ts
-│       ├── types.ts
-│       ├── hooks/
-│       │   └── use-notifications.ts
-│       └── components/
-│           └── notification-bell.tsx
+│   ├── transactions/                 # Phase 2 adds receipts.ts + receipt components
+│   ├── budgeting/{server/{service.ts, actions.ts, validation.ts}, types.ts, components/}
+│   ├── goals/{server/, types.ts, hooks/use-goals.ts, components/}
+│   ├── bills/{server/{service.ts, occurrence.ts, actions.ts, validation.ts}, types.ts, hooks/, components/}
+│   └── notifications/{server/, types.ts, hooks/, components/}
 │
-└── lib/
-    └── uploadthing.ts
+└── lib/uploadthing.ts
 ```
 
 ---
 
 ## Phase 3a additions
 
-Three new feature modules (`debt`, `investments`, `recurring-income`), two new shared `lib/` utilities (`recurrence.ts`, `transaction-link-guard.ts`), two touched Phase 2 files (`bills/server/occurrence.ts`, `bills/server/actions.ts` — see the inline notes above), one addition to the existing `dashboard` module (`snapshot.ts` + the extended `getNetWorth`), and one new kind of Route Handler (`api/cron/net-worth-snapshot`).
+Three new feature modules (`debt`, `investments`, `recurring-income`), two new shared `lib/` utilities (`recurrence.ts`, `transaction-link-guard.ts`), touches to `bills/server/occurrence.ts` and `bills/server/actions.ts`, an addition to `dashboard` (`snapshot.ts` + extended `getNetWorth`), and `api/cron/net-worth-snapshot`.
 
 ```
 src/
 ├── app/
 │   ├── (dashboard)/
-│   │   ├── debts/
-│   │   │   ├── page.tsx              # list + snowball/avalanche strategy comparison
-│   │   │   └── [debtId]/page.tsx     # debt detail: edit, projection detail
+│   │   ├── debt/page.tsx             # (as-built path — see note below)
 │   │   ├── investments/
-│   │   │   ├── page.tsx              # portfolio overview + container list
-│   │   │   └── [accountId]/page.tsx  # container detail: holdings list, allocation, growth chart
+│   │   │   ├── page.tsx
+│   │   │   └── [holdingId]/page.tsx  # (as-built: keyed by holdingId — see note below)
 │   │   └── income/
-│   │       ├── page.tsx              # income stream list + expected-upcoming-income total
-│   │       └── [streamId]/page.tsx   # stream detail: edit, occurrence/receipt history
+│   │       ├── page.tsx
+│   │       └── [streamId]/page.tsx
 │   │
 │   └── api/
-│       ├── debts/route.ts            # GET only — client refetch wrapper, mirrors api/accounts/route.ts
-│       ├── investments/route.ts      # GET only — client refetch wrapper (includeClosed toggle)
-│       ├── income/route.ts           # GET only — client refetch wrapper (includeArchived toggle)
-│       └── cron/
-│           └── net-worth-snapshot/
-│               └── route.ts          # POST — shared-secret-authenticated, called by an external
-│                                      #   scheduler (Vercel Cron/GitHub Actions/equivalent — a
-│                                      #   DevOps/deployment-target decision, not made here). See
-│                                      #   api-contracts.md's Net Worth Snapshot section for the
-│                                      #   auth contract; this is the first Route Handler in the
-│                                      #   codebase not gated by an authenticated browser session.
+│       ├── debts/route.ts
+│       ├── investments/route.ts
+│       ├── income/route.ts
+│       └── cron/net-worth-snapshot/route.ts
 │
 ├── features/
-│   ├── debt/
-│   │   ├── server/
-│   │   │   ├── service.ts            # getDebts, getDebtById, getTotalActiveDebtBalanceForNetWorth
-│   │   │   │                         #   (excludes debts linked to an Account — see Architecture.md's
-│   │   │   │                         #   Net Worth double-counting note)
-│   │   │   ├── actions.ts            # createDebt, updateDebt, archiveDebt, unarchiveDebt,
-│   │   │   │                         #   linkDebtToAccount / unlinkDebtFromAccount (present only if
-│   │   │   │                         #   the Database Architect's chosen shape supports linking)
-│   │   │   └── validation.ts         # CreateDebtSchema, UpdateDebtSchema, ExtraPaymentSchema
-│   │   ├── payoff-math.ts            # PURE, isomorphic (no Prisma, no "use server"/"use client" —
-│   │   │                             #   safe to import from either a Server Component or a Client
-│   │   │                             #   Component): computeAmortization, compareSnowballAndAvalanche.
-│   │   │                             #   Lives at the feature root, not under server/, specifically so
-│   │   │                             #   strategy-comparison.tsx (below) can call it directly for
-│   │   │                             #   instant client-side recompute — see Architecture.md's
-│   │   │                             #   isomorphic pure-calculation-file convention.
-│   │   ├── types.ts                  # Debt, DebtType, DebtWithProjection, StrategyComparisonResult
-│   │   ├── hooks/
-│   │   │   └── use-debts.ts          # mirrors use-accounts.ts exactly (includeArchived toggle refetch)
-│   │   └── components/
-│   │       ├── debt-form.tsx
-│   │       ├── debt-list.tsx
-│   │       ├── debt-card.tsx         # shows Paid Off state distinctly (AC9)
-│   │       ├── extra-payment-input.tsx
-│   │       └── strategy-comparison.tsx  # Client Component; imports ../payoff-math.ts directly,
-│   │                                    #   recomputes on every extra-payment keystroke, no round-trip
-│   │
-│   ├── investments/
-│   │   ├── server/
-│   │   │   ├── service.ts            # getContainers (reads Accounts), getHoldingsForContainer,
-│   │   │   │                         #   getHoldingById, getPortfolioOverview, getAllocation
-│   │   │   │                         #   (asset-type + sector), getGrowthHistory
-│   │   │   ├── actions.ts            # createHolding (offers inline container creation via
-│   │   │   │                         #   accounts.actions.createAccount — AC1), updateHolding
-│   │   │   │                         #   (records a value-history entry on every current-value
-│   │   │   │                         #   edit, AC4; also triggers the derived-balance write-back
-│   │   │   │                         #   onto the container Account — see Architecture.md),
-│   │   │   │                         #   closeHolding, logDividend
-│   │   │   └── validation.ts         # CreateHoldingSchema, UpdateHoldingSchema, LogDividendSchema
-│   │   ├── types.ts                  # Holding, AssetType, Sector, HoldingValueHistoryEntry,
-│   │   │                             #   DividendEntry, PortfolioOverview, AllocationBreakdown
-│   │   ├── hooks/
-│   │   │   └── use-holdings.ts       # includeClosed toggle refetch, same shape as use-accounts.ts
-│   │   └── components/
-│   │       ├── holding-form.tsx
-│   │       ├── holding-list.tsx
-│   │       ├── container-card.tsx    # shows "this account's balance is now calculated from its
-│   │       │                         #   holdings below" messaging once a container has ≥1 holding
-│   │       ├── allocation-chart.tsx  # asset-type + sector, composes Recharts (same lib as Dashboard)
-│   │       ├── growth-chart.tsx      # per-holding + portfolio-level, handles single-data-point state
-│   │       ├── dividend-log-form.tsx
-│   │       └── portfolio-overview-cards.tsx  # composes components/shared/stat-card.tsx
-│   │
-│   └── recurring-income/
-│       ├── server/
-│       │   ├── service.ts            # getIncomeStreams, getStreamById (+ history),
-│       │   │                         #   getExpectedUpcomingIncome
-│       │   ├── occurrence.ts         # PURE: computeStatus (Upcoming/Expected Today/Not Yet
-│       │   │                         #   Received/Received) + ensureOccurrencesGenerated, mirroring
-│       │   │                         #   Bills' proven lazy on-read generation exactly; imports its
-│       │   │                         #   cadence math from lib/recurrence.ts (shared, not duplicated).
-│       │   │                         #   Irregular/One-off streams skip generation entirely (AC11).
-│       │   ├── actions.ts            # createIncomeStream, updateIncomeStream, archiveIncomeStream,
-│       │   │                         #   unarchiveIncomeStream, markOccurrenceReceived,
-│       │   │                         #   linkOccurrenceToTransaction (calls
-│       │   │                         #   lib/transaction-link-guard.ts before linking — see
-│       │   │                         #   Architecture.md's cross-feature exclusivity note),
-│       │   │                         #   unmarkOccurrenceReceived, logIrregularIncomeEvent
-│       │   └── validation.ts
-│       ├── types.ts                  # IncomeStream, IncomeType, IncomeSchedule, IncomeOccurrence,
-│       │                             #   IncomeOccurrenceStatus, IrregularIncomeEvent
-│       ├── hooks/
-│       │   └── use-income-streams.ts # includeArchived toggle refetch, same shape as use-bills.ts
-│       └── components/
-│           ├── income-stream-form.tsx
-│           ├── income-stream-list.tsx
-│           ├── upcoming-income-list.tsx
-│           ├── mark-received-dialog.tsx      # includes the optional transaction-link picker
-│           └── occurrence-history-table.tsx  # composes components/shared/data-table
-│
-├── features/dashboard/                # existing Phase 1 module — Phase 3a adds Net Worth
-│   ├── server/                        #   aggregation calls and the snapshot writer
-│   │   ├── service.ts                 # UPDATED: getNetWorth now also calls
-│   │   │                              #   debt.service.getTotalActiveDebtBalanceForNetWorth —
-│   │   │                              #   see api-contracts.md for the full, double-count-safe formula
-│   │   └── snapshot.ts                # NEW: captureNetWorthSnapshot(userId),
-│   │                                  #   captureAllUsersNetWorthSnapshots() — called by
-│   │                                  #   app/api/cron/net-worth-snapshot/route.ts. No UI this phase
-│   │                                  #   (per roadmap.md's explicit "backend only, no UI" scope).
-│   └── (types.ts, components/ unchanged this phase — Net Worth History chart is Phase 3b)
+│   ├── debt/{server/{service.ts, actions.ts, validation.ts}, payoff-math.ts, types.ts, hooks/, components/}
+│   ├── investments/{server/{service.ts, actions.ts, validation.ts}, types.ts, hooks/, components/}
+│   ├── recurring-income/{server/{service.ts, occurrence.ts, actions.ts, validation.ts}, types.ts, hooks/, components/}
+│   └── dashboard/server/snapshot.ts  # NEW this phase; service.ts UPDATED (getNetWorth)
 │
 └── lib/
-    ├── recurrence.ts                  # NEW: shared pure cadence math, extracted from
-    │                                  #   bills/server/occurrence.ts — see Architecture.md
-    └── transaction-link-guard.ts      # NEW: assertTransactionNotAlreadyLinked(...) — narrow,
-                                       #   documented exception to "no cross-domain Prisma
-                                       #   reach-through," see Architecture.md
+    ├── recurrence.ts
+    └── transaction-link-guard.ts
 ```
+
+**As-built note (2026-07-21, reconciled against the live repo):** the routes actually implemented are `app/(dashboard)/debt/page.tsx` (singular) and `app/(dashboard)/investments/[holdingId]/page.tsx` (keyed by the child `Holding`'s id, not the container `Account`'s id as this document originally sketched). Both are naming/routing details that don't change any module-boundary or data-flow decision in Architecture.md — flagged here only so this document matches the as-built repo rather than silently drifting from it, the same category of correction already applied to `docs/database/er-diagram.md`'s Phase 1 "DebtDetail" note.
+
+### Rationale notes (unchanged from the original Phase 3a design)
+
+- `debt`, `investments`, `recurring-income` are three separate feature modules, not folded into one "Phase 3a" module — same reasoning as Phase 2's Budgeting/Goals/Bills split.
+- `payoff-math.ts` breaks the "pure logic lives under `server/`" precedent deliberately — see Architecture.md's isomorphic pure-calculation-file convention.
+- `lib/transaction-link-guard.ts` exists specifically to avoid a circular feature-level dependency between `bills` and `recurring-income`.
+- The Net Worth Snapshot job is added to the existing `features/dashboard/` module, not a new module — no data of its own beyond a snapshot row of numbers Dashboard already computes.
+
+---
+
+## Phase 3b additions
+
+Two new feature modules (`analytics`, `financial-goals`), one new shared `lib/` utility (`merchant-normalization.ts`), one addition to the existing `dashboard` module (`net-worth-history.ts` + its Route Handler + its hook), and no changes required to any Phase 1/2/3a file beyond the new read-only cross-domain function calls already documented in api-contracts.md (`investments.service.getGainLossForPeriod`, `recurring-income.service.getActualReceivedIncomeBySource`, and confirming `debt.service.getDebtById`'s archived-inclusive behavior).
+
+```
+src/
+├── app/
+│   ├── (dashboard)/
+│   │   ├── page.tsx                  # UPDATED: Dashboard gains the Net Worth History chart
+│   │   │                             #   (features/dashboard/components/net-worth-history-chart.tsx)
+│   │   ├── analytics/
+│   │   │   └── page.tsx              # UPDATED (was a Phase-0-era placeholder stub — see note below):
+│   │   │                             #   ?period=this-year|last-12-months|year-to-date|all-time
+│   │   │                             #   searchParam; composes all 11 metric cards, each its own
+│   │   │                             #   <Suspense> boundary (AC3's "one metric's insufficient
+│   │   │                             #   data must never block the other ten")
+│   │   └── financial-goals/
+│   │       ├── page.tsx              # list (active + Completed + archived toggle), mirrors
+│   │       │                         #   goals/page.tsx's existing shape
+│   │       └── [goalId]/page.tsx     # goal detail: edit, progress (per-type view), archive
+│   │
+│   └── api/
+│       └── dashboard/
+│           └── net-worth-history/
+│               └── route.ts          # GET ?range= — the one new Dashboard Route Handler this
+│                                     #   phase, used only by use-net-worth-history.ts for
+│                                     #   range-selector refetch after initial load
+│
+├── features/
+│   ├── dashboard/                    # existing Phase 1 module — Phase 3b adds:
+│   │   ├── server/
+│   │   │   └── net-worth-history.ts  # NEW: getNetWorthHistory(userId, range), resolveDefaultRange(userId)
+│   │   ├── hooks/
+│   │   │   └── use-net-worth-history.ts  # NEW: TanStack Query, range-toggle refetch,
+│   │   │                             #   same shape as use-debts.ts's includeArchived toggle
+│   │   └── components/
+│   │       └── net-worth-history-chart.tsx  # NEW: Client Component — range selector +
+│   │                                 #   breakdown toggle (pure client-side view switch,
+│   │                                 #   no extra fetch — see api-contracts.md AC5)
+│   │
+│   ├── analytics/
+│   │   ├── server/
+│   │   │   ├── period.ts             # PURE (no Prisma): resolveReportingPeriodRange(period, now).
+│   │   │   │                         #   Stays under server/, not feature-root — nothing client-side
+│   │   │   │                         #   calls it directly (contrast with payoff-math.ts); the shared
+│   │   │   │                         #   reporting-period selector triggers a searchParam navigation,
+│   │   │   │                         #   not a client-side recompute of this function.
+│   │   │   ├── spending-trends.ts    # getYearlySpending, getCategoryTrends (Pass 1)
+│   │   │   ├── expense-breakdown.ts  # getExpenseDistribution, getTopMerchants, getLargestPurchases (Pass 1)
+│   │   │   ├── budget-comparison.ts  # getBudgetVsActual (Pass 1) — the one Pass-1 file with an
+│   │   │   │                         #   outbound cross-domain call (budgeting.service.getBudgetMonth)
+│   │   │   ├── spending-heatmap.ts   # getDailySpendingHeatmap (Pass 1)
+│   │   │   ├── income-analytics.ts   # getIncomeGrowth, getIncomeSources (Pass 2) — calls
+│   │   │   │                         #   recurring-income.service.getActualReceivedIncomeBySource
+│   │   │   ├── savings-growth.ts     # getSavingsGrowth (Pass 2) — calls dashboard.service
+│   │   │   │                         #   .getMonthlySummary (per month) and investments.service
+│   │   │   │                         #   .getGainLossForPeriod
+│   │   │   ├── subscriptions.ts      # getSubscriptionCandidates, getActiveSubscriptionAnnualizedTotal
+│   │   │   │                         #   (Pass 2) — Prisma-touching orchestration + dismissal filtering
+│   │   │   ├── subscription-detection.ts  # PURE: the merchant-grouping/interval/amount-tolerance
+│   │   │   │                         #   detection algorithm. No Prisma. Stays under server/ (not
+│   │   │   │                         #   feature-root) — see the period.ts note above; unit-tested
+│   │   │   │                         #   against fixture arrays exactly like payoff-math.ts.
+│   │   │   ├── actions.ts            # dismissSubscriptionCandidate
+│   │   │   └── validation.ts         # ReportingPeriodSchema, DismissSubscriptionCandidateSchema
+│   │   ├── types.ts                  # ReportingPeriod, SubscriptionCandidate, SubscriptionStatus, etc.
+│   │   └── components/
+│   │       ├── reporting-period-select.tsx  # the one Client Component this module needs
+│   │       │                         #   (triggers router.push with the new searchParam)
+│   │       ├── yearly-spending-chart.tsx
+│   │       ├── category-trends-chart.tsx
+│   │       ├── expense-distribution-chart.tsx
+│   │       ├── budget-vs-actual-table.tsx
+│   │       ├── top-merchants-list.tsx
+│   │       ├── largest-purchases-list.tsx
+│   │       ├── spending-heatmap.tsx
+│   │       ├── income-growth-chart.tsx
+│   │       ├── income-sources-chart.tsx
+│   │       ├── savings-growth-chart.tsx
+│   │       └── subscription-list.tsx  # includes the per-row dismiss button (Server Action)
+│   │                                  # (no hooks/ folder this phase — no client refetch need, see
+│   │                                  #   Architecture.md's Server/client boundary section)
+│   │
+│   └── financial-goals/
+│       ├── server/
+│       │   ├── service.ts            # getFinancialGoals, getFinancialGoalById — calls
+│       │   │                         #   debt.service.getDebtById, dashboard.service.getNetWorth,
+│       │   │                         #   dashboard.server/net-worth-history.ts.getNetWorthHistory,
+│       │   │                         #   accounts.service.getAccounts, dashboard.service
+│       │   │                         #   .getMonthlySummary (x3, rolling average) — see
+│       │   │                         #   Architecture.md's full call list. Also owns the private
+│       │   │                         #   Debt Payoff exclusivity check (no shared lib/ guard needed).
+│       │   ├── actions.ts            # createFinancialGoal, updateFinancialGoal,
+│       │   │                         #   archiveFinancialGoal, unarchiveFinancialGoal —
+│       │   │                         #   deliberately NO contribution/progress-logging action (AC6)
+│       │   └── validation.ts         # CreateFinancialGoalSchema (discriminated union on type),
+│       │                             #   UpdateFinancialGoalSchema (excludes type, per AC1)
+│       ├── types.ts                  # FinancialGoal, FinancialGoalType, MeasurementBasis,
+│       │                             #   FinancialGoalWithProgress (discriminated on type)
+│       │                             # (no hooks/ folder this phase — plain Server Component list,
+│       │                             #   same shape as goals/page.tsx, no toggle-refetch need)
+│       └── components/
+│           ├── debt-payoff-goal-form.tsx
+│           ├── net-worth-savings-goal-form.tsx
+│           ├── savings-rate-goal-form.tsx
+│           ├── financial-goal-list.tsx
+│           └── financial-goal-card.tsx  # renders the per-type progress view differently —
+│                                        #   a 0–100% bar for Debt Payoff/Net Worth types, a plain
+│                                        #   "14% → target 20%" two-figure display for Savings Rate
+│                                        #   (per the spec's explicit "not a fill bar" decision)
+│
+└── lib/
+    └── merchant-normalization.ts     # NEW: normalizeMerchantName(raw) — pure, shared by Top
+                                       #   Merchants and Subscription Cost Detection. See
+                                       #   Architecture.md for why this is a separate function from
+                                       #   transactions/server/import.ts's own private, stricter
+                                       #   CSV-dedup normalization, not a merge of the two.
+```
+
+**As-built note:** `app/(dashboard)/analytics/page.tsx` already exists in the repo as a Phase-0-era placeholder stub (a static "Coming in Phase 3" message, wired up only so Sidebar navigation doesn't 404) — this phase's implementation **replaces that stub's contents**, it is not a new route file.
 
 ### Rationale notes
 
-- **`debt`, `investments`, `recurring-income` are three separate feature modules, not folded into one "Phase 3a" module.** Same reasoning as Phase 2's Budgeting/Goals/Bills split: each is an independently-ownable domain with its own data, its own CRUD surface, and (per the Roadmap's own build-order note) its own dedicated backend implementation pass. Folding them together would recreate the exact "too large for one clean review cycle" problem the Phase 3/3a split itself was designed to avoid at the phase level — no reason to reintroduce it at the module level.
-- **`payoff-math.ts` breaks the "pure logic lives under `server/`" precedent Bills' `occurrence.ts` set**, and that break is deliberate, not an inconsistency — see Architecture.md's isomorphic pure-calculation-file convention for the full justification (client-side instant recompute requirement, AC6/AC7).
-- **`recurring-income/server/occurrence.ts` is a new, small, parallel file to `bills/server/occurrence.ts`, not a shared/merged model.** Per `recurring-income.md`'s own Dependencies note, sharing the underlying schedule/occurrence *model* between Bills and Recurring Income was left as "an implementation consideration, not a product requirement" for the Database Architect. This Architect's recommendation: keep the two Prisma models parallel (`BillOccurrence`, `IncomeOccurrence`), since their status vocabularies and paid/received semantics genuinely differ (Late vs. Not Yet Received is a deliberate, resolved product distinction, not an oversight) — but do not duplicate the underlying cadence math, hence `lib/recurrence.ts`.
-- **`lib/transaction-link-guard.ts` exists specifically to avoid a circular feature-level dependency between `bills` and `recurring-income`** — see Architecture.md's "Cross-feature exclusivity" section for the two designs considered and why the shared-`lib/`-utility shape was chosen over either domain importing the other.
-- **The Net Worth Snapshot job is added to the existing `features/dashboard/` module, not a new `features/net-worth-snapshot/` module.** It has no data of its own beyond a snapshot row of numbers Dashboard's own `getNetWorth` already computes, and no UI this phase (`roadmap.md`: "backend only, no UI... does not wait for 3b's Net Worth History chart"). This mirrors the reasoning that kept Calendar v1 inside `features/bills/` in Phase 2 rather than spinning up a placeholder module: a single dependency, in one direction, with no independent data model of its own beyond "a timestamped copy of a number Dashboard already knows how to compute."
-- **`app/(dashboard)/investments/[accountId]/page.tsx` is keyed by the container's `accountId`, not a separate "investment ID"** — consistent with the Product Owner's/this Architect's recommendation that the Account row itself is the container, not a new parallel entity.
-- **No standalone `app/(dashboard)/debts/[debtId]/holdings` or similar nested route is introduced for Debt** — Debt's optional Account link (if the Database Architect adopts it) is surfaced as an action within the debt detail page (e.g. "Link to an existing account"), not a separate route, matching how Bills' transaction-linking is a dialog within the bill detail view, not its own page.
+- **`analytics` and `financial-goals` are two separate feature modules, not one "Phase 3b" module** — same reasoning as every prior phase's domain-split (Phase 2's Budgeting/Goals/Bills, Phase 3a's Debt/Investments/Recurring Income): each is independently ownable, independently reviewable, and per the Roadmap's own Phase 3b build order, built in sequence (Analytics Pass 1, Pass 2, then Financial Goals) rather than as one monolith.
+- **The Net Worth History chart is added to the existing `features/dashboard/` module, not a new `features/net-worth-history/` module** — identical reasoning to why the Phase 3a snapshot job lives inside `dashboard/` rather than its own module: it has no data of its own beyond reads over a table Dashboard already owns, and its one new Route Handler exists purely to serve Dashboard's own range selector, not a new domain.
+- **`features/analytics/server/` is split into 9 files by shared query shape, not 1 giant file or 11 single-metric files** — see Architecture.md's "Analytics module structure" section for the full reasoning (file-size discipline, avoiding duplicated period-resolution boilerplate, isolating the one Pass-1 file with an outbound cross-domain call).
+- **`subscription-detection.ts` is pure but stays under `server/`, not at the feature root** — it breaks from `payoff-math.ts`'s isomorphic placement precedent deliberately, because (unlike Debt's strategy comparison) no Client Component ever needs to call it directly for instant recompute; detection always happens server-side as part of a Server Component's initial read. Purity earns unit-testability, not automatically the feature-root placement — that placement rule is specifically about client-callability.
+- **Neither `analytics` nor `financial-goals` gets a `hooks/` folder this phase** — flagged explicitly (not a gap): Analytics' shared filter is a searchParam-driven Server Component re-render (same mechanism as Budgeting's month-navigator), and Financial Goals has no toggle-and-refetch need analogous to `includeArchived` on a client-cached list. Both patterns are already fully covered by mechanisms this codebase established in Phase 1/2; neither needs a new one invented for it.
+- **No changes to `features/bills/`, `features/notifications/`, or `features/goals/` (Savings Goals) in Phase 3b** — confirmed, per api-contracts.md's explicit notes in each of those sections above.

@@ -10,8 +10,10 @@ import { db } from "@/lib/db"
 import { addUtcMonths } from "@/lib/recurrence"
 
 import type {
+  ActualReceivedIncomeRecord,
   ExpectedIncomePeriod,
   ExpectedUpcomingIncome,
+  GetActualReceivedIncomeOptions,
   GetExpectedUpcomingIncomeOptions,
   GetIncomeStreamsOptions,
   IncomeOccurrence,
@@ -412,6 +414,123 @@ export async function getExpectedUpcomingIncome(
   }
 
   return { total, byStream }
+}
+
+// ---------------------------------------------------------------------------
+// Actual-received income by source (Phase 3b — Analytics' Income Growth/
+// Income Sources metrics, analytics.md AC13/AC14)
+// ---------------------------------------------------------------------------
+
+/** Builds the shared `[gte, lte]`/`[gte, undefined]` date-range fragment for
+ * `getActualReceivedIncomeBySource`'s three queries below, so "All Time"
+ * (`start: null`) is resolved identically across all three rather than
+ * risking one query's range drifting out of sync with the others. */
+function actualReceivedDateWhere(options: GetActualReceivedIncomeOptions) {
+  return options.start
+    ? { gte: options.start, lte: options.end }
+    : { lte: options.end }
+}
+
+/**
+ * The one cross-domain read this feature exposes to Analytics, per
+ * docs/architecture/api-contracts.md's Recurring Income section: "expose it
+ * as `recurring-income.service`'s own function... rather than Analytics
+ * reaching into `IncomeOccurrence`/`IrregularIncomeEvent` via direct Prisma
+ * access." Returns every actual-received income record within `options`'s
+ * range, tagged with its parent stream's `type` — a flat list (not
+ * pre-bucketed), so `features/analytics/server/income-analytics.ts` can
+ * derive both its per-month (Income Growth) and whole-period (Income
+ * Sources) views from one query.
+ *
+ * **Never the forward-looking `expectedAmount`/`expectedDate` figures**
+ * (analytics.md AC13's own explicit requirement) — this function reads three
+ * disjoint, already-actually-received sources, matching
+ * `toIncomeOccurrence`'s established "effective received amount/date" rule
+ * exactly rather than re-deriving a fourth, parallel definition of "actual":
+ *
+ * 1. **Linked occurrences** (`transactionId` set): the effective amount/date
+ *    is the linked `Transaction`'s own `amount`/`date`, never this row's own
+ *    (unused-when-linked) `receivedAmount`/`receivedDate` columns — the same
+ *    rule `toIncomeOccurrence` applies for the single-stream detail view.
+ * 2. **Manually-received occurrences** (`transactionId` null,
+ *    `receivedAmount` set): this row's own `receivedAmount`/`receivedDate`
+ *    columns are authoritative (AC8's "manual" receipt path).
+ * 3. **Irregular/One-off events**: `amount`/`date` are always this row's own
+ *    columns (never a live Transaction join), per `../types.ts`'s
+ *    `IrregularIncomeEvent` JSDoc — unchanged by this function.
+ *
+ * Every stream is included regardless of `archivedAt` — historical income
+ * actually received under a since-archived stream is still real, already-
+ * happened income and must not vanish from a past month's trend just
+ * because the user archived the stream later.
+ */
+export async function getActualReceivedIncomeBySource(
+  userId: string,
+  options: GetActualReceivedIncomeOptions,
+): Promise<ActualReceivedIncomeRecord[]> {
+  const dateWhere = actualReceivedDateWhere(options)
+
+  const [linkedOccurrences, manualOccurrences, irregularEvents] = await Promise.all([
+    db.incomeOccurrence.findMany({
+      where: { userId, transactionId: { not: null }, transaction: { date: dateWhere } },
+      select: {
+        transaction: { select: { amount: true, date: true } },
+        stream: { select: { type: true } },
+      },
+    }),
+    db.incomeOccurrence.findMany({
+      where: {
+        userId,
+        transactionId: null,
+        receivedAmount: { not: null },
+        receivedDate: dateWhere,
+      },
+      select: {
+        receivedAmount: true,
+        receivedDate: true,
+        stream: { select: { type: true } },
+      },
+    }),
+    db.irregularIncomeEvent.findMany({
+      where: { userId, date: dateWhere },
+      select: {
+        amount: true,
+        date: true,
+        stream: { select: { type: true } },
+      },
+    }),
+  ])
+
+  const records: ActualReceivedIncomeRecord[] = []
+
+  for (const occurrence of linkedOccurrences) {
+    // Defensive only: the `transactionId: { not: null }` filter above
+    // guarantees a linked row always has a joined `transaction`, since
+    // `onDelete: SetNull` clears `transactionId` itself the moment the
+    // linked Transaction is deleted — this can't actually be null in
+    // practice, guarded anyway rather than trusting that invariant silently.
+    if (!occurrence.transaction) continue
+    records.push({
+      type: occurrence.stream.type,
+      amount: occurrence.transaction.amount.toNumber(),
+      date: occurrence.transaction.date,
+    })
+  }
+
+  for (const occurrence of manualOccurrences) {
+    if (!occurrence.receivedAmount || !occurrence.receivedDate) continue
+    records.push({
+      type: occurrence.stream.type,
+      amount: occurrence.receivedAmount.toNumber(),
+      date: occurrence.receivedDate,
+    })
+  }
+
+  for (const event of irregularEvents) {
+    records.push({ type: event.stream.type, amount: event.amount.toNumber(), date: event.date })
+  }
+
+  return records
 }
 
 // Exported so `server/actions.ts` can build the same client-safe

@@ -1,16 +1,20 @@
-// FinanceOS — Prisma schema (Phase 0 + Phase 1 + Phase 2 + Phase 3a)
+// FinanceOS — Prisma schema (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b)
 // Scope: auth (Better Auth), Accounts, Transactions, Categories, Tags (Phase 1);
 // Budgeting, Savings Goals, Bills, Notifications, and a multi-file Receipt model
 // for Transactions (Phase 2); Debt Tracker, Investments (Holding), Recurring
-// Income, and the Net Worth Snapshot job (Phase 3a). Modeled per docs/product/
-// {budgeting,savings-goals,bills,calendar-and-notifications,debt-tracker,
-// investments,recurring-income}.md and docs/architecture/{api-contracts.md,
-// Architecture.md}'s Phase 2/3a module-boundary sections. See
+// Income, and the Net Worth Snapshot job (Phase 3a); Financial Goals and
+// Subscription Cost Detection's dismissal-tracking (Phase 3b — Net Worth
+// History and Analytics' other 11 metrics are pure read layers over existing
+// tables and require no schema changes of their own, see below). Modeled per
+// docs/product/{budgeting,savings-goals,bills,calendar-and-notifications,
+// debt-tracker,investments,recurring-income,financial-goals,analytics,
+// net-worth-history}.md and docs/architecture/{api-contracts.md,
+// Architecture.md}'s Phase 2/3a/3b module-boundary sections. See
 // docs/database/{er-diagram,migration-strategy,performance-considerations}.md
-// for the full rationale behind every Phase 3a modeling decision below.
-// Later-phase domains (Phase 3b Financial Goals extension, Analytics, AI)
-// remain deferred — do not pre-model them here to avoid guessing business
-// rules the Product Owner hasn't specified yet.
+// for the full rationale behind every modeling decision below.
+// Later-phase domains (Phase 4 AI) remain deferred — do not pre-model them
+// here to avoid guessing business rules the Product Owner hasn't specified
+// yet.
 
 generator client {
   provider = "prisma-client-js"
@@ -63,6 +67,10 @@ model User {
   incomeOccurrences     IncomeOccurrence[]
   irregularIncomeEvents IrregularIncomeEvent[]
   netWorthSnapshots     NetWorthSnapshot[]
+
+  // FinanceOS domain data (Phase 3b)
+  financialGoals                 FinancialGoal[]
+  dismissedSubscriptionMerchants DismissedSubscriptionMerchant[]
 
   @@map("user")
 }
@@ -172,6 +180,14 @@ model Account {
   // optional and independent — an Account is never required to have either.
   debt     Debt?
   holdings Holding[]
+
+  // Phase 3b: zero or more FinancialGoal rows of type NET_WORTH_SAVINGS_TARGET
+  // (measurementBasis: ACCOUNT_SUBSET) may include this Account in their
+  // subset — see FinancialGoalAccount below. Purely an inclusion record; an
+  // Account never needs to know which goals reference it in normal use, this
+  // back-relation exists only because Prisma requires both sides of a
+  // relation to be declared.
+  financialGoalLinks FinancialGoalAccount[]
 
   @@index([userId])
   // Better Auth's own OAuth-link model (AuthAccount, above) owns the
@@ -693,6 +709,14 @@ model Debt {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
+  // Phase 3b: zero or more Financial Goals of type DEBT_PAYOFF may target
+  // this Debt over its lifetime (an archived goal followed by a fresh one —
+  // financial-goals.md's own "archive and recreate" allowance) — see
+  // FinancialGoal.linkedDebtId below for the "at most one *active* goal per
+  // Debt at a time" exclusivity rule, which is an application-level guard,
+  // not expressible via this back-relation.
+  financialGoals FinancialGoal[]
+
   @@index([userId])
   // accountId's own @unique already gives Postgres an index for the
   // link/unlink point-lookup; no additional composite index is needed at
@@ -1046,4 +1070,203 @@ model NetWorthSnapshot {
   @@unique([userId, capturedDate])
   @@index([userId, capturedAt])
   @@map("net_worth_snapshot")
+}
+
+// ---------------------------------------------------------------------------
+// FinanceOS domain (Phase 3b) — Financial Goals and Subscription Cost
+// Detection's dismissal-tracking. Net Worth History and the other 11
+// Analytics metrics are pure read layers over tables that already exist
+// (NetWorthSnapshot, Transaction, Category, Budget, HoldingValueHistoryEntry,
+// IncomeOccurrence/IrregularIncomeEvent) and require no schema changes —
+// see docs/architecture/Architecture.md's Phase 3b section and
+// docs/database/er-diagram.md's Phase 3b design notes for the full reasoning.
+// ---------------------------------------------------------------------------
+
+// ---- Subscription Cost Detection's dismissal-tracking -----------------------
+//
+// Modeling decision (docs/product/analytics.md's Subscription Cost Detection
+// section, handoff from Architecture.md's "Subscription Cost Detection's
+// dismissal-tracking schema requirement"): detection itself is entirely
+// computed at read time against Transaction data (never persisted as a
+// "Subscription" row), but a user's dismissal of a false positive is a
+// genuine, durable fact — "this merchant is not a subscription, for this
+// user, from now on" — that a read-time-only computation cannot represent on
+// its own. This is this schema's first model whose entire purpose is
+// "durably record an exclusion decision about a computed, never-persisted
+// concept" (contrast with Notification, which dismisses an already-persisted
+// row, or every archivedAt column, which soft-deletes an already-persisted
+// entity). A JSON array on User, and reusing Notification.dismissedAt, were
+// both considered and rejected — see Architecture.md's full reasoning
+// (row-per-fact convention, no @@unique protection, User being Better-Auth-
+// owned schema territory; Notification dismisses a specific triggered event,
+// not a standing exclusion rule).
+model DismissedSubscriptionMerchant {
+  id                     String   @id @default(cuid())
+  userId                 String
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // MUST be the exact output of lib/merchant-normalization.ts's
+  // normalizeMerchantName() — the same key features/analytics/server/
+  // subscription-detection.ts groups candidates by, so a later detection
+  // pass's grouping key matches this table's lookup key directly. Storing
+  // the *raw* merchant string here would silently fail to suppress future
+  // detections of the same merchant under a slightly different raw spelling
+  // (e.g. "NETFLIX.COM" one month, "Netflix" the next) — normalization must
+  // happen once, before storage, never re-derived inconsistently at read
+  // time. Deliberately a plain `String` (maps to Postgres `text`, no
+  // `@db.VarChar` length cap) to match `Transaction.merchant`'s own column
+  // definition above, which is the raw input this normalized value is
+  // ultimately derived from and must never be truncated relative to.
+  normalizedMerchantName String
+  // Audit/ordering only — this is not a soft-delete of a real entity (there
+  // is no "Subscription" row to undelete), so there is no corresponding
+  // "undismiss" requirement in analytics.md and none is added speculatively
+  // here. A future "undo" action is a simple row delete against this table;
+  // no schema change would be needed for that either.
+  dismissedAt            DateTime @default(now())
+
+  // One dismissal per user per normalized merchant — re-dismissing the same
+  // merchant is an idempotent no-op (upsert), not a second row, and this is
+  // also this table's natural point-lookup for "has this user already
+  // dismissed this merchant" during every detection pass.
+  @@unique([userId, normalizedMerchantName])
+  @@index([userId])
+  @@map("dismissed_subscription_merchant")
+}
+
+// ---- Financial Goals ---------------------------------------------------------
+//
+// Modeling decision (docs/product/financial-goals.md, Database Architect's
+// call per Architecture.md's "FinancialGoal schema-adjacent module design"
+// handoff): a **flat table with nullable type-specific columns, one enum
+// discriminator** — mirroring `Debt` (one table, one `DebtType` enum, fields
+// shared across all six debt types) and `IncomeStream` (one table, one
+// `IncomeType`/`IncomeSchedule` enum pair, nullable fields depending on
+// schedule) rather than three separate per-type tables or a JSON "config"
+// blob. This keeps `getFinancialGoals`'s list query a single-table,
+// single-groupBy-free read regardless of the mix of types a user has
+// created, consistent with this schema's existing precedent.
+//
+// Deliberately **no `completedAt`/`progress`/`percentComplete` column and no
+// manual-update timestamp anywhere on this model.** Every progress/completion
+// value for all three goal types is computed at read time in
+// features/financial-goals/server/service.ts from live source data (Debt's
+// effectiveBalance, Dashboard's getNetWorth, Dashboard's getMonthlySummary),
+// never stored — the identical "never store what's derived" rule already
+// applied to Goal.isCompleted, Debt.isPaidOff, and Bill/Income occurrence
+// status. financial-goals.md's own Boundary section (the resolved distinction
+// from SavingsGoal) states this read-live behavior is this feature's entire
+// reason for existing as a separate model — storing a completion flag here
+// would reintroduce exactly the "which number is the real one" drift risk
+// that boundary decision was written to prevent. A tempting-but-unnecessary
+// `frozenProgressAtArchival` column for the "linked Debt archived while its
+// goal is active" edge case was explicitly considered and rejected too: an
+// archived Debt's row is never deleted, only flagged, so continuing to read
+// its unchanged balance after archival already produces the "frozen"
+// behavior the spec asks for, with zero additional persistence.
+enum FinancialGoalType {
+  DEBT_PAYOFF
+  NET_WORTH_SAVINGS_TARGET
+  SAVINGS_RATE_TARGET
+}
+
+// NET_WORTH_SAVINGS_TARGET-type goals only (financial-goals.md's Type 2):
+// whether the goal's target is measured against the user's Total Net Worth
+// (the same live figure dashboard.service.getNetWorth already computes) or a
+// user-selected subset of their own non-archived Accounts (the
+// FinancialGoalAccount join table below). Persisted alongside
+// FinancialGoal.type as part of the goal's fixed configuration (editable per
+// AC3, but never derived) — not a computed value.
+enum MeasurementBasis {
+  TOTAL_NET_WORTH
+  ACCOUNT_SUBSET
+}
+
+model FinancialGoal {
+  id     String            @id @default(cuid())
+  userId String
+  user   User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name   String
+  // Fixed at creation (AC1: "editing a goal's type after creation is not
+  // supported") — application code must never expose an update path that
+  // changes this column; a user who wants a different type archives the
+  // current goal and creates a new one instead.
+  type   FinancialGoalType
+
+  // ---- Type 1 — DEBT_PAYOFF fields (null for the other two types) ----------
+  // Optional FK to Debt, unlike Debt.accountId's plain @unique: a Debt may be
+  // targeted by more than one FinancialGoal over its lifetime (an archived
+  // goal followed by a fresh one, per the spec's own "archive and restart
+  // tracking" allowance), so this is a plain (non-unique) nullable FK — the
+  // "at most one *active* Debt Payoff goal per Debt at a time" rule is an
+  // application-level guard in features/financial-goals/server/service.ts,
+  // not a database constraint (see the design note in er-diagram.md's Phase
+  // 3b section for the full reasoning on why this is a conscious choice, not
+  // an oversight). onDelete: SetNull mirrors every other optional FK to a
+  // soft-deleted entity in this schema (Debt.accountId, BillOccurrence.
+  // transactionId): Debts are never hard-deleted in normal product use, but
+  // Prisma requires an explicit policy, and a hard-deleted Debt must not
+  // cascade-delete a goal's own name/type/startingBalance configuration.
+  linkedDebtId    String?
+  linkedDebt      Debt?    @relation(fields: [linkedDebtId], references: [id], onDelete: SetNull)
+  // Captured once at creation from the linked Debt's effectiveBalance at
+  // that moment — a fixed anchor, never recomputed later (per the spec's
+  // "how much of the balance that existed when I started this goal have I
+  // paid off, independent of the debt's balance continuing to fluctuate").
+  startingBalance Decimal? @db.Decimal(14, 2)
+
+  // ---- Type 2 — NET_WORTH_SAVINGS_TARGET fields (null for the other two) ---
+  targetAmount     Decimal?          @db.Decimal(14, 2)
+  // The subset itself (when ACCOUNT_SUBSET) lives in the FinancialGoalAccount
+  // join table below, not as a column here — this column only records which
+  // of the two measurement modes is active.
+  measurementBasis MeasurementBasis?
+
+  // ---- Type 3 — SAVINGS_RATE_TARGET fields (null for the other two types) --
+  // Validated 0-100 at the application layer (Zod) per the spec's "target
+  // above 100% or below 0%... rejected with a validation error" — no DB
+  // CHECK constraint, consistent with this schema's existing precedent of
+  // leaving numeric-range validation to Zod (e.g. GoalContribution.amount).
+  targetPercent Decimal?  @db.Decimal(5, 2)
+  // Optional (Type 3 only, per the spec's own wording — Types 1/2 have no
+  // equivalent "target date" concept at all).
+  targetDate    DateTime? @db.Date
+
+  // Archive-only (AC4), matches Account/Bill/Goal/Debt exactly. Explicitly
+  // allowed even on an already-Completed goal (Edge Cases) — archiving is a
+  // pure visibility action, unrelated to the read-time-computed Completed
+  // state.
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  accountSubset FinancialGoalAccount[]
+
+  @@index([userId])
+  // Supports the application-level Debt Payoff exclusivity guard's own
+  // lookup ("does an active DEBT_PAYOFF goal already exist for this Debt") —
+  // a single indexed filter (`WHERE linkedDebtId = ? AND archivedAt IS
+  // NULL`), run inside the same Prisma $transaction as the create, per the
+  // guard's own contract in service.ts. Not a @@unique — see linkedDebtId's
+  // comment above for why a conditional/partial-unique constraint was
+  // considered and not adopted this phase.
+  @@index([linkedDebtId])
+  @@map("financial_goal")
+}
+
+// Explicit join table for Type 2's ACCOUNT_SUBSET measurement basis — not
+// Prisma's implicit m-n, same reasoning as TransactionTag's existing
+// precedent: an explicit table composes better with future growth (e.g. a
+// future "weight" or "addedAt" column) than an implicit one, and it's the
+// natural place to enforce "only non-archived Accounts may be selected" at
+// the application layer whenever a user edits the subset (financial-goals.md
+// Edge Cases: "allowed at any time; recalculates live at the next read using
+// the newly selected subset").
+model FinancialGoalAccount {
+  financialGoalId String
+  financialGoal   FinancialGoal @relation(fields: [financialGoalId], references: [id], onDelete: Cascade)
+  accountId       String
+  account         Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@id([financialGoalId, accountId])
+  @@map("financial_goal_account")
 }

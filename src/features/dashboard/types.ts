@@ -122,3 +122,68 @@ export interface MonthlyTrend {
   income: number
   expenses: number
 }
+
+// ---------------------------------------------------------------------------
+// Net Worth History chart (Phase 3b) — `server/net-worth-history.ts`.
+// Per docs/architecture/api-contracts.md's "Net Worth History chart" section
+// and docs/product/net-worth-history.md. A pure read layer over the existing
+// `NetWorthSnapshot` table (Phase 3a) — no new Prisma model.
+// ---------------------------------------------------------------------------
+
+/** The four time-range selector options net-worth-history.md AC2 requires.
+ * String literals (not a Prisma enum — this has no corresponding DB column)
+ * so the same union is usable both server-side (`getNetWorthHistory`'s
+ * parameter) and as the `?range=` query string value the Route Handler
+ * parses via `NetWorthHistoryRangeSchema`. */
+export type NetWorthHistoryRange = "30d" | "90d" | "1y" | "all"
+
+/** One plotted point in `NetWorthHistoryResponse.points`. Every point is a
+ * genuine, already-captured `NetWorthSnapshot` row — never an averaged or
+ * interpolated synthetic value, per net-worth-history.md AC8 and
+ * Architecture.md's thinning-shape reasoning. */
+export interface NetWorthHistoryPoint {
+  /** `"yyyy-MM-dd"`, the snapshot's `capturedDate` — built from UTC
+   * components, matching this codebase's `MonthlyTrend.month`/
+   * `Transaction.date` UTC-calendar-date convention (risk-register.md #8). */
+  date: string
+  /** `NetWorthSnapshot.totalNetWorth` — the single-line default view. */
+  netWorth: number
+  /** `NetWorthSnapshot.totalAccountBalance` — AC5's "Assets" breakdown
+   * series (includes cash, investments, everything non-debt). */
+  assets: number
+  /** `NetWorthSnapshot.totalUnlinkedDebtLiability` — AC5's "Debt" breakdown
+   * series. */
+  debt: number
+  /** `true` only for the last entry in `points` — drives AC9's "as of Jul
+   * 21"-style label on the chart's most recent point, since that snapshot
+   * may be from earlier today (or yesterday, depending on cron timing) and
+   * must never be implied to be a live, real-time figure. */
+  isMostRecent: boolean
+}
+
+/** Return shape of `service.getNetWorthHistory`, per api-contracts.md's
+ * `NetWorthHistoryResponse` shape. */
+export interface NetWorthHistoryResponse {
+  range: NetWorthHistoryRange
+  /** Total distinct captured days across the user's *entire* snapshot
+   * history — independent of `range` (AC4's "N days tracked so far"
+   * messaging must read correctly even when a shorter range is selected). */
+  daysTracked: number
+  /** `daysTracked < 14` (AC4) — the sparse-history, "Building your net
+   * worth history" messaging threshold. */
+  isSparse: boolean
+  points: NetWorthHistoryPoint[]
+}
+
+/** Return shape of `resolveDefaultRange`, per api-contracts.md — a cheap
+ * `min(capturedDate)`/`count` query, not a full row fetch, so the initial
+ * Server Component render can pick the right default range (AC3) without
+ * paying for the full `getNetWorthHistory` query first. */
+export interface DefaultRangeResolution {
+  /** `"all"` when the user's earliest snapshot is less than 90 days old,
+   * `"90d"` once it is 90 or more days old (AC3) — deliberately *not* a
+   * `NetWorthHistoryRange` union, since "30d"/"1y" are never valid defaults
+   * per the product spec. */
+  defaultRange: "90d" | "all"
+  daysTracked: number
+}
