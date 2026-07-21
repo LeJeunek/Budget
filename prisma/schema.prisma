@@ -782,6 +782,20 @@ model Holding {
 
   @@index([userId])
   @@index([accountId])
+  // Composite index for the (accountId, closedAt) filter shape used by every
+  // hot path that touches this table: `actions.ts`'s
+  // `recalculateContainerBalance` (invoked on every Holding create/update/
+  // close — the single most frequently executed query against this model),
+  // plus the read-side `getContainers` `_count` subquery and
+  // `getHoldingsForContainer`'s scoped list (both in `service.ts`). A single-
+  // column `accountId` index still requires scanning/filtering all of a
+  // container's rows (active + Closed) for `closedAt`; this composite index
+  // lets Postgres satisfy the whole predicate — and, since `closedAt` is
+  // included, the `_sum`/`_count` aggregations — from the index alone.
+  // Non-urgent at current "handful of holdings per container" scale (per
+  // docs/product/investments.md), but cheap to add now per the Phase 3a
+  // gate review's performance follow-up.
+  @@index([accountId, closedAt])
   @@map("holding")
 }
 

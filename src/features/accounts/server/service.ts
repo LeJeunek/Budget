@@ -72,6 +72,43 @@ export async function getAccountById(
 }
 
 /**
+ * Bug fix (Phase 3a Bug Hunter review, HIGH severity — "Accounts'
+ * updateAccount can directly overwrite Investments' derived balance,
+ * corrupting Net Worth"): does this account have at least one active
+ * (non-Closed) Holding? `features/accounts/server/actions.ts`'s
+ * `updateAccount` calls this to decide whether an incoming `balance` field
+ * must be rejected — per docs/product/investments.md's explicit "no second,
+ * independently-maintained balance number for the same container" hard
+ * constraint, a container with active holdings has its `balance` derived and
+ * written back exclusively by `setDerivedBalance` above (Investments' own
+ * write path); `updateAccount` accepting a client-supplied `balance` for such
+ * an account would silently violate that invariant until the next Holding
+ * mutation overwrote it again with no explanation surfaced to the user.
+ *
+ * Implemented as a direct `db.holding` query here — rather than importing
+ * anything from `features/investments` — to preserve the one-directional
+ * dependency documented in `features/investments/server/service.ts`
+ * ("Investments -> Accounts, never the reverse"): Accounts must stay
+ * ignorant of Investments' module internals, but checking "does at least one
+ * row in the shared `holding` table reference this account and have
+ * `closedAt: null`" is a plain fact about this Account's own row, not a piece
+ * of Investments' domain logic (gain/loss math, allocation, etc.) — the same
+ * distinction that already lets this file's `setDerivedBalance` accept a
+ * pre-computed sum without knowing how it was derived.
+ */
+export async function hasActiveHoldings(
+  userId: string,
+  accountId: string,
+): Promise<boolean> {
+  const activeHolding = await db.holding.findFirst({
+    where: { userId, accountId, closedAt: null },
+    select: { id: true },
+  })
+
+  return activeHolding !== null
+}
+
+/**
  * Writes the derived, holdings-sum `balance` onto an Investment/Retirement/
  * Crypto container Account.
  *

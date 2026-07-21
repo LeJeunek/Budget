@@ -188,6 +188,22 @@ export async function createHolding(input: unknown): Promise<ApiResult<Holding>>
  * (`!== undefined`), never by comparing the new value against the old one,
  * so the "re-saving the same value" edge case falls out for free without
  * any special-casing.
+ *
+ * Bug fix (Phase 3a Bug Hunter review, MEDIUM severity — "Closed holdings
+ * remain fully editable, silently rewriting historical gain/loss"): rejects
+ * the edit outright when the target holding's `closedAt` is not null. A
+ * Closed holding is this domain's frozen historical record (AC5's
+ * archive-only pattern, matching Accounts/Goals/Bills/Debt) — every field
+ * remaining editable indefinitely after close let `currentValue`/`costBasis`
+ * be silently rewritten post-close, appending a new
+ * `HoldingValueHistoryEntry` and changing the Closed-holdings view's
+ * gain/loss after the fact with no error surfaced anywhere. This is a
+ * deliberate "closed means frozen" stance: there is intentionally no
+ * "unclose"/reopen action in this file (see this file's own top-level JSDoc),
+ * so a Closed holding has no legitimate path back to being editable at all
+ * right now — if that ever becomes a real product need, it is a new,
+ * explicit action to request from the Solution Architect/Product Owner, not
+ * a side effect of relaxing this check.
  */
 export async function updateHolding(input: unknown): Promise<ApiResult<Holding>> {
   const user = await getCurrentUser()
@@ -202,6 +218,10 @@ export async function updateHolding(input: unknown): Promise<ApiResult<Holding>>
   const existing = await db.holding.findFirst({ where: { id, userId: user.id } })
   if (!existing) {
     return fail("Holding not found")
+  }
+
+  if (existing.closedAt) {
+    return fail("This holding is closed and can no longer be edited")
   }
 
   const effectiveAssetType = assetType ?? existing.assetType

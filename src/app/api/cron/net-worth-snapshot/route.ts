@@ -31,6 +31,13 @@ import { captureAllUsersNetWorthSnapshots } from "@/features/dashboard/server/sn
  * `captureAllUsersNetWorthSnapshots`'s own result, not a redesign of that
  * contract.
  */
+// Performance Engineer's Phase 3a gate review: captureAllUsersNetWorthSnapshots
+// loops sequentially (one DB round trip per user, deliberately — see that
+// function's own doc comment), so this route needs more than a typical
+// serverless default timeout well before the user base is large enough to
+// need the batching/cursor rework already scoped as the real long-term fix.
+export const maxDuration = 60
+
 export async function POST(request: Request): Promise<NextResponse> {
   const cronSecret = process.env.CRON_SECRET
   const providedSecret = getBearerToken(request.headers.get("authorization"))

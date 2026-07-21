@@ -220,6 +220,63 @@ function buildPortfolioGrowthSeries(
 }
 
 // ---------------------------------------------------------------------------
+// Allocation internals (AC9)
+// ---------------------------------------------------------------------------
+
+/** The minimal, plain-number shape `computeAllocationEntries` needs per
+ * holding — deliberately narrower than the full `Holding`/Prisma row (no
+ * Decimal, no id/userId/etc.), so the percentage math below can be unit
+ * tested with plain fixture data, with no database access required. */
+interface AllocationSourceHolding {
+  assetType: AssetType
+  sector: Sector | null
+  currentValue: number
+}
+
+/**
+ * Pure allocation-percentage calculation, extracted out of `getAllocation`
+ * below (Unit Test Engineer, Phase 3a gate-review follow-up: `getAllocation`
+ * itself always queries the database directly with no way to inject fixture
+ * data, so this calculation-only portion is pulled out into its own exported
+ * function purely so it can be unit tested in isolation — a mechanical,
+ * behavior-preserving extraction, not a formula change).
+ *
+ * AC9's grouping/percentage rules: groups `holdings` by asset-type label or
+ * sector label (per `by`), with `null`-sector holdings bucketed into
+ * `SECTOR_NOT_APPLICABLE_LABEL` rather than excluded (Edge Cases), and each
+ * group's `percent = value / totalValue * 100`. Returns `[]` for an empty
+ * (or all-zero-value) `holdings` array rather than dividing by zero (Edge
+ * Case: "zero holdings in a container, or zero containers at all").
+ */
+export function computeAllocationEntries(
+  holdings: AllocationSourceHolding[],
+  by: AllocationBy,
+): AllocationEntry[] {
+  const totalValue = holdings.reduce((sum, holding) => sum + holding.currentValue, 0)
+  if (totalValue === 0) {
+    return []
+  }
+
+  const valueByLabel = new Map<string, number>()
+  for (const holding of holdings) {
+    const label =
+      by === "assetType"
+        ? ASSET_TYPE_LABELS[holding.assetType]
+        : holding.sector
+          ? SECTOR_LABELS[holding.sector]
+          : SECTOR_NOT_APPLICABLE_LABEL
+
+    valueByLabel.set(label, (valueByLabel.get(label) ?? 0) + holding.currentValue)
+  }
+
+  return Array.from(valueByLabel.entries()).map(([label, value]) => ({
+    label,
+    value,
+    percent: (value / totalValue) * 100,
+  }))
+}
+
+// ---------------------------------------------------------------------------
 // Public service functions (docs/architecture/api-contracts.md — Investments)
 // ---------------------------------------------------------------------------
 
@@ -404,29 +461,14 @@ export async function getAllocation(
     select: { assetType: true, sector: true, currentValue: true },
   })
 
-  const totalValue = holdings.reduce((sum, h) => sum + h.currentValue.toNumber(), 0)
-  if (totalValue === 0) {
-    return []
-  }
-
-  const valueByLabel = new Map<string, number>()
-  for (const holding of holdings) {
-    const value = holding.currentValue.toNumber()
-    const label =
-      options.by === "assetType"
-        ? ASSET_TYPE_LABELS[holding.assetType]
-        : holding.sector
-          ? SECTOR_LABELS[holding.sector]
-          : SECTOR_NOT_APPLICABLE_LABEL
-
-    valueByLabel.set(label, (valueByLabel.get(label) ?? 0) + value)
-  }
-
-  return Array.from(valueByLabel.entries()).map(([label, value]) => ({
-    label,
-    value,
-    percent: (value / totalValue) * 100,
-  }))
+  return computeAllocationEntries(
+    holdings.map((holding) => ({
+      assetType: holding.assetType,
+      sector: holding.sector,
+      currentValue: holding.currentValue.toNumber(),
+    })),
+    options.by,
+  )
 }
 
 /**

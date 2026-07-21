@@ -9,7 +9,8 @@ import {
   UpdateAccountSchema,
   AccountIdSchema,
 } from "@/features/accounts/server/validation"
-import { toAccount } from "@/features/accounts/server/service"
+import { hasActiveHoldings, toAccount } from "@/features/accounts/server/service"
+import { unlinkDebtOnAccountArchive } from "@/features/debt/server/service"
 
 /**
  * Mutating Server Actions for the Accounts module. Per
@@ -85,6 +86,21 @@ export async function createAccount(
  * `interestRate: null` is the one deliberate exception — `!== undefined`
  * still includes it, which is required so a caller can explicitly clear a
  * previously-set rate (see the JSDoc on `UpdateAccountSchema`).
+ *
+ * Bug fix (Phase 3a Bug Hunter review, HIGH severity — "Accounts'
+ * updateAccount can directly overwrite Investments' derived balance,
+ * corrupting Net Worth"): an incoming `balance` field is now rejected when
+ * the target account has one or more active Holdings, per
+ * docs/product/investments.md's "no second, independently-maintained balance
+ * number for the same container" hard constraint — such an account's balance
+ * is derived and exclusively written by Investments'
+ * `setDerivedBalance`/`recalculateContainerBalance` write-back path (see
+ * `features/accounts/server/service.ts`'s `hasActiveHoldings`); accepting a
+ * manual balance here would silently violate that invariant until the next
+ * Holding mutation overwrote it again with no explanation ever surfaced to
+ * the user. A container with zero active holdings (never had any, or every
+ * holding has since been Closed) has no derived value to protect, so its
+ * balance still edits normally, same as any non-container account.
  */
 export async function updateAccount(
   input: unknown
@@ -104,6 +120,12 @@ export async function updateAccount(
   })
   if (!existing) {
     return fail("Account not found")
+  }
+
+  if (balance !== undefined && (await hasActiveHoldings(user.id, id))) {
+    return fail(
+      "This account's balance is calculated from its holdings — edit a holding instead"
+    )
   }
 
   const updated = await db.account.update({
@@ -132,6 +154,18 @@ export async function updateAccount(
  * error, it just confirms the (already-satisfied) end state — a client
  * double-submitting the action, or two tabs racing, shouldn't surface a
  * confusing failure for a request that got what it wanted either way.
+ *
+ * Bug fix (Phase 3a Bug Hunter review, HIGH severity — "Net Worth liability
+ * vanishes when a linked Credit Card Account is archived while its Debt
+ * stays active"): archiving now also unlinks any still-active Debt linked to
+ * this Account (snapshotting the Account's current balance onto the Debt's
+ * own `balance` column first), inside the same transaction as the archive
+ * write itself. See `features/debt/server/service.ts`'s
+ * `unlinkDebtOnAccountArchive` for the full reasoning on why auto-unlink was
+ * chosen over rejecting the archive outright. This is a no-op for the
+ * overwhelming majority of accounts (no linked Debt at all), so the extra
+ * query this adds is cheap and only ever does real work in the one case it
+ * exists for.
  */
 export async function archiveAccount(
   input: unknown
@@ -156,9 +190,15 @@ export async function archiveAccount(
     return ok(toAccount(existing))
   }
 
-  const archived = await db.account.update({
-    where: { id },
-    data: { archivedAt: new Date() },
+  const archived = await db.$transaction(async (tx) => {
+    const updated = await tx.account.update({
+      where: { id },
+      data: { archivedAt: new Date() },
+    })
+
+    await unlinkDebtOnAccountArchive(tx, user.id, id, existing.balance)
+
+    return updated
   })
 
   return ok(toAccount(archived))

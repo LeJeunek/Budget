@@ -1,4 +1,4 @@
-import type { Debt as PrismaDebtRow } from "@prisma/client"
+import type { Debt as PrismaDebtRow, Prisma } from "@prisma/client"
 
 import { db } from "@/lib/db"
 
@@ -178,6 +178,76 @@ export async function getTotalActiveDebtBalanceForNetWorth(userId: string): Prom
   })
 
   return result._sum.balance?.toNumber() ?? 0
+}
+
+/**
+ * Bug fix (Phase 3a Bug Hunter review, HIGH severity — "Net Worth liability
+ * vanishes when a linked Credit Card Account is archived while its Debt
+ * stays active"): unlinks the Debt (if any, and if still active) currently
+ * linked to `accountId`, snapshotting the Account's last-known balance onto
+ * the Debt's own `balance` column before clearing `accountId`.
+ *
+ * **Why this exists at all**: `getNetWorth` (dashboard) excludes archived
+ * Accounts from its balance sum, and `getTotalActiveDebtBalanceForNetWorth`
+ * above deliberately excludes every Debt with `accountId != null` (on the
+ * assumption the Account sum already covers that liability once). Archiving
+ * an Account does *not* touch the Debt still pointing at it (`onDelete:
+ * SetNull` on `Debt.accountId` only fires on a hard delete, and Accounts are
+ * never hard-deleted — see `prisma/schema.prisma`'s comment on that FK) — so
+ * without this function, a still-linked-but-now-archived Debt would be
+ * counted in neither sum and its liability would silently disappear from Net
+ * Worth.
+ *
+ * **Why auto-unlink (not reject the archive)**: rejecting `archiveAccount`
+ * outright whenever a linked Debt exists would block a legitimate, common
+ * action (a user closing/archiving an old credit card they've paid off or
+ * moved off of) purely because of an internal bookkeeping detail the user
+ * never asked to think about, and Debt Tracker already has a well-established
+ * "what happens on unlink" answer this reuses verbatim: `server/actions.ts`'s
+ * `unlinkDebtFromAccount` (a user-initiated unlink) seeds `Debt.balance` from
+ * the linked Account's last-known balance before clearing `accountId`, because
+ * `Debt.balance` is otherwise stale/unused while linked (see that function's
+ * own JSDoc and the `Debt.balance` schema comment). Archiving the linked
+ * Account is product-equivalent to "this link is ending" from the Debt's
+ * point of view, so it gets the exact same treatment — the Debt survives,
+ * un-linked, with its own now-authoritative `balance` column correctly seeded,
+ * and `getTotalActiveDebtBalanceForNetWorth`'s existing `accountId IS NULL`
+ * filter picks it back up on the very next Net Worth read with zero changes
+ * needed to that function.
+ *
+ * **(Phase 3a) narrow, internal function — not a client-facing action.**
+ * Mirrors `features/accounts/server/service.ts`'s `setDerivedBalance`: this
+ * function is only ever called from inside the same `$transaction` as the
+ * Account mutation that triggers it (`features/accounts/server/actions.ts`'s
+ * `archiveAccount`), so an Account that archives successfully while its
+ * linked Debt is left stale can never happen — both writes commit or roll
+ * back together. Accepts a Prisma transaction client (`tx`), never the
+ * top-level `db` singleton, for that same reason.
+ *
+ * Only unlinks an *active* linked Debt (`archivedAt: null`) — an already-
+ * archived Debt is already excluded from Net Worth regardless of its
+ * `accountId`, so there is nothing to fix for it here (leaving an archived
+ * Debt's stale link alone is a separate, lower-priority follow-up, not part
+ * of this fix).
+ */
+export async function unlinkDebtOnAccountArchive(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  accountId: string,
+  accountBalance: Prisma.Decimal,
+): Promise<void> {
+  const linkedDebt = await tx.debt.findFirst({
+    where: { accountId, userId, archivedAt: null },
+    select: { id: true },
+  })
+  if (!linkedDebt) {
+    return
+  }
+
+  await tx.debt.update({
+    where: { id: linkedDebt.id },
+    data: { accountId: null, balance: accountBalance },
+  })
 }
 
 export { toDebt, toDebtWithProjection }
