@@ -1,6 +1,7 @@
 import { db } from "@/lib/db"
 import { EXCLUDE_SPLIT_PARENTS } from "@/features/transactions/server/service"
 import { getBudgetMonth } from "@/features/budgeting/server/service"
+import type { BudgetMonthView } from "@/features/budgeting/types"
 import {
   UNCATEGORIZED_CATEGORY_ID,
   UNCATEGORIZED_CATEGORY_NAME,
@@ -32,6 +33,43 @@ async function resolveEarliestActivityDate(userId: string): Promise<Date | null>
 }
 
 /**
+ * Pure per-month reshape of a `BudgetMonthView` into `BudgetVsActualMonth`,
+ * extracted out of `getBudgetVsActual` below (Unit Test Engineer, Phase 3b
+ * Analytics gate-review follow-up — same "calculation-only portion pulled
+ * into its own exported function" rationale as `spending-trends.ts`'s
+ * `buildYearlySpendingPoints`/`buildCategoryTrends`; a mechanical,
+ * behavior-preserving extraction, not a formula change).
+ *
+ * Maps `view.categories` 1:1 into `BudgetVsActualCategoryLine`s, then appends
+ * an explicit Uncategorized line (`allocated: null`, since Uncategorized is
+ * never a real, budgetable category) whenever `view.uncategorizedSpent` is
+ * nonzero — see `getBudgetVsActual`'s own JSDoc for why this must never be
+ * silently dropped.
+ */
+export function reshapeBudgetMonthView(
+  monthKey: string,
+  view: BudgetMonthView,
+): BudgetVsActualMonth {
+  const categories: BudgetVsActualMonth["categories"] = view.categories.map((line) => ({
+    categoryId: line.categoryId,
+    categoryName: line.categoryName,
+    allocated: line.allocated,
+    actual: line.spent,
+  }))
+
+  if (view.uncategorizedSpent !== 0) {
+    categories.push({
+      categoryId: UNCATEGORIZED_CATEGORY_ID,
+      categoryName: UNCATEGORIZED_CATEGORY_NAME,
+      allocated: null,
+      actual: view.uncategorizedSpent,
+    })
+  }
+
+  return { month: monthKey, categories }
+}
+
+/**
  * Budget vs. Actual (analytics.md AC9): for each month in the selected
  * period, each category's allocated amount against its actual spend —
  * Budgeting's own one-month-at-a-time planner view (`getBudgetMonth`),
@@ -56,7 +94,8 @@ async function resolveEarliestActivityDate(userId: string): Promise<Date | null>
  * silently dropping uncategorized spend would make a month's total actual
  * spend look smaller than it really was, contradicting analytics.md's Edge
  * Cases ("shown under the same Uncategorized treatment... rather than
- * silently dropping those...months' data").
+ * silently dropping those...months' data"). See `reshapeBudgetMonthView`
+ * above for the per-month reshaping this function delegates to.
  */
 export async function getBudgetVsActual(
   userId: string,
@@ -72,24 +111,7 @@ export async function getBudgetVsActual(
   return Promise.all(
     monthKeys.map(async (monthKey) => {
       const view = await getBudgetMonth(userId, monthKey)
-
-      const categories: BudgetVsActualMonth["categories"] = view.categories.map((line) => ({
-        categoryId: line.categoryId,
-        categoryName: line.categoryName,
-        allocated: line.allocated,
-        actual: line.spent,
-      }))
-
-      if (view.uncategorizedSpent !== 0) {
-        categories.push({
-          categoryId: UNCATEGORIZED_CATEGORY_ID,
-          categoryName: UNCATEGORIZED_CATEGORY_NAME,
-          allocated: null,
-          actual: view.uncategorizedSpent,
-        })
-      }
-
-      return { month: monthKey, categories }
+      return reshapeBudgetMonthView(monthKey, view)
     }),
   )
 }

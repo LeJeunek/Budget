@@ -35,6 +35,40 @@ async function resolveEarliestExpenseDate(userId: string): Promise<Date | null> 
 }
 
 /**
+ * Pure year-range enumeration + per-year spend normalization, extracted out
+ * of `getYearlySpending` below (Unit Test Engineer, Phase 3b Analytics gate-
+ * review follow-up: `getYearlySpending` itself always queries the database
+ * per year with no way to inject fixture data, so this calculation-only
+ * portion — building every year in `[startYear, endYear]` inclusive, with
+ * each year's raw signed `Transaction.amount` sum negated to a positive spend
+ * total — is pulled into its own exported function purely so it can be unit
+ * tested in isolation, mirroring `features/investments/server/service.ts`'s
+ * `computeAllocationEntries` precedent: a mechanical, behavior-preserving
+ * extraction, not a formula change).
+ *
+ * `rawExpenseSumByYear` holds each year's already-fetched raw signed sum
+ * (`undefined`/`null` for a year with zero matching transactions, exactly
+ * what `result._sum.amount?.toNumber()` yields) — every year in range is
+ * still emitted, even at `$0`, per this function's own "true gap, not a
+ * missing year" convention (matches `getMonthlyTrends`'s equivalent
+ * per-month rule). `|| 0` normalizes IEEE-754 negative zero for a `$0` year,
+ * same convention as `features/dashboard/server/service.ts`'s
+ * `getIncomeAndExpenses`.
+ */
+export function buildYearlySpendingPoints(
+  startYear: number,
+  endYear: number,
+  rawExpenseSumByYear: Map<number, number | null | undefined>,
+): YearlySpendingPoint[] {
+  const points: YearlySpendingPoint[] = []
+  for (let year = startYear; year <= endYear; year++) {
+    const totalExpenses = -(rawExpenseSumByYear.get(year) ?? 0) || 0
+    points.push({ year, totalExpenses })
+  }
+  return points
+}
+
+/**
  * Yearly Spending (analytics.md AC6): total expenses for every calendar
  * year the user has expense history for — always all-time by definition
  * (this function takes no `period` argument), per api-contracts.md.
@@ -50,7 +84,9 @@ async function resolveEarliestExpenseDate(userId: string): Promise<Date | null> 
  * Every year in range is included even when its total is $0 (a genuine
  * "spending dropped to zero" data point for a multi-year trend, never
  * silently skipped) — same "true gap, not a missing month" convention
- * `getMonthlyTrends` already established.
+ * `getMonthlyTrends` already established. See `buildYearlySpendingPoints`
+ * above for the per-year enumeration/normalization math this function
+ * delegates to.
  */
 export async function getYearlySpending(userId: string): Promise<YearlySpendingPoint[]> {
   const earliestDate = await resolveEarliestExpenseDate(userId)
@@ -66,7 +102,7 @@ export async function getYearlySpending(userId: string): Promise<YearlySpendingP
     years.push(year)
   }
 
-  return Promise.all(
+  const rawSums = await Promise.all(
     years.map(async (year) => {
       const result = await db.transaction.aggregate({
         where: {
@@ -80,69 +116,59 @@ export async function getYearlySpending(userId: string): Promise<YearlySpendingP
         },
         _sum: { amount: true },
       })
-
-      // Expenses are stored as negative amounts; negate to a positive spend
-      // total. `|| 0` normalizes IEEE-754 negative zero for a $0 year, same
-      // convention as `features/dashboard/server/service.ts`'s
-      // `getIncomeAndExpenses`.
-      const totalExpenses = -(result._sum.amount?.toNumber() ?? 0) || 0
-      return { year, totalExpenses }
+      return result._sum.amount?.toNumber()
     }),
   )
+
+  const rawExpenseSumByYear = new Map<number, number | null | undefined>(
+    years.map((year, i) => [year, rawSums[i]]),
+  )
+
+  return buildYearlySpendingPoints(startYear, endYear, rawExpenseSumByYear)
+}
+
+/** The minimal, plain-number shape `buildCategoryTrends` needs per
+ * transaction — deliberately narrower than a full Prisma `Transaction` row
+ * (no `Decimal`, no `userId`/`id`/etc.), matching
+ * `features/investments/server/service.ts`'s `AllocationSourceHolding`
+ * convention, so the bucketing math below can be unit tested with plain
+ * fixture data and no database access. */
+export interface CategoryTrendTransaction {
+  categoryId: string | null
+  /** Signed (negative for an expense), already converted from `Decimal`. */
+  amount: number
+  date: Date
 }
 
 /**
- * Category Trends (analytics.md AC7): for each category with any expense
- * activity in the selected period, total spending per month across the
- * period.
+ * Pure month × category bucketing, extracted out of `getCategoryTrends`
+ * below (Unit Test Engineer, Phase 3b Analytics gate-review follow-up — same
+ * "calculation-only portion pulled into its own exported function" rationale
+ * as `buildYearlySpendingPoints` above and `computeAllocationEntries` in
+ * `features/investments/server/service.ts`; a mechanical, behavior-preserving
+ * extraction, not a formula change).
  *
- * This is the one metric Architecture.md's Risk #11 section flags as
- * genuinely needing a column-projected, bounded `findMany` reduced once in
- * application code — a category × month 2D bucket isn't expressible via a
- * single Prisma `groupBy` against a truncated date column. The `findMany`
- * below selects only `categoryId`/`amount`/`date` (never a full transaction
- * row) and is bounded to the resolved period range, matching that
- * guidance exactly.
+ * Buckets `transactions` by `"yyyy-MM"` month (via `formatMonthKey`) and
+ * category (`categoryId`, or `UNCATEGORIZED_CATEGORY_ID` for a `null`
+ * category), in a single O(transactions) pass — never filtering the array
+ * once per category. `categoryNameById` resolves each real category's display
+ * name; a category id with no entry in that map (e.g. deleted after being
+ * transacted against) falls back to the raw id rather than throwing, though
+ * in practice every caller supplies a complete map for every id this
+ * function's own bucketing pass discovers.
  *
- * "Uncategorized" is folded into its own bucket via
- * `UNCATEGORIZED_CATEGORY_ID`/`UNCATEGORIZED_CATEGORY_NAME` (Dashboard's own
- * sentinel constants, reused rather than redefined — analytics.md AC4/Edge
- * Cases require the same "Uncategorized" treatment Dashboard already uses,
- * including a category deleted after being budgeted against in a past
- * month, per `Transaction.categoryId`'s `onDelete: SetNull`).
- *
- * Every month in the period is included in every returned category's
- * `points` (even a $0 month), so a multi-series trend chart has a uniform,
- * gap-free x-axis across every category — same "true gap, not a missing
- * month" convention as `getYearlySpending`/`getMonthlyTrends`. Categories
- * are ordered by total period spend descending (largest spender first),
- * matching `getSpendingByCategory`'s existing sort convention.
+ * Every month in `monthKeys` is included in every returned category's
+ * `points` (even a `$0` month), and categories are ordered by total period
+ * spend descending — see `getCategoryTrends`'s own JSDoc for why (same "true
+ * gap, not a missing month" convention as `getYearlySpending`).
  */
-export async function getCategoryTrends(
-  userId: string,
-  period: ReportingPeriodRange,
-): Promise<CategoryTrend[]> {
-  const start = period.start ?? (await resolveEarliestExpenseDate(userId))
-  if (!start) {
-    return []
-  }
-
-  const monthKeys = enumerateMonthKeys(start, period.end)
-
-  const transactions = await db.transaction.findMany({
-    where: {
-      userId,
-      amount: { lt: 0 },
-      date: { gte: start, lte: period.end },
-      ...EXCLUDE_SPLIT_PARENTS,
-    },
-    select: { categoryId: true, amount: true, date: true },
-  })
-
+export function buildCategoryTrends(
+  transactions: CategoryTrendTransaction[],
+  monthKeys: string[],
+  categoryNameById: Map<string, string>,
+): CategoryTrend[] {
   // `buckets.get(monthKey).get(categoryKey)` = that category's total spend
-  // for that month. Built once via a single pass over the fetched rows,
-  // rather than filtering the array once per category (which would be
-  // O(categories × transactions) instead of O(transactions)).
+  // for that month.
   const buckets = new Map<string, Map<string, number>>()
   const categoryKeysSeen = new Set<string>()
 
@@ -152,21 +178,10 @@ export async function getCategoryTrends(
     categoryKeysSeen.add(categoryKey)
 
     const monthMap = buckets.get(monthKey) ?? new Map<string, number>()
-    const amount = -(txn.amount.toNumber()) || 0
+    const amount = -txn.amount || 0
     monthMap.set(categoryKey, (monthMap.get(categoryKey) ?? 0) + amount)
     buckets.set(monthKey, monthMap)
   }
-
-  const realCategoryIds = [...categoryKeysSeen].filter(
-    (key) => key !== UNCATEGORIZED_CATEGORY_ID,
-  )
-  const categories = realCategoryIds.length
-    ? await db.category.findMany({
-        where: { id: { in: realCategoryIds } },
-        select: { id: true, name: true },
-      })
-    : []
-  const categoryNameById = new Map(categories.map((c) => [c.id, c.name]))
 
   const rows: (CategoryTrend & { totalForSort: number })[] = [...categoryKeysSeen].map(
     (categoryKey) => {
@@ -198,4 +213,74 @@ export async function getCategoryTrends(
     categoryName: row.categoryName,
     points: row.points,
   }))
+}
+
+/**
+ * Category Trends (analytics.md AC7): for each category with any expense
+ * activity in the selected period, total spending per month across the
+ * period.
+ *
+ * This is the one metric Architecture.md's Risk #11 section flags as
+ * genuinely needing a column-projected, bounded `findMany` reduced once in
+ * application code — a category × month 2D bucket isn't expressible via a
+ * single Prisma `groupBy` against a truncated date column. The `findMany`
+ * below selects only `categoryId`/`amount`/`date` (never a full transaction
+ * row) and is bounded to the resolved period range, matching that
+ * guidance exactly.
+ *
+ * "Uncategorized" is folded into its own bucket via
+ * `UNCATEGORIZED_CATEGORY_ID`/`UNCATEGORIZED_CATEGORY_NAME` (Dashboard's own
+ * sentinel constants, reused rather than redefined — analytics.md AC4/Edge
+ * Cases require the same "Uncategorized" treatment Dashboard already uses,
+ * including a category deleted after being budgeted against in a past
+ * month, per `Transaction.categoryId`'s `onDelete: SetNull`).
+ *
+ * Every month in the period is included in every returned category's
+ * `points` (even a $0 month), so a multi-series trend chart has a uniform,
+ * gap-free x-axis across every category — same "true gap, not a missing
+ * month" convention as `getYearlySpending`/`getMonthlyTrends`. Categories
+ * are ordered by total period spend descending (largest spender first),
+ * matching `getSpendingByCategory`'s existing sort convention. See
+ * `buildCategoryTrends` above for the bucketing/sorting math this function
+ * delegates to.
+ */
+export async function getCategoryTrends(
+  userId: string,
+  period: ReportingPeriodRange,
+): Promise<CategoryTrend[]> {
+  const start = period.start ?? (await resolveEarliestExpenseDate(userId))
+  if (!start) {
+    return []
+  }
+
+  const monthKeys = enumerateMonthKeys(start, period.end)
+
+  const rows = await db.transaction.findMany({
+    where: {
+      userId,
+      amount: { lt: 0 },
+      date: { gte: start, lte: period.end },
+      ...EXCLUDE_SPLIT_PARENTS,
+    },
+    select: { categoryId: true, amount: true, date: true },
+  })
+
+  const transactions: CategoryTrendTransaction[] = rows.map((row) => ({
+    categoryId: row.categoryId,
+    amount: row.amount.toNumber(),
+    date: row.date,
+  }))
+
+  const realCategoryIds = [
+    ...new Set(transactions.map((txn) => txn.categoryId).filter((id): id is string => id !== null)),
+  ]
+  const categories = realCategoryIds.length
+    ? await db.category.findMany({
+        where: { id: { in: realCategoryIds } },
+        select: { id: true, name: true },
+      })
+    : []
+  const categoryNameById = new Map(categories.map((c) => [c.id, c.name]))
+
+  return buildCategoryTrends(transactions, monthKeys, categoryNameById)
 }

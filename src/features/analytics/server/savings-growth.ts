@@ -28,6 +28,34 @@ async function resolveEarliestActivityDate(userId: string): Promise<Date | null>
 }
 
 /**
+ * Pure per-month Savings Growth point calculation, extracted out of
+ * `getSavingsGrowth` below (Unit Test Engineer, Phase 3b Analytics gate-
+ * review follow-up — same "calculation-only portion pulled into its own
+ * exported function" rationale as this module's sibling extractions in
+ * `spending-trends.ts`/`budget-comparison.ts`/`income-analytics.ts`; a
+ * mechanical, behavior-preserving extraction, not a formula change).
+ *
+ * This is the exact gain/loss-adjustment math analytics.md's Definition of
+ * Done calls out by name: `(income - expenses) - investmentGainLoss`, with
+ * the `$0`-income month excluded as `null` per this file's own JSDoc (never a
+ * divide-by-zero — this metric doesn't divide by income at all, but a `$0`-
+ * income month is still not a meaningful "did you save more" data point).
+ */
+export function computeSavingsGrowthPoint(
+  monthKey: string,
+  income: number,
+  expenses: number,
+  investmentGainLoss: number,
+): SavingsGrowthPoint {
+  if (income === 0) {
+    return { month: monthKey, actualSavings: null }
+  }
+
+  const actualSavings = income - expenses - investmentGainLoss
+  return { month: monthKey, actualSavings }
+}
+
+/**
  * Savings Growth (analytics.md AC15): the trend, over the selected period,
  * of the user's actual month-by-month savings — `(actual income - actual
  * expenses) - that same month's investment gain/loss` — so unrealized
@@ -56,7 +84,9 @@ async function resolveEarliestActivityDate(userId: string): Promise<Date | null>
  *
  * Every month in the period is included (even a `$0` or excluded-as-`null`
  * one) — the same "true gap, not a missing month" convention every other
- * per-month metric in this module follows.
+ * per-month metric in this module follows. See `computeSavingsGrowthPoint`
+ * above for the per-month gain/loss-adjustment math this function delegates
+ * to.
  */
 export async function getSavingsGrowth(
   userId: string,
@@ -78,12 +108,7 @@ export async function getSavingsGrowth(
         getGainLossForPeriod(userId, { start: monthStart, end: monthEnd }),
       ])
 
-      if (summary.income === 0) {
-        return { month: monthKey, actualSavings: null }
-      }
-
-      const actualSavings = summary.income - summary.expenses - gainLoss
-      return { month: monthKey, actualSavings }
+      return computeSavingsGrowthPoint(monthKey, summary.income, summary.expenses, gainLoss)
     }),
   )
 }

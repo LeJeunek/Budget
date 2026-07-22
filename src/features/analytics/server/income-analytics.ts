@@ -67,6 +67,40 @@ async function getMonthlyIncomeTotal(userId: string, monthKey: string): Promise<
 }
 
 /**
+ * Pure per-month Income Growth point builder, extracted out of
+ * `getIncomeGrowth` below (Unit Test Engineer, Phase 3b Analytics gate-review
+ * follow-up — same "calculation-only portion pulled into its own exported
+ * function" rationale as `spending-trends.ts`/`budget-comparison.ts`'s
+ * equivalent extractions; a mechanical, behavior-preserving extraction, not a
+ * formula change).
+ *
+ * Implements this file's own top-level "Untracked/Other" partition rule:
+ * `bySource` is every tracked `IncomeType`'s sum for the month, plus
+ * `"UNTRACKED"` for `max(0, total - trackedSum)` whenever that residual is
+ * positive — see this file's top-level JSDoc for exactly why the `max(0, ...)`
+ * clamp exists (a manually-marked-received recurring-income record with no
+ * linked `Transaction` can push `trackedSum` above `total`).
+ */
+export function buildIncomeGrowthPoint(
+  monthKey: string,
+  total: number,
+  trackedByType: Map<IncomeSourceType, number>,
+): IncomeGrowthPoint {
+  const trackedSum = [...trackedByType.values()].reduce((sum, amount) => sum + amount, 0)
+
+  const bySource: IncomeGrowthPoint["bySource"] = [...trackedByType.entries()].map(
+    ([type, amount]) => ({ type, amount }),
+  )
+
+  const untracked = Math.max(0, total - trackedSum)
+  if (untracked > 0) {
+    bySource.push({ type: UNTRACKED_INCOME_TYPE, amount: untracked })
+  }
+
+  return { month: monthKey, total, bySource }
+}
+
+/**
  * Income Growth (analytics.md AC13): total actual-received income per month,
  * with an by-source overlay built from Recurring Income's actual-received
  * data — never the forward-looking "expected" figures (AC13's own explicit
@@ -75,7 +109,8 @@ async function getMonthlyIncomeTotal(userId: string, monthKey: string): Promise<
  *
  * Every month in the period is included even at `$0` (the "true gap, not a
  * missing month" convention every other Pass 1/Pass 2 per-month metric in
- * this module already follows).
+ * this module already follows). See `buildIncomeGrowthPoint` above for the
+ * per-month Untracked/Other partition math this function delegates to.
  */
 export async function getIncomeGrowth(
   userId: string,
@@ -109,18 +144,7 @@ export async function getIncomeGrowth(
   return monthKeys.map((monthKey) => {
     const total = totalByMonth.get(monthKey) ?? 0
     const trackedByType = trackedByMonth.get(monthKey) ?? new Map<IncomeSourceType, number>()
-    const trackedSum = [...trackedByType.values()].reduce((sum, amount) => sum + amount, 0)
-
-    const bySource: IncomeGrowthPoint["bySource"] = [...trackedByType.entries()].map(
-      ([type, amount]) => ({ type, amount }),
-    )
-
-    const untracked = Math.max(0, total - trackedSum)
-    if (untracked > 0) {
-      bySource.push({ type: UNTRACKED_INCOME_TYPE, amount: untracked })
-    }
-
-    return { month: monthKey, total, bySource }
+    return buildIncomeGrowthPoint(monthKey, total, trackedByType)
   })
 }
 
