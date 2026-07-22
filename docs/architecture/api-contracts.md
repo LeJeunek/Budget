@@ -1,6 +1,6 @@
-# FinanceOS — API Contracts (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b)
+# FinanceOS — API Contracts (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b + Phase 4a foundation)
 
-All responses use `ApiResult<T>` from `lib/api-response.ts` (see naming-standards.md). All endpoints require an authenticated session (Better Auth) except `/api/auth/*`; unauthenticated requests return `{ success: false, error: "UNAUTHENTICATED" }` with HTTP 401. All queries are scoped server-side to `getCurrentUser().id` — no endpoint accepts a client-supplied user ID. **(Phase 3a exception, documented in full in its own section below)**: `app/api/cron/net-worth-snapshot/route.ts` is authenticated by a shared secret instead of a user session, since it has no calling user — it iterates all users server-side. It does not use `ApiResult<T>` either, for the same reason `app/api/uploadthing/route.ts` doesn't (system/integration surface, not a client-facing contract).
+All responses use `ApiResult<T>` from `lib/api-response.ts` (see naming-standards.md). All endpoints require an authenticated session (Better Auth) except `/api/auth/*`; unauthenticated requests return `{ success: false, error: "UNAUTHENTICATED" }` with HTTP 401. All queries are scoped server-side to `getCurrentUser().id` — no endpoint accepts a client-supplied user ID. **(Phase 3a exception, documented in full in its own section below, extended by Phase 4a)**: `app/api/cron/net-worth-snapshot/route.ts` is authenticated by a shared secret instead of a user session, since it has no calling user — it iterates all users server-side. It does not use `ApiResult<T>` either, for the same reason `app/api/uploadthing/route.ts` doesn't (system/integration surface, not a client-facing contract). **Phase 4a adds three more instances of this exact same exception** — `app/api/cron/categorize-transactions/route.ts`, `app/api/cron/monthly-summary/route.ts`, `app/api/cron/financial-health-score-snapshot/route.ts` — see the Phase 4a section at the end of this document. **Phase 4a also introduces one new, cross-cutting response-shape composition** (not a new exception to `ApiResult<T>`, an addition on top of it): every on-demand AI-generation Server Action returns `ApiResult<AiFeatureResult<T>>` — see that section's own note for why.
 
 ## Auth
 - `ALL /api/auth/[...all]` — handled entirely by Better Auth's Next.js handler. Backend Engineer wires it up; does not reimplement auth logic.
@@ -43,6 +43,8 @@ Pagination uses `page`/`pageSize` (not cursor) for Phase 1 — matches TanStack 
 
 **(Phase 3b) `EXCLUDE_SPLIT_PARENTS` gains a third consumer, confirmed as the canonical import site, not duplicated a third time.** `features/transactions/server/service.ts`'s `EXCLUDE_SPLIT_PARENTS` (already imported by `features/transactions/server/aggregations.ts`) is now also imported by every Analytics function touching expense transactions — see Architecture.md's Phase 3b "Analytics module structure" section for the full reasoning, including the pre-existing, out-of-scope duplicate copy in `features/dashboard/server/service.ts` flagged there for a future cleanup pass.
 
+**(Phase 4a) Transaction Auto-Categorization — see its own full section at the end of this document.** No change to any row above; the new suggestion lifecycle (`requestCategorySuggestion`/`acceptCategorySuggestion`/`rejectCategorySuggestion`) is entirely additive, and `acceptCategorySuggestion` reuses `updateTransaction`'s existing category-assignment code path rather than introducing a second write mechanism (per Feature 1 AC4).
+
 ## Dashboard (`features/dashboard`)
 Read-only aggregation, Server Component direct calls (no client mutation, so no Server Actions/routes needed):
 - `service.getNetWorth(userId)` → `{ total: number; byAccount: { accountId: string; balance: number }[] }`
@@ -57,6 +59,8 @@ Read-only aggregation, Server Component direct calls (no client mutation, so no 
 **(Phase 3a) Net Worth Aggregation Update — see its own full section below**, immediately after Recurring Income, for the complete, double-count-safe formula and the new `service.getNetWorth` contract.
 
 **(Phase 3b) Net Worth History chart — see its own full section below**, after Financial Goals, for the new `features/dashboard/server/net-worth-history.ts` module and its one new Route Handler.
+
+**(Phase 4a) `service.getFinancialHealthScoreCard(userId)`** — a third thin pass-through, added alongside the two above, mirroring `getBudgetHealthScoreCard` exactly: calls `features/financial-health-score/server/service.ts.getFinancialHealthScore(userId)` and maps it to the Dashboard summary card's small shape. **Automatic Monthly Summaries** also add read functions to this module — see the Phase 4a section at the end of this document.
 
 ## Categories (`features/categories`)
 **Scope correction (CTO, 2026-07-19):** this section previously scoped Phase 1 Categories as seed-only/no-CRUD, which conflicted with the Roadmap's Phase 1 description. Resolved: **minimal custom-category CRUD ships in Phase 1.**
@@ -116,6 +120,8 @@ Per `docs/product/budgeting.md`. Read paths are Server Component direct calls; t
 
 **(Phase 3b) `getBudgetMonth` gains a new caller, reused as-is, no signature change.** `features/analytics/server/budget-comparison.ts` calls `getBudgetMonth(userId, month)` once per month in the selected reporting period to build the multi-month Budget vs. Actual table (analytics.md AC9) — see the Analytics section below. Calling it in a per-month loop is the same bounded-loop shape `dashboard.service.getMonthlyTrends` already uses; past months' lazy-materialization behavior ("past months with no row return `hasAnyBudgetData: false` without mutating anything," restated just above) makes this safe to call repeatedly with no side effects on historical months.
 
+**(Phase 4a) `getBudgetHealthScore` gains a new caller, reused verbatim, no signature change.** `features/financial-health-score/server/service.ts` calls `budgeting.service.getBudgetHealthScore(userId, month)` directly for the Financial Health Score's Budget Adherence component (`ai-features.md` Feature 5's own requirement: "never independently recomputed with new logic"). **AI Budget Advisor — see the Phase 4a section at the end of this document.**
+
 ## Savings Goals (`features/goals`) — Phase 2
 
 Per `docs/product/savings-goals.md`. Follows the exact archive/unarchive CRUD shape established by Accounts.
@@ -152,6 +158,8 @@ No functional dependency on Accounts or Transactions (confirmed resolved, CTO 20
 
 **(Phase 3b) No functional dependency on `FinancialGoal` in either direction (confirmed, per financial-goals.md's Boundary section and Risk #12's resolution).** `SavingsGoal` is untouched by Phase 3b — no shared code, no shared table, no cross-import. See the Financial Goals section below for the full, resolved boundary reasoning.
 
+**Not extended in Phase 4a.** No Phase 4a feature reads or writes `SavingsGoal`/`GoalContribution` — none of the five AI features' Dependencies sections name Savings Goals as a data source.
+
 ## Bills (`features/bills`) — Phase 2
 
 Per `docs/product/bills.md`. Includes the optional occurrence-to-Transaction link (AC7) and backs Calendar v1.
@@ -178,11 +186,9 @@ Per `docs/product/bills.md`. Includes the optional occurrence-to-Transaction lin
 
 **(Phase 3a update to `linkOccurrenceToTransaction`):** before creating the link, it now also calls `lib/transaction-link-guard.ts`'s `assertTransactionNotAlreadyLinked`.
 
-**Data model recommendation for the Database Architect:** `BillOccurrence.transactionId` should be a nullable, unique FK to `Transaction`, `onDelete: SetNull`.
-
 **Bills reads via other domains, explicit service calls only:** `searchTransactionsForLinking(userId, { query? })` on `features/transactions/server/service.ts`, now also reused by Recurring Income.
 
-**Not extended in Phase 3b.** No Phase 3b spec requests any Bills change — Bills is untouched by Net Worth History, Analytics, or Financial Goals.
+**Not extended in Phase 3b or Phase 4a.** No spec in either phase requests any Bills change — Bills is untouched by Net Worth History, Analytics, Financial Goals, or any of the five Phase 4a AI features.
 
 ## Calendar v1 — Phase 2
 
@@ -192,7 +198,7 @@ Per `docs/product/calendar-and-notifications.md`. No new data, no mutations — 
 |---|---|---|---|
 | Get a month's calendar | Server Component direct call to `bills.service.getCalendarMonth(userId, month)` | `month: "YYYY-MM"` | `{ day: string; occurrences: { billId; billOccurrenceId; billName; amount; status }[] }[]` |
 
-Scoped to bills only, unchanged through Phase 3b — no Phase 3b spec requests extending Calendar v1.
+Scoped to bills only, unchanged through Phase 4a — no phase requests extending Calendar v1.
 
 ---
 
@@ -210,6 +216,8 @@ Per `docs/product/calendar-and-notifications.md`. Lazy, on-read materialization 
 `service.ensureNotifications(userId)` reads from `budgeting.service.getOverBudgetCategories` and `bills.service.getDueSoonAndLateOccurrences`, upserting `Notification` rows; never writes to Budgeting/Bills.
 
 **Not extended in Phase 3a or Phase 3b.** No spec in either phase requests a Debt/Investment/Recurring-Income/Analytics/Financial-Goal-triggered notification type (e.g. "you just paid off a debt," per financial-goals.md AC7's own explicit "notifications are out of scope for this phase — Notifications v2 is Phase 4"). Flagged again here so it isn't assumed silently: if Phase 4 wants one, it follows the exact same one-directional read pattern already established here.
+
+**Not extended in Phase 4a either — confirmed, not just carried forward by omission.** None of the five AI features generates a new `Notification` row or a new `NotificationType` (e.g. "a new spending insight is ready," "your monthly recap is available") — `ai-features.md` names no such requirement, and `roadmap.md`'s own Phase 4b description reserves new trigger types for "Notifications v2." This is worth stating explicitly here (not just leaving it implied) because Phase 4a's monthly-cadence cron jobs (categorization batches, monthly summaries, health-score snapshots) are the most plausible-looking candidates yet for "maybe this should also notify the user" — flagged now so a future implementer doesn't wire one in as an unrequested scope addition.
 
 **Data model recommendation for the Database Architect:** `id, userId, type (enum), budgetCategoryId (nullable FK), billOccurrenceId (nullable FK), createdAt, readAt, dismissedAt`, with unique constraints per steps 1–2 of the ensure-algorithm.
 
@@ -267,6 +275,8 @@ Per `docs/product/debt-tracker.md`. Follows the archive/unarchive CRUD shape est
 
 **(Phase 3b) `getDebtById` gains a new cross-domain caller and one confirmed behavior, no signature change.** `features/financial-goals/server/service.ts` calls `getDebtById(userId, debtId)` for the Debt Payoff goal type's live `effectiveBalance` and `archivedAt` state. **Confirmation required from the Backend Engineer (not a redesign):** this single-record lookup must return the Debt regardless of its `archivedAt` value (unlike `getDebts`' list, which correctly defaults to excluding archived) — Financial Goals' "a linked Debt is archived while its goal is active: progress freezes at its last-known value" edge case depends on this, and needs no new function or schema change to satisfy, since an archived Debt's row (and its live `balance`) is never deleted. See Architecture.md's Phase 3b Financial Goals section for the full reasoning.
 
+**(Phase 4a) `debt.service` gains a new read-only aggregate consumer, no signature change.** `features/financial-health-score/server/service.ts` reads active, non-archived Debts' minimum payments (summed) for the Financial Health Score's Debt-to-Income component (`ai-features.md` Feature 5's formula) — likely via the same `getTotalActiveDebtBalanceForNetWorth`-style existing aggregate pattern already used for Net Worth, or a small new sibling read function if a minimum-payment total isn't already exposed; either way, **no schema change**, since every Debt row already carries `minimumPayment`.
+
 `StrategyComparisonResult` shape (pure output of `payoff-math.ts`, never persisted):
 ```ts
 {
@@ -299,6 +309,8 @@ Per `docs/product/investments.md`. Containers are existing Investment/Retirement
 
 **(Phase 3b) New required function, no schema change:** `service.getGainLossForPeriod(userId, { start, end }): Promise<number>` — sums `(HoldingValueHistoryEntry.newValue - previousValue)` across every entry recorded within `[start, end]`, across both active and closed holdings. Consumed by `features/analytics/server/savings-growth.ts` (AC15's "with any investment holdings' gain/loss for that same period subtracted out"). This is deliberately **not** the same figure as `getPortfolioOverview`'s lifetime `totalGainLoss` — that is a point-in-time cumulative total (`currentValue - costBasis`), while this new function is a period-scoped delta, using data the existing `HoldingValueHistoryEntry` table (already queried by `getGrowthHistory`) already fully supports. See Architecture.md's Phase 3b Analytics section for the full reasoning.
 
+**Not extended in Phase 4a.** No Phase 4a feature's Dependencies section names Investments as a data source (Feature 5's Net Worth Trend component reads Dashboard's already-double-count-safe `getNetWorth`, which already folds in Investments' contribution — no direct Investments read is needed).
+
 ## Recurring Income (`features/recurring-income`) — Phase 3a
 
 Per `docs/product/recurring-income.md`. Mirrors Bills' proven lazy on-read occurrence generation exactly, with its own status vocabulary and an Irregular/One-off cadence Bills has no equivalent of.
@@ -321,6 +333,8 @@ Per `docs/product/recurring-income.md`. Mirrors Bills' proven lazy on-read occur
 **(Phase 3b) `IncomeOccurrence`/`IrregularIncomeEvent` gain a new read-only, cross-domain caller.** `features/analytics/server/income-analytics.ts` reads these two tables' actual-received amounts, grouped by the parent `IncomeStream.type`, for Income Growth and Income Sources (AC13/AC14) — via a new query living entirely in `features/recurring-income/server/service.ts` (this Architect's recommendation: expose it as `recurring-income.service`'s own function, e.g. `getActualReceivedIncomeBySource(userId, { start, end })`, rather than Analytics reaching into `IncomeOccurrence`/`IrregularIncomeEvent` via direct Prisma access — preserving the "explicit, individually-exported service calls, not direct Prisma reach-through" rule for this new cross-domain read the same way every other one in this document already does). **No schema change required** — both tables already carry every field this query needs (`receivedAmount`/`receivedDate` and the parent stream's `type`).
 
 `IncomeOccurrence.status` is never a stored column — always computed at read time.
+
+**(Phase 4a) `recurring-income.service` gains a new read-only aggregate consumer, no signature change.** `features/financial-health-score/server/service.ts` reads total actual-received monthly income (reusing `getActualReceivedIncomeBySource`'s underlying data, or a thin new total-only wrapper around it) for the Financial Health Score's Debt-to-Income denominator and the Net Worth Trend component's income-relative normalization (`ai-features.md` Feature 5's CTO-corrected formula). **No schema change.**
 
 ## Financial Goals (`features/financial-goals`) — Phase 3b
 
@@ -379,6 +393,8 @@ Per `docs/product/financial-goals.md`. Follows the archive/unarchive CRUD shape 
 
 **Data model recommendation for the Database Architect:** see Architecture.md's full `FinancialGoal`/`FinancialGoalAccount` schema shape, under "FinancialGoal schema-adjacent module design."
 
+**Not extended in Phase 4a.** No Phase 4a feature's Dependencies section names Financial Goals as a data source or consumer; `FinancialGoal` is untouched.
+
 ## Analytics (`features/analytics`) — Phase 3b
 
 Per `docs/product/analytics.md`. Entirely read-only aggregation (Server Component direct calls) plus one small mutation (dismissing a false-positive subscription candidate). See Architecture.md's Phase 3b "Analytics module structure" section for the full file-layout reasoning and Risk #11's resolution (raw on-read aggregation, no materialized/cached aggregates).
@@ -421,6 +437,8 @@ Per `docs/product/analytics.md`. Entirely read-only aggregation (Server Componen
 
 **Data model recommendation for the Database Architect:** see Architecture.md's full `DismissedSubscriptionMerchant` schema shape, under "Subscription Cost Detection's dismissal-tracking schema requirement."
 
+**(Phase 4a) Spending Insights — see the Phase 4a section at the end of this document.** No change to any row above; Insights reads every one of the 11 metric functions listed here as a pure downstream consumer (never re-implementing any of them), exactly as `ai-features.md` Feature 4's Dependencies require.
+
 ---
 
 ## Net Worth Aggregation Update (`features/dashboard`) — Phase 3a
@@ -442,7 +460,7 @@ netWorth = totalAccountBalance - unlinkedDebtLiability
 **Updated contract:**
 - `service.getNetWorth(userId)` → `{ total: number; byAccount: { accountId: string; balance: number }[]; totalUnlinkedDebtLiability: number }`
 
-**Unchanged and confirmed stable through Phase 3b.** Every Phase 3b consumer of Net Worth (the Net Worth History chart, Financial Goals' `NET_WORTH_SAVINGS_TARGET` type) reads this same `total`/`totalUnlinkedDebtLiability` shape, never re-deriving net worth independently — the single-source-of-truth guarantee this formula exists to provide holds unchanged into Phase 3b.
+**Unchanged and confirmed stable through Phase 4a.** Every consumer of Net Worth (the Net Worth History chart, Financial Goals' `NET_WORTH_SAVINGS_TARGET` type, and — new in Phase 4a — the Financial Health Score's Net Worth Trend component) reads this same `total`/`totalUnlinkedDebtLiability` shape, never re-deriving net worth independently — the single-source-of-truth guarantee this formula exists to provide holds unchanged into Phase 4a.
 
 ## Net Worth Snapshot job (`features/dashboard/server/snapshot.ts`) — Phase 3a
 
@@ -456,7 +474,7 @@ Internally calls `dashboard.service.captureAllUsersNetWorthSnapshots()`, looping
 
 **Data model:** `NetWorthSnapshot { id, userId (FK), capturedAt, capturedDate, totalNetWorth, totalAccountBalance, totalUnlinkedDebtLiability }`, `@@unique([userId, capturedDate])`, indexed on `(userId, capturedAt)` — as-built, per er-diagram.md.
 
-**Unchanged through Phase 3b.** Phase 3b's Net Worth History chart is a pure read layer over this exact table — see its own section immediately below. No change to the cadence, the cron mechanism, or the row shape is requested or required.
+**Unchanged through Phase 4a.** Phase 3b's Net Worth History chart, and Phase 4a's Financial Health Score Net Worth Trend component, are both pure read layers over this exact table — see their own sections for the read-side contract. No change to the cadence, the cron mechanism, or the row shape is requested or required by either. **Phase 4a's own `FinancialHealthScoreSnapshot`-shaped table (see the Phase 4a section below) is a deliberate new sibling table, not an extension of this one** — see Architecture.md's Phase 4a module-placement resolution for the full reasoning.
 
 ## Net Worth History chart (`features/dashboard`) — Phase 3b
 
@@ -492,3 +510,157 @@ Per `docs/product/net-worth-history.md`. A read layer over the existing `NetWort
 **Breakdown toggle (AC5)** is a pure client-side view switch in `features/dashboard/components/net-worth-history-chart.tsx` between the single `netWorth` series and the `assets`/`debt` two-series view — both are already present on every point in the one response above, so toggling never triggers a new fetch.
 
 **Scoping (AC10):** `getNetWorthHistory` and `resolveDefaultRange` both take `userId` from the caller's `getCurrentUser()` result, same as every other read function in this document — no endpoint accepts a client-supplied user id.
+
+---
+
+## AI Features (Phase 4a)
+
+Per `docs/product/ai-features.md` (Product Owner spec, all five features + the Financial Health Score's deterministic-formula scope resolution) and `docs/architecture/ai-features-design.md` (AI Engineer's technical design — LLM provider, `lib/ai/` internals, the Zod structured-output/grounding/retry pattern, prompt-injection defenses, cost/latency bounds). **This section documents only the API surface** — mechanism classification (Server Action vs. Server-Component-direct-call vs. Route Handler) and input/output shapes at the contract level — for all five features, following this document's established per-phase pattern. For *why* a given call returns what it returns, or how a schema/prompt is built, see `ai-features-design.md`; it is not restated here.
+
+**Doc update (AI Engineer, following the Security Architect's design-stage APPROVE-WITH-CHANGES review):** `ai-features-design.md` was revised to address Findings 1, 2, 3, 4, 6, 7, and 8 (Finding 5 — `CategorySuggestion` cron-level concurrency — is out of scope for that revision, handled separately with the Database Architect). The shapes and rate-limit descriptions below are updated accordingly: every narrative/insight-text field below is now an explicitly bounded `z.string().max(N)` and passes a new `lib/ai/verify-narrative-safety.ts` check in addition to the existing `citedFigures` grounding check (Finding 1); `CategorySuggestion.transactionId` is now closed-set (a per-request `z.enum`) like `categoryId` already was (Finding 4); every rate-limited on-demand action below uses an atomic conditional update plus a secondary per-user rolling-window cap, not a plain read-then-write minimum-interval check (Finding 6). The per-feature prompt-input DTOs and the cross-user batch-payload invariant introduced for Findings 2 and 3 are internal to `lib/ai/`/each feature's server directory and don't change any row's documented client-facing shape, so they aren't restated here — see `ai-features-design.md` §4.1/§4.5.
+
+### The `ApiResult<AiFeatureResult<T>>` composition — read this once, applies to every on-demand action below
+
+Every one of the five features' *on-demand* generate/refresh Server Actions returns a **nested** result: the outer `ApiResult<T>` (this codebase's standing convention, `lib/api-response.ts`) communicates ordinary request-level success/failure (auth, input validation, an unexpected server exception) — exactly as it does for every other Server Action in this document. The inner `AiFeatureResult<T>` (`lib/ai/types.ts`, per `ai-features-design.md` §5) communicates the AI-specific outcome: `{ status: "ok"; data: T }` or `{ status: "unavailable" }`. **These are not redundant with each other.** A degraded AI outcome (provider down, timeout, invalid output even after retry) is `{ success: true, data: { status: "unavailable" } }` — a **successful** request that happened to determine the AI feature can't currently produce output — never `{ success: false, ... }`. Reserving `success: false` for genuine request-level failures (bad input, no session) keeps the outer `ApiResult` contract's existing meaning intact and gives the Frontend Lead exactly one place to check for "did the AI generation itself work" (the inner `status` field) rather than conflating it with request-level error handling. This is the one genuinely new response-shape convention Phase 4a introduces; see naming-standards.md for where `AiFeatureResult<T>` itself is defined and how it composes.
+
+**Server-Component-direct-call reads** that surface AI-generated content return `AiFeatureResult<T>` directly (no outer `ApiResult` wrapper), consistent with every other Server-Component-direct-call row in this document never being `ApiResult`-wrapped either (e.g. Accounts' "List accounts" row above returns a plain `Account[]`, not `ApiResult<Account[]>`).
+
+### Feature 1 — Transaction Auto-Categorization (`features/transactions`)
+
+| Action | Mechanism | Input | Output |
+|---|---|---|---|
+| Automatic suggestion generation (batch) | `POST /api/cron/categorize-transactions` — shared-secret authenticated, not a user session, not `ApiResult<T>` (same exception class as `net-worth-snapshot`) | none | `{ processed: number; suggested: number }` plain JSON |
+| Manual "reconsider" suggestion | Server Action `requestCategorySuggestion` | `{ transactionId: string } \| { splitLineItemId: string }` — rate-limited per `lib/ai/rate-limit.ts` via an atomic conditional update against that transaction's own last-requested timestamp (not read-then-write — `ai-features-design.md` §2/§6, Security Architect Finding 6b), plus a secondary per-user rolling-window cap across all of that user's "reconsider" calls in aggregate, not just this one transaction (Finding 6a) | `ApiResult<AiFeatureResult<CategorySuggestion>>` |
+| Get pending suggestions for a transaction/batch | Server Component direct call to `categorization.getPendingSuggestions(userId, { importBatchId? })` | — | `TransactionSuggestion[]` — the persisted, `PENDING`-state rows (see the suggestion/audit-trail table's required facts, `ai-features-design.md` §7); this is a plain read of already-generated suggestions, not a new generation call, so it is never AI-feature-result-wrapped |
+| Accept a suggestion | Server Action `acceptCategorySuggestion` | `{ suggestionId: string }` — internally calls the **same** category-assignment path `updateTransaction` already uses (Feature 1 AC4); this is the **only** code path that ever writes `Transaction.categoryId` as a result of a suggestion | `ApiResult<Transaction>` |
+| Reject a suggestion | Server Action `rejectCategorySuggestion` | `{ suggestionId: string }` | `ApiResult<{ suggestionId: string }>` |
+
+`CategorySuggestion` shape (the model's structured output, validated against a per-request-built `z.enum` of the user's own real category IDs — `ai-features-design.md` §4.2 — never persisted in this exact shape; the persisted row is the suggestion/audit-trail table, Database Architect's schema):
+```ts
+{
+  transactionId: string           // or splitLineItemId, for the split-line-item case (AC8) — validated
+                                    //   against a per-request-built z.enum of the exact batch's own
+                                    //   candidate IDs, the same closed-set technique as categoryId
+                                    //   (`ai-features-design.md` §4.2, Security Architect Finding 4;
+                                    //   previously an unconstrained z.string(), fixed this revision)
+  categoryId: string               // guaranteed to be one of the caller's own current category IDs —
+                                    //   the schema itself is the closed set (§4.2), not a post-hoc check
+  confidence: number                // 0–1
+}
+```
+
+### Feature 2 — AI Budget Advisor (`features/budgeting`)
+
+| Action | Mechanism | Input | Output |
+|---|---|---|---|
+| Get advisor card (initial view — generates on first view, or reads the cached row) | Server Component direct call to `advisor.getBudgetAdvisorRecommendations(userId, month)` | `month: "YYYY-MM"` — **current, editable month only** (Feature 2 AC5); never called for a past month | `AiFeatureResult<BudgetAdvisorRecommendations>` |
+| Refresh recommendations | Server Action `refreshBudgetAdvisor` | `{ month: string }` — rate-limited against the cached row's own `generatedAt` via an atomic conditional update, not read-then-write (`ai-features-design.md` §2/§6, Finding 6b), plus a secondary per-user rolling-window cap across every month the user might refresh, not just the current `(userId, month)` key (Finding 6a) | `ApiResult<AiFeatureResult<BudgetAdvisorRecommendations>>` |
+
+`BudgetAdvisorRecommendations` shape:
+```ts
+{
+  recommendations: { text: string; citedFigures: { label: string; value: number }[] }[]  // 1–3 items;
+                                    //   `text` is `z.string().max(~500)` (exact ceiling is the schema
+                                    //   file's own call) — every narrative field is now explicitly
+                                    //   bounded, never unbounded (Security Architect Finding 1a), and
+                                    //   is additionally checked by `lib/ai/verify-narrative-safety.ts`
+                                    //   alongside the existing `citedFigures` grounding check
+                                    //   (Finding 1b) before this shape is ever returned as `"ok"`
+  generatedAt: string
+}
+```
+
+**Rendering requirement (Finding 1c, Frontend Lead):** `text` must always render as a plain text node — never `dangerouslySetInnerHTML`, never a markdown-to-HTML pipeline. See `ai-features-design.md` §4.3/§8.
+
+**Read-only, by construction, not just by convention.** `features/budgeting/server/advisor.ts` has no Prisma **write** access to `Budget`/`BudgetCategory` at all (Feature 2's own Definition of Done requires this be verifiable by test, not merely by code review) — its only persistence is its own generated-content cache row, owned entirely within Budgeting's module (see Architecture.md's Phase 4a "module ownership" note).
+
+### Feature 3 — Automatic Monthly Summaries (`features/dashboard`)
+
+| Action | Mechanism | Input | Output |
+|---|---|---|---|
+| Cron generation (once per user, per just-closed month) | `POST /api/cron/monthly-summary` — shared-secret authenticated, plain JSON | none | `{ processed: number }` |
+| Get most-recent summary (Dashboard card) | Server Component direct call to `monthly-summary.getMostRecentSummary(userId)` | — | `MonthlySummary \| null` — `null` only for a brand-new user with no completed month yet (Feature 3's own "no fabricated first month" edge case); a completed month whose generation failed still returns its persisted row (with enough state for the UI to render "Summary not available for [Month]" — exact column shape is the Database Architect's call) |
+| Browse summary history | Server Component direct call to `monthly-summary.getSummaryHistory(userId)` | — | `MonthlySummary[]` |
+| Regenerate a summary (optional, if built per Feature 3's "may optionally be offered") | Server Action `regenerateMonthlySummary` | `{ month: string }` — rate-limited, same atomic-conditional-update-plus-per-user-rolling-cap pattern as Advisor's refresh (`ai-features-design.md` §6, Finding 6) | `ApiResult<AiFeatureResult<MonthlySummary>>` |
+
+`MonthlySummary` shape:
+```ts
+{
+  month: string                    // "YYYY-MM", always a fully-closed month (Feature 3 AC3)
+  narrative: string                 // z.string().max(~800) — bounded, never unbounded (Finding 1a);
+                                    //   checked by lib/ai/verify-narrative-safety.ts alongside the
+                                    //   citedFigures grounding check below (Finding 1b) before this
+                                    //   shape is ever returned as "ok"; must render as a plain text
+                                    //   node client-side, never dangerouslySetInnerHTML or a markdown
+                                    //   pipeline (Finding 1c)
+  citedFigures: { label: string; value: number }[]   // income, expenses, cash flow, savings rate,
+                                    //   net worth change, top category/merchant — every figure this
+                                    //   narrative references, per the grounding-verification pattern
+                                    //   (ai-features-design.md §4.3)
+  isPartialMonth: boolean            // true only for a user's genuinely partial first month (Edge Cases)
+}
+```
+
+**Persisted, never regenerated automatically (Feature 3 AC2)** — this Server Component read is a plain row fetch; no AI call ever happens on this path. Only the cron route and the optional `regenerateMonthlySummary` action ever call `lib/ai/`.
+
+### Feature 4 — Spending Insights (`features/analytics`)
+
+| Action | Mechanism | Input | Output |
+|---|---|---|---|
+| Get insights (initial view — generates on first view, or reads the cached row) | Server Component direct call to `insights.getSpendingInsights(userId, period)` | `period` — Analytics' existing shared reporting-period control when surfaced on the Analytics page (AC5); a fixed current-month-vs-prior comparison when surfaced on the Dashboard, per the same AC | `AiFeatureResult<SpendingInsight[]>` |
+| Refresh insights | Server Action `refreshSpendingInsights` | `{ period }` — rate-limited against the cached row's own `generatedAt` via an atomic conditional update, not read-then-write (Finding 6b), plus a secondary per-user rolling-window cap across every reporting period the user might refresh, not just the current `(userId, period)` key (Finding 6a) | `ApiResult<AiFeatureResult<SpendingInsight[]>>` |
+
+`SpendingInsight` shape:
+```ts
+{
+  text: string                      // z.string().max(~150) — bounded, never unbounded (Finding 1a);
+                                    //   checked by lib/ai/verify-narrative-safety.ts alongside
+                                    //   citedFigures below (Finding 1b); must render as a plain text
+                                    //   node client-side, never dangerouslySetInnerHTML or a markdown
+                                    //   pipeline (Finding 1c)
+  citedFigures: { label: string; value: number }[]   // every percentage/dollar amount/merchant-or-
+                                    //   category name referenced, grounded against the specific
+                                    //   Analytics metric it's sourced from (§4.3's verification)
+  sourceMetric: "categoryTrends" | "topMerchants" | "largestPurchases" | "subscriptionDetection"
+               | "dailySpendingHeatmap" | "savingsGrowth"   // which of the 11 Analytics metrics this
+                                    //   insight is drawn from — never a computation of its own
+}
+```
+
+2–4 items per refresh (Feature 4 AC1). Reads every one of Analytics' 11 metric functions listed in the Analytics section above as a pure downstream consumer — `features/analytics/server/insights.ts` never recomputes any of them.
+
+### Feature 5 — Financial Health Score (`features/financial-health-score` — new module; see Architecture.md's module-placement resolution)
+
+| Action | Mechanism | Input | Output |
+|---|---|---|---|
+| Get score + 4-component breakdown (always available — **zero AI dependency in this row**) | Server Component direct call to `service.getFinancialHealthScore(userId)` | — | `FinancialHealthScoreBreakdown` — a plain value, **never** `AiFeatureResult`-wrapped, per Feature 5's own strongest-degradation guarantee (this row's correctness and availability cannot be affected by the AI provider in any way) |
+| Get historical trend (sparkline) | Server Component direct call to `snapshot.getFinancialHealthScoreHistory(userId)` | — | `{ date: string; score: number }[]` — reads the periodic, cron-captured snapshot rows (AC7) |
+| Get the latest narrative (optional, may be unavailable) | Server Component direct call to `service.getLatestNarrative(userId)` | — | `AiFeatureResult<{ narrative: string; asOf: string }>` — `narrative` is `z.string().max(~400)` (bounded, Finding 1a), checked by `lib/ai/verify-narrative-safety.ts` alongside its own `citedFigures` grounding check (Finding 1b) before persistence, and must render as a plain text node client-side, never `dangerouslySetInnerHTML` or a markdown pipeline (Finding 1c); reads the narrative persisted onto the most recent snapshot row; **no on-demand refresh action exists for this one** (see note below) |
+| Cron: capture snapshot + generate narrative (one invocation) | `POST /api/cron/financial-health-score-snapshot` — shared-secret authenticated, plain JSON | none | `{ processed: number }` |
+| Dashboard summary card | Server Component direct call to `dashboard.service.getFinancialHealthScoreCard(userId)` | — | `{ score: number; label: "Good" \| "Fair" \| "Needs attention" } \| { status: "not_enough_data" }` — thin pass-through, mirrors `getBudgetHealthScoreCard` exactly |
+
+`FinancialHealthScoreBreakdown` shape:
+```ts
+{
+  score: number | null              // null = zero components computable (brand-new user) — Feature 5's
+                                    //   own "never show a misleading 0" rule
+  label: "Good" | "Fair" | "Needs attention" | null
+  components: {
+    debtToIncome: number | null
+    savingsRate: number | null
+    budgetAdherence: number | null  // identical to Budgeting's own Budget Health Score value —
+                                    //   read via budgeting.service.getBudgetHealthScore, never
+                                    //   independently recomputed (Feature 5's own DoD requirement)
+    netWorthTrend: number | null
+  }
+  undefinedComponents: ("debtToIncome" | "savingsRate" | "budgetAdherence" | "netWorthTrend")[]
+                                    // which component(s), if any, are undefined and why-labeled
+                                    //   in the UI (AC4) — e.g. fewer than 3 months of income history
+}
+```
+
+**Deliberately, `refreshSpendingInsights`-style on-demand regeneration does not exist for the Health Score narrative.** Per `ai-features-design.md` §6's explicit recommendation, the narrative is generated **only** as a side effect of the same cron invocation that captures the historical snapshot (AC7) — never on a page view, never via a user-triggered refresh — because that cadence is what keeps this feature's cost bound to "once per snapshot interval per user," not "once per page view." This is an intentional, permanent asymmetry with Features 2 and 4 (both of which do offer a user-triggered refresh), not an oversight — flagged here so a future implementer doesn't "complete the pattern" by adding a refresh action that would reintroduce the exact per-page-view cost risk the CTO's constraints were written to prevent.
+
+### Cross-feature note: no new client-side hooks, no new session-authenticated Route Handlers
+
+Every on-demand path across all five features above is a Server Action followed by the ordinary `revalidatePath` → Server Component re-fetch flow already used by every mutation in this codebase — none of them is a TanStack Query hook or a client-refetchable `GET` route. This is a deliberate continuity with the rest of the app (Server Actions are the default mutation mechanism everywhere) and not an oversight of a "should this have a hook" question: none of the five features has a Net-Worth-History-style "change a client-side control without a full navigation" requirement that would justify one. The only three new Route Handlers this phase are the shared-secret cron routes, listed above.

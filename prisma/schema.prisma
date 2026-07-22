@@ -1,20 +1,23 @@
-// FinanceOS — Prisma schema (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b)
+// FinanceOS — Prisma schema (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b + Phase 4a)
 // Scope: auth (Better Auth), Accounts, Transactions, Categories, Tags (Phase 1);
 // Budgeting, Savings Goals, Bills, Notifications, and a multi-file Receipt model
 // for Transactions (Phase 2); Debt Tracker, Investments (Holding), Recurring
 // Income, and the Net Worth Snapshot job (Phase 3a); Financial Goals and
 // Subscription Cost Detection's dismissal-tracking (Phase 3b — Net Worth
 // History and Analytics' other 11 metrics are pure read layers over existing
-// tables and require no schema changes of their own, see below). Modeled per
+// tables and require no schema changes of their own, see below); the
+// Transaction Auto-Categorization suggestion/audit-trail table, the Budget
+// Advisor/Spending Insights refresh-cache rows, Monthly Summaries, and the
+// Financial Health Score's own historical snapshot table (Phase 4a — see
+// below; Phase 4a's actual AI provider/prompt/schema code has no Prisma
+// model of its own, it only reads/writes the tables below). Modeled per
 // docs/product/{budgeting,savings-goals,bills,calendar-and-notifications,
 // debt-tracker,investments,recurring-income,financial-goals,analytics,
-// net-worth-history}.md and docs/architecture/{api-contracts.md,
-// Architecture.md}'s Phase 2/3a/3b module-boundary sections. See
-// docs/database/{er-diagram,migration-strategy,performance-considerations}.md
-// for the full rationale behind every modeling decision below.
-// Later-phase domains (Phase 4 AI) remain deferred — do not pre-model them
-// here to avoid guessing business rules the Product Owner hasn't specified
-// yet.
+// net-worth-history,ai-features}.md and docs/architecture/{api-contracts.md,
+// Architecture.md,ai-features-design.md}'s Phase 2/3a/3b/4a module-boundary
+// sections. See docs/database/{er-diagram,migration-strategy,
+// performance-considerations}.md for the full rationale behind every
+// modeling decision below.
 
 generator client {
   provider = "prisma-client-js"
@@ -71,6 +74,13 @@ model User {
   // FinanceOS domain data (Phase 3b)
   financialGoals                 FinancialGoal[]
   dismissedSubscriptionMerchants DismissedSubscriptionMerchant[]
+
+  // FinanceOS domain data (Phase 4a)
+  categorySuggestions           CategorySuggestion[]
+  budgetAdvisorCaches           BudgetAdvisorCache[]
+  monthlySummaries              MonthlySummary[]
+  spendingInsightsCaches        SpendingInsightsCache[]
+  financialHealthScoreSnapshots FinancialHealthScoreSnapshot[]
 
   @@map("user")
 }
@@ -218,6 +228,13 @@ model Category {
   budgetCategories BudgetCategory[]
   bills            Bill[]
 
+  // Phase 4a back-relation. Category itself is unchanged (still hard-delete
+  // for custom categories per categories.md AC6) — CategorySuggestion.
+  // suggestedCategoryId uses onDelete: SetNull below, the same pattern
+  // already established for Transaction/BudgetCategory/Bill's categoryId, so
+  // a deleted category never leaves a dangling FK on a suggestion row either.
+  categorySuggestions CategorySuggestion[]
+
   @@unique([userId, name])
   @@map("category")
 }
@@ -287,6 +304,19 @@ model Transaction {
   // considered and not added in this phase.
   incomeOccurrence     IncomeOccurrence?
   irregularIncomeEvent IrregularIncomeEvent?
+
+  // Phase 4a: zero or more Transaction Auto-Categorization suggestion/
+  // audit-trail rows may reference this transaction over its lifetime (an
+  // automatic suggestion, later rejected, followed by a fresh manual
+  // "reconsider" suggestion) — see CategorySuggestion below. A plain
+  // (non-unique) back-relation, since AC1/AC6 both allow more than one
+  // suggestion per transaction across time; "at most one *pending*
+  // suggestion at a time" is the invariant, enforced by a real database
+  // partial unique index (not just an application-level guard — see
+  // CategorySuggestion's own comment for why this table's cron/AUTOMATIC
+  // path needed a stronger mechanism than this schema's existing
+  // Bills/Recurring-Income and Debt Payoff exclusivity precedents).
+  categorySuggestions CategorySuggestion[]
 
   @@index([userId, date])
   @@index([accountId])
@@ -1269,4 +1299,513 @@ model FinancialGoalAccount {
 
   @@id([financialGoalId, accountId])
   @@map("financial_goal_account")
+}
+
+// ---------------------------------------------------------------------------
+// FinanceOS domain (Phase 4a) — AI Features' four persisted, non-AI-owned
+// tables: the Transaction Auto-Categorization suggestion/audit-trail table,
+// the Budget Advisor / Spending Insights refresh-cache rows, Monthly
+// Summaries, and the Financial Health Score's own historical snapshot table.
+// Modeled per docs/product/ai-features.md (Product Owner spec + CTO's
+// Resolved section), docs/architecture/ai-features-design.md §7 (AI
+// Engineer's handoff — the suggestion/audit-trail table's required facts,
+// and the two "flagged, not designed" cache needs), and
+// docs/architecture/Architecture.md's Phase 4a module-ownership section
+// (each table below is owned/queried by exactly one existing feature module
+// — Transactions, Budgeting, Dashboard, Analytics — plus the one new
+// `financial-health-score` module; no shared/generic "AI content" table is
+// introduced anywhere here, per the CTO's own DismissedSubscriptionMerchant
+// reasoning restated by both the AI Engineer and this Architect). None of
+// lib/ai/'s prompt/model-calling code has any Prisma model of its own — it
+// is pure infrastructure that reads/writes the rows below through each
+// feature's own server/ files, never directly.
+// ---------------------------------------------------------------------------
+
+// ---- Transaction Auto-Categorization: suggestion/audit-trail table --------
+//
+// Modeling decision (ai-features-design.md §7's required-facts list,
+// confirmed load-bearing — not optional — per ai-features.md's CTO Resolved
+// item 3): a small, purpose-built table recording a suggestion's full
+// lifecycle, mirroring the precedent DismissedSubscriptionMerchant already
+// established ("durably record a fact about an otherwise-ephemeral,
+// computed-at-read-time concept") rather than a JSON blob or a reuse of an
+// unrelated model. This table is the *only* way this product can ever answer
+// its own Success Metrics ("percentage of newly-Uncategorized transactions
+// that receive a suggestion the user accepts within 30 days," "suggestion
+// rejection rate") — Transaction.categoryId alone only ever reflects the
+// current, final category, with no memory of a suggestion that was shown and
+// rejected (which, per ai-features.md AC5, leaves the transaction
+// Uncategorized with no other trace at all).
+enum CategorySuggestionSource {
+  // Generated by app/api/cron/categorize-transactions/route.ts, structurally
+  // only ever for a currently-Uncategorized transaction (ai-features.md's
+  // Product Rule — "the automatic path never re-suggests for an already-
+  // categorized transaction" is enforced by categorization.ts's own
+  // generation query, not by this enum, but the source column is what makes
+  // the automatic-path-only acceptance-rate metric computable at all: it
+  // must be countable separately from MANUAL_RECONSIDER, which has no such
+  // restriction and is explicitly excluded from that specific metric).
+  AUTOMATIC
+  // Generated by the user-initiated requestCategorySuggestion Server Action
+  // (the "reconsider" path, ai-features.md AC6) — allowed on any transaction,
+  // categorized or not.
+  MANUAL_RECONSIDER
+}
+
+// Explicit lifecycle states, not a boolean "resolved" flag — "generated ->
+// shown -> accepted/rejected" (ai-features-design.md §7 item 3) needs a
+// PENDING/ACCEPTED/REJECTED distinction to compute a rejection rate
+// separately from a still-open suggestion, which two booleans (isAccepted /
+// isRejected) would allow to be set simultaneously — actually invalid.
+enum CategorySuggestionStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+model CategorySuggestion {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Required, non-nullable — a suggestion always concerns exactly one
+  // Transaction row (a normal transaction, or a split child row for the
+  // split-line-item case, ai-features.md AC8 — split line items are already
+  // ordinary Transaction rows via parentTransactionId, per Transaction's own
+  // schema comment, so no separate "splitLineItemId" column is needed here;
+  // the API layer's `{ transactionId } | { splitLineItemId }` input shape,
+  // api-contracts.md's requestCategorySuggestion, collapses to this same
+  // column either way). onDelete: Cascade: an audit trail for a
+  // hard-deleted transaction (transactions.md's own delete action) has
+  // nothing left to audit, mirroring Receipt.transactionId's own
+  // onDelete: Cascade precedent exactly (both are "detail rows that only
+  // make sense alongside their parent Transaction").
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  // Nullable + onDelete: SetNull — the exact pattern already established by
+  // Transaction.categoryId / BudgetCategory.categoryId / Bill.categoryId.
+  // This is what satisfies ai-features.md's own edge case ("the suggested
+  // category is deleted between suggestion generation and the user viewing/
+  // accepting it: the suggestion is invalidated, the transaction shows as
+  // plain Uncategorized") with zero extra status bookkeeping: a PENDING row
+  // whose suggestedCategoryId has gone null (because the category was
+  // hard-deleted, categories.md AC6) is read, at display/accept time, as
+  // "invalidated" by categorization.ts/actions.ts — the same "nullability
+  // itself carries the meaning" discipline this schema already uses
+  // elsewhere (e.g. BudgetCategory's row-presence pattern), rather than a
+  // second INVALIDATED enum value duplicating information the FK's own
+  // nullability already provides. The suggested category id *at generation
+  // time* is still durably recoverable from this column even after
+  // SetNull fires, right up until the moment a delete actually occurs —
+  // exactly the "was this real when it was suggested" fact
+  // ai-features-design.md §7 item 2 requires.
+  suggestedCategoryId String?
+  suggestedCategory   Category? @relation(fields: [suggestedCategoryId], references: [id], onDelete: SetNull)
+
+  status CategorySuggestionStatus @default(PENDING)
+  source CategorySuggestionSource
+
+  // The model's own reported confidence (0.00–1.00), matching the
+  // structured-output shape's `confidence` field verbatim
+  // (ai-features-design.md §4.2 / api-contracts.md's CategorySuggestion
+  // shape). Not required for the Success Metrics to be computable
+  // (ai-features-design.md §7 explicitly leaves this to this Architect's
+  // judgment) — persisted anyway since it is already present on every
+  // structured-output response at zero extra generation cost, and is cheap,
+  // useful raw material for future model-quality evaluation work the same
+  // §7 note flags as a live open interest, expensive to reconstruct
+  // retroactively if dropped now.
+  confidence Decimal? @db.Decimal(3, 2)
+
+  // Lightweight model/tier provenance (ai-features-design.md §7 item 6,
+  // e.g. "fastModel:claude-haiku:2026-08") — a plain String rather than an
+  // enum, deliberately: this schema's enums are reserved for closed,
+  // product-meaningful vocabularies (AccountType, DebtType, ...) that change
+  // rarely and require a migration when they do; which literal model
+  // identifier/tier generated a given row is an operational/debugging detail
+  // lib/ai/client.ts controls independently of any schema change (a future
+  // provider or model-version swap must never require a Prisma migration to
+  // keep recording provenance).
+  generatorModel String
+
+  // Explicit lifecycle timestamps (ai-features-design.md §7 item 3:
+  // "generated -> shown -> accepted/rejected, each with its own
+  // timestamp"). createdAt IS the "generated" timestamp (this codebase's
+  // standing convention — no separate generatedAt column is introduced
+  // alongside it, consistent with every other model's use of createdAt as
+  // its own creation-moment timestamp). shownAt/resolvedAt are nullable
+  // because a PENDING row may not yet have been rendered to the user, or may
+  // still be awaiting an accept/reject decision. No general-purpose
+  // updatedAt: this is an audit trail of discrete lifecycle events, each
+  // with its own named timestamp column, the same shape already established
+  // for Notification (readAt/dismissedAt, no updatedAt) rather than a
+  // single "last modified" column that can't distinguish which transition
+  // last occurred.
+  shownAt    DateTime?
+  resolvedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  // At-most-one-PENDING-suggestion-per-transaction (ai-features-design.md §7
+  // item 5) is enforced by a REAL DATABASE CONSTRAINT — a partial unique
+  // index on (transactionId) WHERE status = 'PENDING' — unlike this
+  // schema's two prior "conditional uniqueness" precedents (Phase 3a's
+  // Bills<->Recurring-Income cross-table exclusivity; Phase 3b's Debt Payoff
+  // exclusivity, er-diagram.md's Design notes (Phase 3b) #2), both of which
+  // were left as application-level-only guards. This is a deliberate
+  // departure from those two precedents, not an inconsistency: both prior
+  // cases share one concurrency profile this schema's comments have always
+  // named explicitly — "one authenticated user, acting on one of their own
+  // rows, within milliseconds of themselves" — a race window narrow enough
+  // that an app-level check-then-create was judged sufficient. This table's
+  // MANUAL_RECONSIDER path matches that profile exactly, but its AUTOMATIC
+  // path does not: app/api/cron/categorize-transactions/route.ts iterates
+  // potentially hundreds of transaction rows per invocation, and nothing in
+  // this codebase prevents two OVERLAPPING invocations of that route (a
+  // slow-running invocation still in flight when the next scheduled tick
+  // fires, or a manual re-trigger during an incident) from racing the same
+  // check-then-create guard against the same transaction from two entirely
+  // separate execution contexts — a materially different, multi-process
+  // race an app-level guard cannot close on its own (a Security Architect
+  // Phase 4a design-stage review finding, resolved here). A run-level
+  // idempotency key (mirroring NetWorthSnapshot's (userId, capturedDate)
+  // pattern below) was considered and rejected for this specific case: that
+  // pattern's semantics are "capture at most once per calendar day," which
+  // fits a daily snapshot job but doesn't fit this cron's actual job
+  // ("process whatever is currently Uncategorized," which may legitimately
+  // need to run more than once a day as new transactions arrive) — bending
+  // that pattern to fit here would mean building an ad hoc run-level
+  // mutex/lock (with its own stuck-lock/crash-recovery edge cases) that
+  // still wouldn't close the race for a future direct-write bug or a
+  // same-invocation double-insert, whereas a real constraint closes the
+  // actual race, at the actual layer it occurs, unconditionally. Prisma's
+  // schema DSL has no first-class conditional/partial @@unique syntax, so
+  // this index is hand-authored SQL appended to this table's migration (the
+  // "hand-edited migration SQL" exception migration-strategy.md documents
+  // for constraints Prisma cannot express declaratively, not just
+  // irreversible backfills) — see that file and er-diagram.md's Phase 4a
+  // design notes for the full reasoning and the exact index definition. The
+  // application-level check-then-create in categorization.ts/actions.ts is
+  // KEPT, not removed: it remains valuable as a fast-path that avoids a
+  // wasted model call in the overwhelmingly common (non-racing) case, but it
+  // is no longer this invariant's sole enforcement — a second writer that
+  // loses the race now gets a Prisma unique-constraint violation
+  // (P2002) instead of a silently-created second PENDING row, and callers
+  // must catch that specific error and treat it as "a suggestion already
+  // exists, no-op" rather than letting it surface as an unhandled 500. The
+  // composite index below is unchanged and still serves that guard's own
+  // pre-create lookup ("does a PENDING row already exist for this
+  // transaction") as a cheap, indexed point-lookup rather than a scan.
+  @@index([userId])
+  @@index([transactionId, status])
+  // Supports the Success Metrics' own required query shapes: "percentage of
+  // newly-Uncategorized transactions that receive an accepted suggestion
+  // within 30 days" is scoped to the AUTOMATIC source only
+  // (ai-features-design.md §7 item 4); "suggestion rejection rate" needs the
+  // same (userId, source, status) shape to count REJECTED distinctly from
+  // PENDING/ACCEPTED, per user, per source.
+  @@index([userId, source, status])
+  @@map("category_suggestion")
+}
+
+// ---- AI Budget Advisor: refresh-cache row ----------------------------------
+//
+// Modeling decision (ai-features-design.md §7's "flagged, not designed" note,
+// confirmed as Budgeting's own feature-owned table by Architecture.md's
+// Phase 4a module-ownership section): a single cached-result-plus-timestamp
+// row per (userId, month) — NOT a growing history table. ai-features.md's
+// own spec never asks for a history/comparison view of past advisor
+// recommendations (Feature 2's only UI surface is "the current, editable
+// month" per AC5); only the latest generated content for the current month
+// is ever displayed, so a row is upserted in place on every
+// generate/refresh, never appended. This is what lets `getBudgetAdvisorRecommendations`
+// satisfy ai-features-design.md §6's "generated result is cached... keyed by
+// (userId, month)" cost bound with a single indexed point-lookup, with zero
+// unbounded row growth per user over time (contrast with e.g.
+// HoldingValueHistoryEntry, a genuine append-only ledger this table is
+// deliberately not shaped like).
+model BudgetAdvisorCache {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // First-of-month UTC calendar date, mirroring Budget.month's own
+  // convention exactly (risk-register.md #8's UTC/@db.Date discipline) —
+  // this feature reads the same current-month concept Budgeting already
+  // defines, so its own cache key uses the identical date representation
+  // rather than introducing a second "YYYY-MM" string convention alongside
+  // it.
+  month DateTime @db.Date
+
+  // The generated recommendations bundle (1–3 items, each `{ text,
+  // citedFigures }` per api-contracts.md's BudgetAdvisorRecommendations
+  // shape) — stored as opaque JSON, not a normalized child table. This
+  // content has no relational query need of its own (no filtering/joining
+  // across individual recommendations is ever required — the whole bundle
+  // is always read and replaced together), so a Json column is the simplest
+  // faithful representation of "cache whatever the last successful
+  // structured-output call returned," consistent with this being a cache
+  // row for non-deterministic generated content, not first-class relational
+  // domain data. Nullable: a row may exist purely to record a failed
+  // generation *attempt* (see generatedAt below) with no successful content
+  // yet to show.
+  recommendations Json?
+
+  // MUST be named exactly `generatedAt` (naming-standards.md's binding
+  // Phase 4a convention) — lib/ai/rate-limit.ts's canRefreshNow(lastGeneratedAt,
+  // minIntervalMs) reads this column's value directly. Updated on every
+  // generation *attempt* (success or "unavailable"), not only on success —
+  // the refresh action must bound call *volume* regardless of outcome
+  // (ai-features-design.md §6's "no unbounded ... fan-out" constraint would
+  // otherwise be defeated by a user repeatedly triggering Refresh into a
+  // failing/degraded provider with zero cooldown). `recommendations` above
+  // is only overwritten on a successful generation, so a failed attempt
+  // updates this timestamp while leaving the last known-good content (if
+  // any) in place for continued display.
+  generatedAt DateTime @default(now())
+
+  // One cache row per user per month — the natural upsert key for both the
+  // implicit generate-on-first-view path and the explicit Refresh action,
+  // and (mirroring Budget's own @@unique([userId, month]) +
+  // @@index([userId, month]) pair exactly) the composite index already
+  // covers every userId-only lookup via its leftmost prefix, so no separate
+  // plain @@index([userId]) is added.
+  @@unique([userId, month])
+  @@index([userId, month])
+  @@map("budget_advisor_cache")
+}
+
+// ---- Automatic Monthly Summaries --------------------------------------------
+//
+// Modeling decision (ai-features.md Feature 3, "generated once per user per
+// month... persisted... does not regenerate on each view," explicitly
+// mirroring the Net Worth Snapshot precedent per the spec's own words):
+// unlike the two refresh-cache models in this section, this genuinely is a
+// permanent, growing history table — one row per user per fully-closed
+// calendar month, forever — because Feature 3 AC5 requires a browsable
+// history of every past month's summary, not just the latest. A completed
+// month whose generation ultimately failed still gets a persisted row
+// (narrative: null), so the Dashboard/history view can render "Summary not
+// available for [Month]" rather than a month silently missing from history
+// with no explanation (Feature 3's own Edge Case) — this is the same
+// nullability-carries-meaning discipline used elsewhere in this section
+// (CategorySuggestion.suggestedCategoryId, FinancialHealthScoreSnapshot.narrative
+// below).
+model MonthlySummary {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // First-of-month UTC calendar date, same convention as Budget.month /
+  // BudgetAdvisorCache.month above. Always a fully-closed month by
+  // construction (Feature 3 AC3: "the current, in-progress month never has
+  // a generated summary") — enforced by app/api/cron/monthly-summary/route.ts
+  // only ever processing months that have already closed, the same
+  // "application-level, not a DB constraint" precedent already used for
+  // Budgeting's own past-vs-current-month distinction (isEditable is never
+  // stored either).
+  month DateTime @db.Date
+
+  // Null = generation has not yet succeeded for this month (a cron failure,
+  // or — transiently, between row creation and the cron's own generation
+  // step within the same invocation — not yet attempted). This is the exact
+  // signal the "Summary not available for [Month]" degraded state
+  // (Feature 3 Edge Cases) reads, mirroring CategorySuggestion's own
+  // "nullability of the generated-content column is the failure signal"
+  // pattern rather than a separate status enum.
+  narrative String? @db.Text
+
+  // Every figure the narrative references — income, expenses, cash flow,
+  // savings rate, net worth change, top category/merchant — per
+  // api-contracts.md's MonthlySummary.citedFigures shape and the
+  // grounding-verification pattern (ai-features-design.md §4.3). Null
+  // exactly when narrative is null (both are written together, in the same
+  // upsert, by whichever code path succeeds in generating this month's
+  // summary).
+  citedFigures Json?
+
+  // True only for a user's genuinely partial first month (Feature 3 Edge
+  // Cases: a user who signs up mid-month gets a summary explicitly noting
+  // the partial coverage, never a summary implying a full month passed).
+  // Determined once, at generation time, from the user's own account-
+  // creation date — never recomputed later, since a month's "partial-ness"
+  // is a fixed historical fact about that month, not something that could
+  // change on a later read.
+  isPartialMonth Boolean @default(false)
+
+  // Last generation *attempt* timestamp (success or failure) — same
+  // "updated on every attempt, not only on success" contract as
+  // BudgetAdvisorCache.generatedAt above, feeding the optional
+  // regenerateMonthlySummary Server Action's rate limit
+  // (api-contracts.md: "rate-limited, same pattern as Advisor's refresh").
+  generatedAt DateTime
+
+  // When this month's row was first created (the cron's first attempt for
+  // this user+month, success or failure) — stable across any later
+  // successful regenerateMonthlySummary call, so "does a row exist for this
+  // month at all" (used by getSummaryHistory/getMostRecentSummary to answer
+  // "has this month been processed yet vs. genuinely doesn't exist because
+  // the user hadn't signed up") stays answerable independent of how many
+  // times generatedAt has since been touched by a retry.
+  createdAt DateTime @default(now())
+
+  // One row per user per calendar month, forever — mirrors Budget's own
+  // @@unique([userId, month]) + @@index([userId, month]) pair exactly; the
+  // composite index serves both getMostRecentSummary (ORDER BY month DESC
+  // LIMIT 1) and getSummaryHistory (ORDER BY month) without a separate plain
+  // @@index([userId]).
+  @@unique([userId, month])
+  @@index([userId, month])
+  @@map("monthly_summary")
+}
+
+// ---- Spending Insights: refresh-cache row -----------------------------------
+//
+// Same shape and reasoning as BudgetAdvisorCache above (single
+// cached-result-plus-timestamp row, not a history table — ai-features.md
+// Feature 4 has no "browse past insights" requirement, only "refresh insights
+// on demand" for the current period, AC4), owned by Analytics per
+// Architecture.md's module-ownership note, keyed by (userId, period) instead
+// of (userId, month).
+model SpendingInsightsCache {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Free-text period key, deliberately NOT a Prisma enum. Unlike Budgeting's
+  // month (a single, fixed date representation reused verbatim everywhere),
+  // Spending Insights' "period" concept has two distinct vocabularies
+  // depending on surface (ai-features.md AC5): Analytics' own full
+  // reporting-period control (naming-standards.md's `ReportingPeriod` —
+  // itself a Zod/TS-only type, never a persisted Prisma enum, since
+  // Analytics has no data model of its own to attach one to) when shown on
+  // the Analytics page, vs. a fixed "current month vs. prior comparable
+  // period" when shown on the Dashboard. A Prisma enum would force one
+  // closed, migration-gated vocabulary to serve both call sites; a plain
+  // String column simply persists whatever period key the caller's own
+  // Zod-validated input already resolved to, with zero schema coupling to
+  // Analytics' period vocabulary evolving independently later.
+  period String
+
+  // The generated insights bundle (2–4 items, each `{ text, citedFigures,
+  // sourceMetric }` per api-contracts.md's SpendingInsight shape) — same
+  // opaque-JSON-cache rationale as BudgetAdvisorCache.recommendations above.
+  // Nullable for the same reason: a row may record a failed attempt with no
+  // successful content yet.
+  insights Json?
+
+  // Same "updated on every attempt, success or failure" contract as
+  // BudgetAdvisorCache.generatedAt / MonthlySummary.generatedAt above — MUST
+  // be named exactly `generatedAt` per naming-standards.md's binding
+  // convention (lib/ai/rate-limit.ts's canRefreshNow(lastGeneratedAt, ...)).
+  generatedAt DateTime @default(now())
+
+  // One cache row per user per period key — mirrors BudgetAdvisorCache's
+  // @@unique([userId, month]) + @@index([userId, month]) pair exactly, with
+  // `period` standing in for `month`.
+  @@unique([userId, period])
+  @@index([userId, period])
+  @@map("spending_insights_cache")
+}
+
+// ---- Financial Health Score: historical snapshot table ---------------------
+//
+// Modeling decision (ai-features.md's CTO Resolved item 2, independently
+// confirmed by this Architect and by the Solution Architect's
+// Architecture.md module-placement section): a NEW sibling table, NOT an
+// extension of NetWorthSnapshot. NetWorthSnapshot stores three Decimal
+// columns describing one concept (net worth and its two components); this
+// table stores four independent component scores, a total, a banded label,
+// and (per ai-features-design.md §6's explicit recommendation that the
+// narrative piggyback on the same cron cadence as the snapshot, rather than
+// being generated per page view) a narrative-cache field — a materially
+// wider row answering a materially different question ("how healthy is this
+// user's whole financial picture," not "what is this user's net worth").
+// Folding these onto NetWorthSnapshot would force every future reader of
+// that table to know which columns belong to which concept, exactly the
+// two-concepts-one-table conflation this schema has already deliberately
+// avoided once (DismissedSubscriptionMerchant kept standalone rather than
+// folded into Notification). Mirrors NetWorthSnapshot's own proven
+// cron-triggered, idempotent-per-user-per-day capture *pattern* (not its
+// rows) — the exact "reuse the pattern, not the same table" framing the
+// CTO's own Resolved-section language used.
+enum FinancialHealthScoreLabel {
+  GOOD
+  FAIR
+  NEEDS_ATTENTION
+}
+
+model FinancialHealthScoreSnapshot {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Precise capture timestamp, for display/ordering — same doubled-date
+  // shape as NetWorthSnapshot.
+  capturedAt   DateTime @default(now())
+  // UTC calendar date derived from capturedAt at write time, same
+  // @db.Date + UTC convention (risk-register.md #8) and same idempotency
+  // role as NetWorthSnapshot.capturedDate: if the external scheduler
+  // invokes app/api/cron/financial-health-score-snapshot/route.ts more than
+  // once on the same day, capturing a snapshot is an upsert on
+  // (userId, capturedDate), never a second duplicate row.
+  capturedDate DateTime @db.Date
+
+  // The four already-scored (0–100) component values from ai-features.md
+  // Feature 5's deterministic formula, persisted as a copy at capture time —
+  // the same "persisted copy of numbers a service.ts already computed,
+  // never recomputed here" discipline NetWorthSnapshot itself follows. Each
+  // is independently nullable per the formula's own "undefined-component
+  // handling" rule (Feature 5: a component is undefined, NOT zero, when its
+  // prerequisite data doesn't exist yet) — a null value here IS the
+  // "undefined" signal read back by FinancialHealthScoreBreakdown.
+  // undefinedComponents (api-contracts.md), so no separate array/bitmask
+  // column is needed to record which components were undefined at capture
+  // time.
+  debtToIncomeScore    Int?
+  savingsRateScore     Int?
+  budgetAdherenceScore Int?
+  netWorthTrendScore   Int?
+
+  // The Final Score — round(average of whichever components are
+  // computable) — and its banded label. Both nullable together: null
+  // exactly when zero components were computable that day (Feature 5's own
+  // "not enough data yet" empty state, never a misleading 0). `label` is
+  // stored explicitly rather than always re-derived from `totalScore` at
+  // read time for the identical reason NetWorthSnapshot stores
+  // `totalNetWorth` explicitly instead of recomputing it from its own two
+  // components: the CTO's Resolved section flags the Net Worth Trend
+  // component's ±15%-of-income threshold as "provisional pending
+  // recalibration," and the 70/40 band cutoffs themselves could in
+  // principle be revisited in a later release — freezing both the score AND
+  // its label at capture time guarantees a future threshold change can
+  // never silently rewrite what an already-displayed historical sparkline
+  // point meant on the day it was captured.
+  totalScore Int?
+  label      FinancialHealthScoreLabel?
+
+  // Nullable — the score has ZERO AI dependency (ai-features.md Feature 5's
+  // own strongest degradation guarantee, restated structurally here:
+  // narrative generation failing must NEVER block persisting a valid
+  // totalScore/label/component set for that day, and a valid score must
+  // NEVER be blocked from being captured because the narrative call failed
+  // or is slow). Generated, at most once per snapshot, as a second step
+  // inside the SAME cron invocation that captures the score
+  // (ai-features-design.md §6's explicit recommendation) — there is no
+  // separate narrativeGeneratedAt column because the narrative and the
+  // score it explains are always written together, atomically, keyed off
+  // this same row's own capturedAt; a cycle where the score succeeds but
+  // the narrative fails simply leaves this column null for that day's row,
+  // exactly like MonthlySummary.narrative / BudgetAdvisorCache.
+  // recommendations / SpendingInsightsCache.insights above.
+  narrative String? @db.Text
+
+  // (userId, capturedDate) is both the idempotency guard and the natural
+  // "did we already snapshot this user today" point-lookup; (userId,
+  // capturedAt) supports the historical-trend sparkline's own ordered range
+  // query (getFinancialHealthScoreHistory, api-contracts.md) — identical
+  // rationale to NetWorthSnapshot's own two indexes.
+  @@unique([userId, capturedDate])
+  @@index([userId, capturedAt])
+  @@map("financial_health_score_snapshot")
 }

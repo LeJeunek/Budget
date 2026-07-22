@@ -1,4 +1,4 @@
-# FinanceOS — ER Diagram (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b)
+# FinanceOS — ER Diagram (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b + Phase 4a)
 
 ```mermaid
 erDiagram
@@ -61,6 +61,15 @@ erDiagram
     Debt ||--o{ FinancialGoal : "optionally targeted by (DEBT_PAYOFF)"
     FinancialGoal ||--o{ FinancialGoalAccount : "optionally scoped to (ACCOUNT_SUBSET)"
     Account ||--o{ FinancialGoalAccount : "optionally included in"
+
+    User ||--o{ CategorySuggestion : owns
+    User ||--o{ BudgetAdvisorCache : owns
+    User ||--o{ MonthlySummary : owns
+    User ||--o{ SpendingInsightsCache : owns
+    User ||--o{ FinancialHealthScoreSnapshot : owns
+
+    Transaction ||--o{ CategorySuggestion : "suggested for"
+    Category ||--o{ CategorySuggestion : "optionally suggested (nullable, SetNull)"
 
     User {
         string id PK
@@ -292,6 +301,61 @@ erDiagram
         string financialGoalId FK
         string accountId FK
     }
+
+    CategorySuggestion {
+        string id PK
+        string userId FK
+        string transactionId FK
+        string suggestedCategoryId FK "nullable"
+        enum status
+        enum source
+        decimal confidence "nullable, 0.00-1.00"
+        string generatorModel
+        datetime shownAt "nullable"
+        datetime resolvedAt "nullable"
+        datetime createdAt "generation timestamp"
+    }
+
+    BudgetAdvisorCache {
+        string id PK
+        string userId FK
+        date month "unique per user, per month"
+        json recommendations "nullable"
+        datetime generatedAt
+    }
+
+    MonthlySummary {
+        string id PK
+        string userId FK
+        date month "unique per user, per month"
+        string narrative "nullable"
+        json citedFigures "nullable"
+        boolean isPartialMonth
+        datetime generatedAt
+        datetime createdAt
+    }
+
+    SpendingInsightsCache {
+        string id PK
+        string userId FK
+        string period "unique per user, per period key"
+        json insights "nullable"
+        datetime generatedAt
+    }
+
+    FinancialHealthScoreSnapshot {
+        string id PK
+        string userId FK
+        datetime capturedAt
+        date capturedDate "unique per user, per day"
+        int debtToIncomeScore "nullable"
+        int savingsRateScore "nullable"
+        int budgetAdherenceScore "nullable"
+        int netWorthTrendScore "nullable"
+        int totalScore "nullable"
+        enum label "nullable"
+        string narrative "nullable"
+    }
 ```
 
 ## Design notes (Phase 0/1)
@@ -401,3 +465,68 @@ A flat table, one `FinancialGoalType` discriminator (`DEBT_PAYOFF | NET_WORTH_SA
 ### 3. `debt.service.getDebtById`'s archived-inclusive-by-id behavior: confirmed already satisfied, no follow-up needed
 
 Checked against the actual current implementation (`src/features/debt/server/service.ts`): `getDebtById(userId, id)` calls `db.debt.findFirst({ where: { id, userId }, include: LINKED_ACCOUNT_BALANCE_INCLUDE })` — no `archivedAt` filter of any kind. This already returns archived Debts by id exactly as Financial Goals' "linked Debt was later archived, goal progress freezes" edge case requires (only `getDebts`' *list* query correctly excludes archived rows by default, via its own explicit `archivedAt: includeArchived ? { not: null } : null` filter, which is the intentional difference between a list read and a by-id read this codebase has followed since Phase 3a). **No Backend Engineer follow-up is required for this specific confirmation** — flagged here as verified, not left open.
+
+## Design notes (Phase 4a)
+
+Four schema requirements were handed off for this phase, all from `ai-features-design.md` §7/§8 and `Architecture.md`'s Phase 4a module-ownership section: the Transaction Auto-Categorization suggestion/audit-trail table, the Budget Advisor/Spending Insights refresh-cache rows, Monthly Summaries, and the Financial Health Score's historical snapshot table. See `prisma/schema.prisma`'s own inline comments on each model for the full column-by-column rationale (restated there rather than duplicated verbatim here); this section covers the handful of decisions that needed real judgment.
+
+### 1. `CategorySuggestion`: lifecycle + exclusivity mechanism
+
+**Lifecycle** is modeled with explicit named timestamp columns (`createdAt` = generated, `shownAt`, `resolvedAt`) plus a `CategorySuggestionStatus` enum (`PENDING | ACCEPTED | REJECTED`), mirroring `Notification`'s own `readAt`/`dismissedAt` shape (named event timestamps, no generic `updatedAt`) rather than a single "last modified" column that can't distinguish which transition last happened. `createdAt` doing double duty as the "generated" timestamp is a deliberate reuse of this schema's existing convention (every model's `createdAt` already means "the moment this row came into existence"), not a new concept needing its own `generatedAt` column alongside it.
+
+**The deleted-suggested-category edge case** ("suggestion invalidated if its category is deleted before the user acts on it") is answered with zero extra bookkeeping: `suggestedCategoryId` is a nullable FK, `onDelete: SetNull`, the identical pattern already shipped for `Transaction.categoryId`/`BudgetCategory.categoryId`/`Bill.categoryId`. A `PENDING` row whose `suggestedCategoryId` has gone `null` (because the category was hard-deleted per `categories.md` AC6) is read back, at display/accept time, as "invalidated" — the same "nullability itself carries the meaning" discipline this schema already leans on elsewhere (`BudgetCategory`'s row-presence pattern, and three other Phase 4a models below), rather than adding a fifth status value that would duplicate information the FK's own nullability already provides.
+
+**At-most-one-`PENDING`-suggestion-per-transaction** is enforced by a **real database constraint** — a hand-authored partial unique index, `CREATE UNIQUE INDEX ... ON category_suggestion ("transactionId") WHERE status = 'PENDING'` (migration `20260722193327_category_suggestion_pending_partial_unique_index`) — a deliberate departure from this schema's two prior "conditional uniqueness" precedents (Phase 3a's Bills↔Recurring-Income cross-table exclusivity, and Phase 3b's Debt Payoff exclusivity, `Design notes (Phase 3b)` #2 above), both of which remain application-level-only guards.
+
+This departure was flagged by the Security Architect's Phase 4a design-stage review (Finding 5) and resolved jointly with this Architect, per `ai-features-design.md`'s own note that Finding 5 was left open for this document. The finding's core observation: this table's two write paths have genuinely different concurrency profiles, and the original schema comment's justification only covered one of them.
+
+- **`MANUAL_RECONSIDER`** matches the two prior precedents exactly — a single authenticated user, clicking "reconsider" on one of their own transactions, within milliseconds of themselves. An application-level check-then-create is sufficient here, as it was judged sufficient for Bills↔Recurring-Income and Debt Payoff.
+- **`AUTOMATIC`** does not. Rows on this path are written by `app/api/cron/categorize-transactions/route.ts`, a scheduled job iterating potentially hundreds of Uncategorized transaction rows per invocation. Nothing in this design prevented two *overlapping* invocations of that route — a slow-running invocation still in flight when the next scheduled tick fires, or a manual re-trigger during an incident — from racing the same check-then-create guard against the same transaction, from two entirely separate execution contexts, not one user double-clicking. That is a materially different race than either prior precedent was ever evaluated against, and an application-level guard inside a single Prisma `$transaction` cannot close a race between two *different* transactions/processes, by construction — the whole point of that guard's "single Prisma `$transaction`" framing is that it only serializes writes *within* one connection's transaction, not across two.
+
+**Why a partial unique index, not a run-level cron idempotency key.** Two options were on the table (the Security Architect raised both): (a) reuse `NetWorthSnapshot`/`FinancialHealthScoreSnapshot`'s `(userId, capturedDate)`-style idempotency pattern for the cron *route* itself, or (b) a real partial unique index on `CategorySuggestion` directly. Option (b) was chosen:
+
+- The `(userId, capturedDate)` pattern's semantics are "capture at most once per calendar day" — a good fit for a snapshot job whose entire job *is* "produce one row representing today," but a poor fit for `categorize-transactions`, whose job is "process whatever is currently Uncategorized." That job has no natural "once per day" ceiling — a reasonable future cadence change (e.g. running every 15 minutes so newly-imported transactions get categorized promptly, rather than waiting for a once-daily run) would be *correct* to run more than once a day, so gating the whole route behind a daily idempotency key would fight the feature's own purpose, not just its concurrency.
+- Building an equivalent run-level mutex that isn't tied to "once per day" (e.g. a lock row acquired at invocation start, released at completion) is possible, but reinvents an advisory lock by hand — it needs its own crash/timeout recovery story (what happens if an invocation dies mid-run without releasing the lock?) that this codebase has no existing precedent for, and it still only prevents two *whole invocations* from overlapping; it does nothing to stop a single invocation's own loop from double-inserting if a future refactor introduces that bug, and nothing to stop a hypothetical future direct-write path that bypasses the cron route's own lock entirely.
+- A partial unique index closes the actual race, at the actual layer it occurs (the row itself), unconditionally — regardless of how many execution contexts, cron schedules, or future code paths ever attempt a write. It requires no assumptions about cron cadence, no lock-acquisition/release bookkeeping, and no crash-recovery logic. This is strictly stronger than option (a) for the same or lower implementation cost, which is why it was chosen over reusing an existing precedent that, on inspection, doesn't actually fit this job's semantics.
+
+**This does not replace the application-level guard, it backstops it.** `categorization.ts`/`actions.ts`'s check-then-create is kept as a fast-path: in the overwhelming common case (no race), it avoids ever attempting — and therefore ever needing to handle a rejected — insert, and it lets the caller return an immediate, clean "a suggestion already exists" response without a database round-trip that fails. The partial unique index is what makes that guard *safe* under concurrency rather than merely *usually correct*: a second writer that loses the race now gets a Prisma `P2002` unique-constraint-violation error instead of silently creating a second `PENDING` row — Backend Engineer's implementation of both `categorization.ts` and the cron route must catch that specific error and treat it as an idempotent no-op ("a suggestion already exists for this transaction, skip"), not let it surface as an unhandled 500.
+
+`@@index([transactionId, status])` is unchanged and still serves the guard's own pre-create lookup ("does a `PENDING` row already exist for this transaction") as a cheap indexed point-lookup, not a scan — but it is no longer, on its own, this invariant's enforcement mechanism, only its performance optimization. See `docs/database/performance-considerations.md`'s Phase 4a section and `docs/database/migration-strategy.md`'s "Applied migrations" / rule 2 for the migration mechanics and the now-documented second category of hand-edited-SQL exception this migration establishes.
+
+**Provenance** (`generatorModel`) is a plain `String`, deliberately not an enum — which literal model/tier generated a row is an operational detail `lib/ai/client.ts` controls independently (a future provider or model-version swap must never require a schema migration just to keep recording provenance), unlike this schema's enums (`AccountType`, `DebtType`, ...), which are reserved for closed, rarely-changing, product-meaningful vocabularies.
+
+**Confidence** is persisted (`Decimal? @db.Decimal(3,2)`) even though `ai-features-design.md` §7 explicitly left this optional — it's already present on every structured-output response at zero extra generation cost, and is the kind of raw material that's cheap to capture now and expensive to reconstruct retroactively for future model-quality evaluation work, the same reasoning already used to justify capturing `generatorModel`.
+
+### 2. `FinancialHealthScoreSnapshot`: a new sibling table, and the narrative-nullability decision
+
+**New sibling table, not an extension of `NetWorthSnapshot`** — confirmed per the CTO's Resolved section and independently re-confirmed here (and by the Solution Architect, `Architecture.md`'s Phase 4a module-placement section): `NetWorthSnapshot` stores three `Decimal` columns describing one concept; this table stores four independent component scores, a total, a label, and a narrative — a materially wider row answering a materially different question. Folding the two together would repeat the exact two-concepts-one-table conflation this schema already declined once for `DismissedSubscriptionMerchant` (kept standalone rather than folded into `Notification`). The cron-triggered, idempotent-per-user-per-day capture *pattern* is reused verbatim from `NetWorthSnapshot` (`@@unique([userId, capturedDate])` + `@@index([userId, capturedAt])`, identical rationale) — only the pattern, not the rows.
+
+**The narrative field is nullable, and this is load-bearing, not incidental.** `ai-features.md` Feature 5 states the score has *zero* AI dependency and this must be its "strongest degradation guarantee" among all five Phase 4a features — a narrative generation failure must never block persisting a valid score for that day, and a valid score must never be blocked by a slow/failing narrative call. Making `narrative` a required column would force an artificial choice on every capture where narrative generation fails (write a placeholder string? skip the whole row, losing that day's score too?) — either would violate the spec's own explicit guarantee. A nullable column lets the cron's two steps (capture the deterministic score, then attempt the narrative) succeed or fail **independently**, with the row always persisting the score-half regardless of the narrative-half's outcome. No separate `narrativeGeneratedAt` timestamp is added alongside it: per `ai-features-design.md` §6, the narrative is generated only as a second step inside the *same* cron invocation that captures the snapshot, so the two are always written together, atomically, keyed off the row's own `capturedAt` — a second timestamp would carry no information `capturedAt` doesn't already provide (there is no separate on-demand narrative-refresh path for this feature, unlike Advisor/Insights, per `api-contracts.md`'s explicit note that this asymmetry is intentional).
+
+**`totalScore` and `label` are both nullable, and `label` is stored explicitly rather than always re-derived from `totalScore`** — mirroring `NetWorthSnapshot.totalNetWorth`'s own precedent of storing the final formula output explicitly rather than only its inputs, specifically because the CTO's Resolved section flags the Net Worth Trend component's ±15%-of-income threshold as "provisional pending recalibration": if that threshold (or the 70/40 band cutoffs) is later recalibrated, a historical snapshot's already-displayed score/label must never silently reinterpret itself under a future formula version — each row is a frozen statement of "what the formula produced on this day," the identical framing `er-diagram.md`'s Phase 3a design note #6 already used for `NetWorthSnapshot.totalNetWorth`.
+
+**The four component scores are each independently nullable**, directly encoding Feature 5's own "undefined-component handling" rule (a component is undefined, not zero, when its prerequisite data doesn't exist yet). No separate `undefinedComponents` array/bitmask column is added — a `null` component value already *is* the "undefined" signal `FinancialHealthScoreBreakdown.undefinedComponents` (api-contracts.md) reads back at query time, the same "let nullability itself carry the meaning" discipline used for `CategorySuggestion.suggestedCategoryId` above and both cache models below.
+
+### 3. `BudgetAdvisorCache` / `SpendingInsightsCache`: single-row caches, not history tables — and why `generatedAt` updates on every attempt, not only on success
+
+Both are exactly what `ai-features-design.md` §7's "flagged, not designed" note asked for: "a single cached-result-plus-timestamp row per user per feature," keyed by `(userId, month)` for the Advisor and `(userId, period)` for Insights — never a growing history table, since neither feature's product spec asks for a browsable past-recommendations/past-insights view (Feature 2's only surface is the current, editable month; Feature 4's only requirement is an on-demand refresh of the *current* period). Content (`recommendations`/`insights`) is stored as opaque `Json`, not a normalized child table, since it has no relational query need of its own — the whole bundle is always read and replaced together, never filtered/joined at the row level.
+
+**`generatedAt` is updated on every generation *attempt*, success or failure — a decision this Architect made explicitly, not left implicit.** `naming-standards.md` mandates the column be named exactly `generatedAt` (so `lib/ai/rate-limit.ts`'s `canRefreshNow(lastGeneratedAt, minIntervalMs)` reads it directly), but doesn't specify *when* it updates. Updating it only on success would let a user spam the "Refresh" action into a failing/degraded AI provider with zero cooldown between attempts — directly defeating `ai-features-design.md` §6's "no unbounded ... fan-out" cost/latency bound, which exists precisely to bound call *volume*, not just successful-call volume. Making the content columns (`recommendations`/`insights`) nullable is what makes this work cleanly: a failed attempt upserts `generatedAt` (moving the rate-limit cooldown forward) while leaving the last known-good content, if any, untouched and still displayable — the row's content and its "was an attempt just made" signal are deliberately decoupled.
+
+**`SpendingInsightsCache.period` is a plain `String`, not a Prisma enum** — unlike Budgeting's `month` (one fixed date representation reused everywhere), Insights' "period" concept has two genuinely different vocabularies depending on surface (Analytics' full reporting-period control vs. a fixed Dashboard "current month vs. prior" comparison, `ai-features.md` AC5), and `ReportingPeriod` itself is a Zod/TS-only type with no existing Prisma enum to reuse (Analytics has no data model of its own). A migration-gated enum would force one vocabulary to serve both call sites; a plain string lets the cache key track whatever the caller's own Zod-validated input resolves to, with zero schema coupling to that vocabulary evolving independently later.
+
+### 4. `MonthlySummary`: the one genuine history table this phase adds, and why a failed month still gets a row
+
+Unlike the two cache models above, `MonthlySummary` is a permanent, ever-growing table — one row per user per fully-closed calendar month, forever — because Feature 3 AC5 explicitly requires a browsable history of *every* past month's summary, not just the latest (the same shape distinction that makes `NetWorthSnapshot` a history table while `BudgetAdvisorCache`/`SpendingInsightsCache` are not).
+
+**A completed month whose generation ultimately fails still gets a persisted row, with `narrative: null`.** This is required by Feature 3's own Edge Case: "if generation ultimately does not succeed... the Dashboard/history shows an explicit 'Summary not available for [Month]' state — never a blank space, a broken card, or a silently missing month with no explanation." A silently-absent row for that month would be indistinguishable from "the cron hasn't reached this month yet" or "this user didn't exist yet that month" — exactly the ambiguity the spec's edge case rules out. Writing the row regardless of outcome (content nullable, same discipline as the two cache models above and `CategorySuggestion`) is what lets `getMostRecentSummary`/`getSummaryHistory` distinguish "processed, failed" from "not yet processed" from "user didn't exist yet" purely from row presence + `narrative` nullability, with no extra status column.
+
+**`generatedAt` (required, updated on every attempt) is distinct from `createdAt` (set once, at first row creation).** This split exists specifically for the optional `regenerateMonthlySummary` action (`api-contracts.md`: "rate-limited, same pattern as Advisor's refresh"): `generatedAt` feeds that action's rate limit exactly like the two cache models' `generatedAt` above, while `createdAt` stays stable as "when did this month's row first appear" regardless of how many later regenerate attempts touch `generatedAt` — needed so history-browsing logic never has to guess whether a row's presence reflects the original cron run or a much-later manual retry.
+
+### Cross-cutting Phase 4a pattern, stated once: nullability-as-signal, used four times
+
+`CategorySuggestion.suggestedCategoryId`, `MonthlySummary.narrative`/`citedFigures`, `BudgetAdvisorCache.recommendations`, `SpendingInsightsCache.insights`, and `FinancialHealthScoreSnapshot`'s four component scores/`totalScore`/`label`/`narrative` all use the identical discipline: a `null` value **is** the degraded/undefined/not-yet-generated signal, never a separate boolean/enum flag duplicating what the nullable column's own state already says. This is not five independent choices — it's one discipline applied consistently across every Phase 4a model, chosen specifically because Cross-Cutting Product Requirement #1 (`ai-features.md`, graceful degradation) and Feature 5's own strongest-degradation guarantee both require that an AI-generation failure be structurally distinguishable from success at the data layer, and Prisma's own nullable-column semantics already provide exactly that distinction for free, without an extra column anywhere.
+
+### No new caching-layer precedent, restated from the schema's own angle
+
+`BudgetAdvisorCache`/`SpendingInsightsCache` might look, at a glance, like Risk #11's declined "materialized/cached-aggregate" pattern reappearing — it is not. Risk #11 declined caching *deterministic Prisma aggregation* (cheap to recompute on every request, so caching would add complexity for no correctness/cost benefit). These two tables cache *non-deterministic, non-free-to-regenerate AI output* — the entire reason `ai-features-design.md` §6 requires bounding how often generation happens at all. No other Phase 4a read path (the Health Score's own deterministic four-component formula, `service.ts`) introduces any caching of its own — it remains a live, on-read computation exactly like `getBudgetHealthScore`/`getNetWorth`/every other deterministic formula in this codebase, consistent with this schema's evidence-first stance on caching everywhere else.

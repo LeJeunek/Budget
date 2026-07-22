@@ -28,6 +28,22 @@
 // demonstrate a join-table row, which doesn't earn its place in a minimal dev
 // seed — Integration Test Engineer's dedicated fixtures are the right place
 // for that case, not this script.
+//
+// Phase 4a addition: one row per new AI-features model — a PENDING
+// CategorySuggestion (automatic path) against the demo transaction seeded
+// below, a BudgetAdvisorCache row, a MonthlySummary row (a fully-closed prior
+// month, narrative present — the "generation succeeded" case), a
+// SpendingInsightsCache row, and a FinancialHealthScoreSnapshot row (all four
+// components defined, narrative present). Deliberately not exhaustive: the
+// REJECTED/ACCEPTED CategorySuggestion states, a failed-generation
+// (narrative: null) MonthlySummary/cache row, and an undefined-component
+// FinancialHealthScoreSnapshot are Integration Test Engineer's dedicated
+// fixture concerns, not this minimal dev seed's job — same "exercise every
+// new model at least once, not every state" standard already applied to
+// Phase 3a/3b above. No lib/ai/ call happens anywhere in this script — every
+// generated-content field below is static seed literal text, never a real
+// model call, consistent with this script running with no network/API-key
+// dependency at all.
 
 import {
   PrismaClient,
@@ -39,6 +55,9 @@ import {
   IncomeSchedule,
   FinancialGoalType,
   MeasurementBasis,
+  CategorySuggestionSource,
+  CategorySuggestionStatus,
+  FinancialHealthScoreLabel,
 } from "@prisma/client";
 import { DEFAULT_CATEGORIES } from "../src/features/categories/default-categories";
 
@@ -260,6 +279,111 @@ async function main() {
     data: {
       userId: demoUser.id,
       normalizedMerchantName: "demo coffee shop",
+    },
+  });
+
+  // ---- Phase 4a: Transaction Auto-Categorization suggestion/audit-trail ----
+  // A second, Uncategorized demo transaction is seeded here specifically —
+  // reusing the already-categorized coffee-shop transaction above would
+  // violate the product's own rule (ai-features.md's Product Rule: automatic
+  // suggestions are only ever generated for a currently-Uncategorized
+  // transaction), so a realistic PENDING/AUTOMATIC row needs its own
+  // Uncategorized target.
+  const uncategorizedTransaction = await prisma.transaction.create({
+    data: {
+      userId: demoUser.id,
+      accountId: checking.id,
+      merchant: "Demo Grocery Market",
+      amount: -84.12,
+      date: new Date(),
+    },
+  });
+
+  await prisma.categorySuggestion.create({
+    data: {
+      userId: demoUser.id,
+      transactionId: uncategorizedTransaction.id,
+      suggestedCategoryId: diningCategory.id,
+      status: CategorySuggestionStatus.PENDING,
+      source: CategorySuggestionSource.AUTOMATIC,
+      confidence: 0.87,
+      generatorModel: "fastModel:claude-haiku:2026-08",
+    },
+  });
+
+  // ---- Phase 4a: AI Budget Advisor refresh-cache -----------------------------
+  // Static seed literal text, never a real lib/ai/ call — this script has no
+  // network/API-key dependency, matching every other Phase 4a row below.
+  const currentMonth = new Date();
+  currentMonth.setUTCDate(1);
+  currentMonth.setUTCHours(0, 0, 0, 0);
+
+  await prisma.budgetAdvisorCache.create({
+    data: {
+      userId: demoUser.id,
+      month: currentMonth,
+      recommendations: [
+        {
+          text: "You're on track across all your budgeted categories this month.",
+          citedFigures: [],
+        },
+      ],
+    },
+  });
+
+  // ---- Phase 4a: Automatic Monthly Summaries ---------------------------------
+  // A fully-closed prior month (never the current, in-progress month, per
+  // Feature 3 AC3), narrative present — the "generation succeeded" case.
+  const priorMonth = new Date(currentMonth);
+  priorMonth.setUTCMonth(priorMonth.getUTCMonth() - 1);
+
+  await prisma.monthlySummary.create({
+    data: {
+      userId: demoUser.id,
+      month: priorMonth,
+      narrative:
+        "Last month you brought in $4,800 in income against $3,200 in expenses, a 33% savings rate. Food was your top spending category.",
+      citedFigures: [
+        { label: "income", value: 4800 },
+        { label: "expenses", value: 3200 },
+        { label: "savingsRate", value: 33 },
+      ],
+      isPartialMonth: false,
+      generatedAt: new Date(),
+    },
+  });
+
+  // ---- Phase 4a: Spending Insights refresh-cache -----------------------------
+  await prisma.spendingInsightsCache.create({
+    data: {
+      userId: demoUser.id,
+      period: "this-month",
+      insights: [
+        {
+          text: "No unusual spending patterns this period.",
+          citedFigures: [],
+          sourceMetric: "categoryTrends",
+        },
+      ],
+    },
+  });
+
+  // ---- Phase 4a: Financial Health Score historical snapshot ------------------
+  // All four components defined, narrative present — the "fully computable"
+  // case; the undefined-component and zero-components cases are Integration
+  // Test Engineer's dedicated fixture concern, not this minimal dev seed.
+  await prisma.financialHealthScoreSnapshot.create({
+    data: {
+      userId: demoUser.id,
+      capturedDate: new Date(),
+      debtToIncomeScore: 78,
+      savingsRateScore: 85,
+      budgetAdherenceScore: 90,
+      netWorthTrendScore: 70,
+      totalScore: 81,
+      label: FinancialHealthScoreLabel.GOOD,
+      narrative:
+        "Your score is Good overall, driven by a strong savings rate and solid budget adherence.",
     },
   });
 
