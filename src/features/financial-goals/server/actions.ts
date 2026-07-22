@@ -418,16 +418,22 @@ export async function archiveFinancialGoal(
  * has no effect on its stored configuration. Idempotent for the same reason
  * as `archiveFinancialGoal`.
  *
- * Deliberately does **not** re-check the Debt Payoff exclusivity guard: per
- * financial-goals.md's Type 1 wording, that rule only prevents a *second*
- * simultaneously-active goal from being *created* against an already-tracked
- * Debt — it says nothing about unarchiving. If a user archived goal A for a
- * Debt and then created goal B for the same Debt (which the guard correctly
- * allowed, since A was archived at that point), unarchiving A back to active
- * alongside B is an unusual but not explicitly forbidden state, and
- * re-litigating it here would silently add a restriction the spec never
- * asked for. This mirrors Bills/Recurring Income's own precedent of not
- * re-validating cross-table exclusivity on an unarchive path.
+ * **Debt Payoff exclusivity re-check (bugfix, financial-goals.md's Type 1
+ * "at most one active Debt Payoff Financial Goal per Debt at a time"):**
+ * although the rule's Edge Cases wording is framed around *creation*, the
+ * invariant itself ("at a time") is not create-only — it must hold at every
+ * point in time, regardless of which sequence of operations (create/
+ * archive/unarchive) got there. Archiving goal A for Debt X, creating goal B
+ * for the same Debt X (correctly allowed, since A was archived), then
+ * unarchiving A is entirely ordinary UI usage that must not be allowed to
+ * silently produce two simultaneously-active goals tracking the same Debt
+ * (see docs/testing/bug-reports/financial-goal-unarchive-bypasses-debt-payoff-exclusivity.md).
+ * For a `DEBT_PAYOFF` goal, this re-runs
+ * `assertDebtNotAlreadyLinkedToActiveGoal` inside the same transaction as the
+ * `archivedAt: null` write — mirroring `createDebtPayoffGoal`'s own
+ * check-then-write pattern exactly, closing the same race window. Non-
+ * `DEBT_PAYOFF` goals have no such exclusivity rule, so they skip the guard
+ * entirely.
  */
 export async function unarchiveFinancialGoal(
   input: unknown,
@@ -451,10 +457,29 @@ export async function unarchiveFinancialGoal(
     return ok(toFinancialGoal(existing))
   }
 
-  const unarchived = await db.financialGoal.update({
-    where: { id },
-    data: { archivedAt: null },
-  })
+  try {
+    const unarchived = await db.$transaction(async (tx) => {
+      if (existing.type === "DEBT_PAYOFF" && existing.linkedDebtId) {
+        await assertDebtNotAlreadyLinkedToActiveGoal(
+          tx,
+          user.id,
+          existing.linkedDebtId,
+        )
+      }
 
-  return ok(toFinancialGoal(unarchived))
+      return tx.financialGoal.update({
+        where: { id },
+        data: { archivedAt: null },
+      })
+    })
+
+    return ok(toFinancialGoal(unarchived))
+  } catch (error) {
+    if (error instanceof DebtAlreadyLinkedError) {
+      return fail(
+        "Another active goal is already tracking this debt — archive it first.",
+      )
+    }
+    throw error
+  }
 }

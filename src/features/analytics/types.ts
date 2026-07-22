@@ -250,3 +250,26 @@ export interface SubscriptionCandidate {
   estimatedAnnualizedCost: number
   status: SubscriptionStatus
 }
+
+/**
+ * One row of `subscriptions.getDismissedSubscriptionMerchants`'s result — a
+ * user's standing `DismissedSubscriptionMerchant` exclusions, surfaced so a
+ * dismissal is a visible, reversible action rather than a silent, permanent
+ * one (bugfix: docs/testing/bug-reports/
+ * subscription-dismissal-normalized-name-collision.md — dismissing "Ace
+ * Corp" must not silently and irreversibly blind the user to an unrelated,
+ * later "Ace" subscription with no way to see or undo the original
+ * dismissal). Only `normalizedMerchantName`/`dismissedAt` are available —
+ * `DismissedSubscriptionMerchant` never stores the original raw merchant
+ * string or any other identifying detail beyond the normalized key itself
+ * (see the model's own schema comment), so this list cannot show a
+ * human-friendly "display name" the way `SubscriptionCandidate` can.
+ */
+export interface DismissedSubscriptionMerchantEntry {
+  normalizedMerchantName: string
+  /** Raw `Date`, not a formatted string — matches this codebase's convention
+   * of passing Prisma `DateTime` fields through as-is (e.g.
+   * `FinancialGoal.archivedAt`) rather than pre-formatting a timestamp that
+   * isn't a calendar-date-only field. */
+  dismissedAt: Date
+}

@@ -83,3 +83,18 @@ export function resolveLimit(limit: number | undefined, fallback: number): numbe
 export const DismissSubscriptionCandidateSchema = z.object({
   normalizedMerchantName: z.string().min(1, "normalizedMerchantName is required"),
 })
+
+/**
+ * Input schema for the `undismissSubscriptionMerchant` Server Action
+ * (`server/actions.ts`) — the reversal of `dismissSubscriptionCandidate`
+ * (bugfix: docs/testing/bug-reports/
+ * subscription-dismissal-normalized-name-collision.md's "minimum viable
+ * fix": make a dismissal recoverable). Same shape as
+ * `DismissSubscriptionCandidateSchema` for the same reason: this value is
+ * always sourced from a rendered `DismissedSubscriptionMerchantEntry.
+ * normalizedMerchantName` (never free-typed), so only shape validation is
+ * needed here, not re-derivation.
+ */
+export const UndismissSubscriptionMerchantSchema = z.object({
+  normalizedMerchantName: z.string().min(1, "normalizedMerchantName is required"),
+})

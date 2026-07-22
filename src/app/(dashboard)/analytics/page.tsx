@@ -11,10 +11,14 @@ import {
 } from "@/features/analytics/server/expense-breakdown"
 import { getBudgetVsActual } from "@/features/analytics/server/budget-comparison"
 import { getDailySpendingHeatmap } from "@/features/analytics/server/spending-heatmap"
-import { getIncomeGrowth, getIncomeSources } from "@/features/analytics/server/income-analytics"
+import {
+  deriveIncomeSourcesFromGrowth,
+  getIncomeGrowth,
+} from "@/features/analytics/server/income-analytics"
 import { getSavingsGrowth } from "@/features/analytics/server/savings-growth"
 import {
-  getActiveSubscriptionAnnualizedTotal,
+  deriveActiveSubscriptionAnnualizedTotal,
+  getDismissedSubscriptionMerchants,
   getSubscriptionCandidates,
 } from "@/features/analytics/server/subscriptions"
 
@@ -93,10 +97,9 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     largestPurchases,
     dailyHeatmap,
     incomeGrowth,
-    incomeSources,
     savingsGrowth,
     subscriptionCandidates,
-    subscriptionTotal,
+    dismissedSubscriptionMerchants,
   ] = await Promise.all([
     getYearlySpending(user.id),
     getCategoryTrends(user.id, range),
@@ -106,11 +109,27 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     getLargestPurchases(user.id),
     getDailySpendingHeatmap(user.id, range),
     getIncomeGrowth(user.id, range),
-    getIncomeSources(user.id, range),
     getSavingsGrowth(user.id, range),
     getSubscriptionCandidates(user.id),
-    getActiveSubscriptionAnnualizedTotal(user.id),
+    // Bugfix: docs/testing/bug-reports/
+    // subscription-dismissal-normalized-name-collision.md — a dismissal was
+    // previously invisible and permanent. Fetched alongside every other
+    // metric (same "Server Component direct call" convention as the rest of
+    // this page) and handed to `SubscriptionsList` so it can render an
+    // "Undismiss" affordance next to the candidates it excludes from.
+    getDismissedSubscriptionMerchants(user.id),
   ])
+
+  // Both derived in-memory from results already fetched above — no extra
+  // query cost. `getIncomeSources`/`getActiveSubscriptionAnnualizedTotal`
+  // each internally recompute their source function's full result when
+  // called standalone; calling them here would silently duplicate the
+  // `getIncomeGrowth`/`getSubscriptionCandidates` fetches this page already
+  // performed (perf follow-up, Phase 3b Performance Engineer review — see
+  // each derive helper's own JSDoc in `income-analytics.ts`/
+  // `subscriptions.ts`).
+  const incomeSources = deriveIncomeSourcesFromGrowth(incomeGrowth)
+  const subscriptionTotal = deriveActiveSubscriptionAnnualizedTotal(subscriptionCandidates)
 
   return (
     <div className="flex flex-col gap-6">
@@ -153,6 +172,7 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
       <SubscriptionsList
         candidates={subscriptionCandidates}
         activeAnnualizedTotal={subscriptionTotal.total}
+        dismissedMerchants={dismissedSubscriptionMerchants}
       />
     </div>
   )

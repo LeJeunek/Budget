@@ -1,7 +1,7 @@
 import { db } from "@/lib/db"
 import { EXCLUDE_SPLIT_PARENTS } from "@/features/transactions/server/service"
 
-import type { SubscriptionCandidate } from "../types"
+import type { DismissedSubscriptionMerchantEntry, SubscriptionCandidate } from "../types"
 import { detectSubscriptionCandidates } from "./subscription-detection"
 
 // Prisma-touching orchestration for Subscription Cost Detection
@@ -72,6 +72,35 @@ export async function getSubscriptionCandidates(userId: string): Promise<Subscri
 }
 
 /**
+ * Pure re-shaping of an already-computed `getSubscriptionCandidates` result
+ * into the running-total shape (analytics.md's "a running total of
+ * estimated combined annualized subscription cost across all currently
+ * Active detected subscriptions") — the actual math
+ * `getActiveSubscriptionAnnualizedTotal` below performs, extracted so a
+ * caller that has *already* fetched `getSubscriptionCandidates` for the same
+ * `userId` (e.g. `app/(dashboard)/analytics/page.tsx`) can derive the total
+ * from that one result directly, instead of triggering a second, fully
+ * redundant `getSubscriptionCandidates` call (and therefore a second full
+ * expense-transaction fetch plus a second run of the detection algorithm)
+ * purely to throw its own copy away. Performance follow-up from the Phase 3b
+ * Performance Engineer review: `getActiveSubscriptionAnnualizedTotal` and the
+ * page were each independently computing `getSubscriptionCandidates`'s
+ * result for the exact same `userId`.
+ *
+ * No DB access — plain in-memory aggregation only, so this can be called as
+ * many times as needed with zero additional query cost.
+ */
+export function deriveActiveSubscriptionAnnualizedTotal(
+  candidates: SubscriptionCandidate[],
+): { total: number } {
+  const total = candidates
+    .filter((candidate) => candidate.status === "ACTIVE")
+    .reduce((sum, candidate) => sum + candidate.estimatedAnnualizedCost, 0)
+
+  return { total }
+}
+
+/**
  * Subscription Cost Detection's running total (analytics.md's own section:
  * "a running total of estimated combined annualized subscription cost across
  * all currently Active detected subscriptions"). Deliberately reuses
@@ -80,15 +109,47 @@ export async function getSubscriptionCandidates(userId: string): Promise<Subscri
  * list it's summing (the same "one computation, multiple derived views"
  * discipline `income-analytics.ts`'s `getIncomeSources` follows for
  * `getIncomeGrowth`).
+ *
+ * Standalone entry point for any caller that has *not* already fetched
+ * `getSubscriptionCandidates` itself — it still computes
+ * `getSubscriptionCandidates` internally exactly once. A caller that already
+ * has that result in hand (like the Analytics page, which renders the
+ * Subscriptions list from the same data) should call
+ * `deriveActiveSubscriptionAnnualizedTotal` directly instead, to avoid the
+ * redundant fetch this function's own body would otherwise trigger.
  */
 export async function getActiveSubscriptionAnnualizedTotal(
   userId: string,
 ): Promise<{ total: number }> {
   const candidates = await getSubscriptionCandidates(userId)
+  return deriveActiveSubscriptionAnnualizedTotal(candidates)
+}
 
-  const total = candidates
-    .filter((candidate) => candidate.status === "ACTIVE")
-    .reduce((sum, candidate) => sum + candidate.estimatedAnnualizedCost, 0)
+/**
+ * Lists the caller's standing `DismissedSubscriptionMerchant` exclusions
+ * (bugfix: docs/testing/bug-reports/
+ * subscription-dismissal-normalized-name-collision.md). A dismissal
+ * previously had no reversibility surface at all — once dismissed, a
+ * normalized merchant name was excluded from every future
+ * `getSubscriptionCandidates` call forever, with nothing in the product
+ * surfacing that exclusion or letting the user undo it. This does not
+ * change detection or dismissal semantics (the normalized-name collision
+ * risk the bug report describes is an accepted, documented limitation, not
+ * what this fixes) — it only makes the *existing* exclusion list visible so
+ * `actions.ts`'s `undismissSubscriptionMerchant` has something for a caller
+ * to act on.
+ *
+ * Ordered most-recently-dismissed first, the natural order for a "review
+ * what you've hidden" list.
+ */
+export async function getDismissedSubscriptionMerchants(
+  userId: string,
+): Promise<DismissedSubscriptionMerchantEntry[]> {
+  const rows = await db.dismissedSubscriptionMerchant.findMany({
+    where: { userId },
+    select: { normalizedMerchantName: true, dismissedAt: true },
+    orderBy: { dismissedAt: "desc" },
+  })
 
-  return { total }
+  return rows
 }

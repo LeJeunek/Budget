@@ -125,27 +125,25 @@ export async function getIncomeGrowth(
 }
 
 /**
- * Income Sources (analytics.md AC14): the selected period's share of total
- * actual-received income attributable to each `IncomeType`, plus the same
- * `"UNTRACKED"` residual bucket as `getIncomeGrowth` (see this file's
- * top-level JSDoc for the shared partition reasoning).
+ * Pure re-shaping of an already-computed `getIncomeGrowth` result into
+ * Income Sources' whole-period-proportions shape (analytics.md AC14) — the
+ * actual math `getIncomeSources` below performs, extracted so a caller that
+ * has *already* fetched `getIncomeGrowth` for the same `userId`/period (e.g.
+ * `app/(dashboard)/analytics/page.tsx`) can derive Income Sources from that
+ * one result directly, instead of triggering a second, fully redundant
+ * `getIncomeGrowth` call (and therefore a second full set of monthly
+ * `Transaction` aggregates plus a second `getActualReceivedIncomeBySource`
+ * read) purely to throw its own copy away. Performance follow-up from the
+ * Phase 3b Performance Engineer review: `getIncomeSources` and the page were
+ * each independently computing `getIncomeGrowth`'s result for the exact same
+ * `userId`/`period`.
  *
- * Reuses `getIncomeGrowth`'s own per-month computation rather than
- * re-deriving totals/tracked sums independently, then simply sums across
- * every month in the period — guarantees these two metrics can never
- * silently disagree with each other for an overlapping period, the same
- * "single source of truth" requirement analytics.md's Success Metrics holds
- * every pair of related Analytics metrics to.
- *
- * Returns `[]` for a period with `$0` total income across every month
- * (nothing to compute a percentage share of) rather than dividing by zero.
+ * No DB access — plain in-memory aggregation only, so this can be called as
+ * many times as needed with zero additional query cost.
  */
-export async function getIncomeSources(
-  userId: string,
-  period: ReportingPeriodRange,
-): Promise<IncomeSourceEntry[]> {
-  const growth = await getIncomeGrowth(userId, period)
-
+export function deriveIncomeSourcesFromGrowth(
+  growth: IncomeGrowthPoint[],
+): IncomeSourceEntry[] {
   const amountByType = new Map<IncomeSourceType, number>()
   for (const point of growth) {
     for (const entry of point.bySource) {
@@ -161,4 +159,36 @@ export async function getIncomeSources(
   return [...amountByType.entries()]
     .map(([type, amount]) => ({ type, amount, percent: (amount / total) * 100 }))
     .sort((a, b) => b.amount - a.amount)
+}
+
+/**
+ * Income Sources (analytics.md AC14): the selected period's share of total
+ * actual-received income attributable to each `IncomeType`, plus the same
+ * `"UNTRACKED"` residual bucket as `getIncomeGrowth` (see this file's
+ * top-level JSDoc for the shared partition reasoning).
+ *
+ * Reuses `getIncomeGrowth`'s own per-month computation rather than
+ * re-deriving totals/tracked sums independently, then simply sums across
+ * every month in the period — guarantees these two metrics can never
+ * silently disagree with each other for an overlapping period, the same
+ * "single source of truth" requirement analytics.md's Success Metrics holds
+ * every pair of related Analytics metrics to.
+ *
+ * Standalone entry point for any caller that has *not* already fetched
+ * `getIncomeGrowth` itself (e.g. a future consumer outside this page) — it
+ * still computes `getIncomeGrowth` internally exactly once. A caller that
+ * already has that result in hand (like the Analytics page, which renders
+ * the Income Growth chart from the same data) should call
+ * `deriveIncomeSourcesFromGrowth` directly instead, to avoid the redundant
+ * fetch this function's own body would otherwise trigger.
+ *
+ * Returns `[]` for a period with `$0` total income across every month
+ * (nothing to compute a percentage share of) rather than dividing by zero.
+ */
+export async function getIncomeSources(
+  userId: string,
+  period: ReportingPeriodRange,
+): Promise<IncomeSourceEntry[]> {
+  const growth = await getIncomeGrowth(userId, period)
+  return deriveIncomeSourcesFromGrowth(growth)
 }

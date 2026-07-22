@@ -20,14 +20,26 @@
  * entirely") — `app/(dashboard)/analytics/page.tsx` fetches both
  * `candidates`/`activeAnnualizedTotal` independent of the page's period
  * selector, so this component takes no period prop at all.
+ *
+ * Also renders the "Dismissed merchants" section (bugfix:
+ * docs/testing/bug-reports/
+ * subscription-dismissal-normalized-name-collision.md) — a dismissal
+ * previously had no visible record and no way to undo it. Collapsed behind a
+ * disclosure button by default (secondary to the primary candidates table
+ * above), with an "Undismiss" action per row using this same file's
+ * established "Server Action -> toast -> `router.refresh()`" pattern.
  */
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { ChevronDown, ChevronRight } from "lucide-react"
 import { toast } from "sonner"
 
 import { formatCurrency } from "@/lib/utils"
-import { dismissSubscriptionCandidate } from "@/features/analytics/server/actions"
+import {
+  dismissSubscriptionCandidate,
+  undismissSubscriptionMerchant,
+} from "@/features/analytics/server/actions"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -40,12 +52,33 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-import type { SubscriptionCandidate, SubscriptionInterval } from "../types"
+import type {
+  DismissedSubscriptionMerchantEntry,
+  SubscriptionCandidate,
+  SubscriptionInterval,
+} from "../types"
 import { formatDateLabel } from "./chart-format"
 
 export interface SubscriptionsListProps {
   candidates: SubscriptionCandidate[]
   activeAnnualizedTotal: number
+  /** This user's standing "not a subscription" exclusions — passed through
+   * so a dismissal is reversible, not a silent, permanent one. */
+  dismissedMerchants: DismissedSubscriptionMerchantEntry[]
+}
+
+/** `Date` -> short display label, e.g. "Jul 21, 2026". Unlike
+ * `chart-format.ts`'s `formatDateLabel` (which parses a `"yyyy-MM-dd"` key),
+ * `DismissedSubscriptionMerchantEntry.dismissedAt` is a real `Date` with a
+ * time component — formatted directly, still pinned to `timeZone: "UTC"` for
+ * this codebase's established UTC-calendar-date display convention. */
+function formatDismissedAtLabel(dismissedAt: Date): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(dismissedAt)
 }
 
 const INTERVAL_LABELS: Record<SubscriptionInterval, string> = {
@@ -55,9 +88,18 @@ const INTERVAL_LABELS: Record<SubscriptionInterval, string> = {
   ANNUALLY: "Annually",
 }
 
-export function SubscriptionsList({ candidates, activeAnnualizedTotal }: SubscriptionsListProps) {
+export function SubscriptionsList({
+  candidates,
+  activeAnnualizedTotal,
+  dismissedMerchants,
+}: SubscriptionsListProps) {
   const router = useRouter()
   const [dismissingMerchant, setDismissingMerchant] = useState<string | null>(null)
+  const [undismissingMerchant, setUndismissingMerchant] = useState<string | null>(null)
+  // Collapsed by default: this section is secondary to the candidates table
+  // above (per this file's own JSDoc) — a user only needs it when reviewing/
+  // reversing a past dismissal, not on every visit to this card.
+  const [showDismissed, setShowDismissed] = useState(false)
 
   async function handleDismiss(normalizedMerchantName: string) {
     setDismissingMerchant(normalizedMerchantName)
@@ -73,6 +115,24 @@ export function SubscriptionsList({ candidates, activeAnnualizedTotal }: Subscri
     // Re-runs the Server Component page's getSubscriptionCandidates()/
     // getActiveSubscriptionAnnualizedTotal() calls so the list and total both
     // reflect the new exclusion — see app/(dashboard)/analytics/page.tsx.
+    router.refresh()
+  }
+
+  async function handleUndismiss(normalizedMerchantName: string) {
+    setUndismissingMerchant(normalizedMerchantName)
+    const result = await undismissSubscriptionMerchant({ normalizedMerchantName })
+    setUndismissingMerchant(null)
+
+    if (!result.success) {
+      toast.error(result.error)
+      return
+    }
+
+    toast.success("Merchant restored — it may be flagged again if it still matches")
+    // Re-runs the Server Component page's getSubscriptionCandidates()/
+    // getDismissedSubscriptionMerchants() calls so both this section and the
+    // candidates table above reflect the reversal — see
+    // app/(dashboard)/analytics/page.tsx.
     router.refresh()
   }
 
@@ -157,6 +217,60 @@ export function SubscriptionsList({ candidates, activeAnnualizedTotal }: Subscri
               </TableBody>
             </Table>
           </>
+        )}
+
+        {dismissedMerchants.length > 0 && (
+          <div className="flex flex-col gap-2 border-t pt-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-fit gap-1 px-2 text-muted-foreground"
+              onClick={() => setShowDismissed((current) => !current)}
+              aria-expanded={showDismissed}
+            >
+              {showDismissed ? <ChevronDown /> : <ChevronRight />}
+              Dismissed merchants ({dismissedMerchants.length})
+            </Button>
+
+            {showDismissed && (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Merchant</TableHead>
+                    <TableHead>Dismissed</TableHead>
+                    <TableHead className="text-right">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {dismissedMerchants.map((merchant) => (
+                    <TableRow key={merchant.normalizedMerchantName}>
+                      {/* Only the normalized key is available here — see
+                          `DismissedSubscriptionMerchantEntry`'s own JSDoc on
+                          why no human-friendly display name can be shown. */}
+                      <TableCell className="font-medium text-foreground">
+                        {merchant.normalizedMerchantName}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatDismissedAtLabel(merchant.dismissedAt)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={undismissingMerchant === merchant.normalizedMerchantName}
+                          onClick={() => handleUndismiss(merchant.normalizedMerchantName)}
+                        >
+                          Undismiss
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
         )}
       </CardContent>
     </Card>
