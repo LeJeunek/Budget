@@ -6,6 +6,12 @@ import { getCurrentUser } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { utapi } from "@/lib/uploadthing"
 import { ok, fail, type ApiResult } from "@/lib/api-response"
+import {
+  canRefreshNow,
+  hasReachedRollingWindowCap,
+  rollingWindowStart,
+} from "@/lib/ai/rate-limit"
+import type { AiFeatureResult } from "@/lib/ai/types"
 import type { Transaction } from "@/features/transactions/types"
 import {
   CreateTransactionSchema,
@@ -13,12 +19,18 @@ import {
   TransactionIdSchema,
   SplitTransactionSchema,
   ReceiptIdSchema,
+  RequestCategorySuggestionSchema,
+  SuggestionIdSchema,
 } from "@/features/transactions/server/validation"
 import {
   TRANSACTION_INCLUDE,
   toTransaction,
 } from "@/features/transactions/server/service"
 import { removeReceipt as removeReceiptForUser } from "@/features/transactions/server/receipts"
+import {
+  requestManualSuggestion,
+  type ManualSuggestionResult,
+} from "@/features/transactions/server/categorization"
 
 /**
  * Mutating Server Actions for the Transactions module. Per
@@ -468,4 +480,200 @@ export async function splitTransaction(
   )
 
   return ok(created.map(toTransaction))
+}
+
+// ---------------------------------------------------------------------------
+// Transaction Auto-Categorization (Phase 4a) — per
+// docs/architecture/api-contracts.md's Feature 1 section and
+// docs/architecture/ai-features-design.md. `requestCategorySuggestion` is the
+// manual "reconsider" path's Server Action (AI-generation logic lives in
+// `./categorization.ts`); `acceptCategorySuggestion`/`rejectCategorySuggestion`
+// are ordinary, non-AI Server Actions that resolve an already-generated
+// suggestion's lifecycle. All three follow this file's own standing
+// auth-then-validate-then-ownership-check convention.
+// ---------------------------------------------------------------------------
+
+/** Minimum time between successive "reconsider" requests for the SAME
+ * transaction. This action's concurrency profile — one authenticated user,
+ * acting on one of their own rows, within milliseconds of themselves —
+ * matches the exact profile `prisma/schema.prisma`'s own
+ * `CategorySuggestion` comment uses to justify a plain app-level read-check
+ * (rather than the atomic-conditional-update pattern the shared
+ * `(userId, month)`/`(userId, period)` cache rows of the Budget
+ * Advisor/Spending Insights need) — see `lib/ai/rate-limit.ts`'s
+ * `canRefreshNow` doc comment. */
+const RECONSIDER_MIN_INTERVAL_MS = 60_000
+
+/** Secondary, per-user rolling-window cap (ai-features-design.md §2/§6,
+ * Finding 6a) across ALL of a user's "reconsider" calls in aggregate, not
+ * just calls against one transaction — bounds total call volume even if a
+ * user cycles through many distinct transactions in quick succession. */
+const RECONSIDER_ROLLING_WINDOW_MS = 60 * 60 * 1000
+const RECONSIDER_MAX_CALLS_PER_ROLLING_WINDOW = 30
+
+/**
+ * The manual "reconsider" path (ai-features.md AC6): requests a fresh
+ * suggestion for any transaction, including one that already has a
+ * category — this action never changes the transaction's category on its
+ * own, it only surfaces a new suggestion for the user to accept or ignore.
+ *
+ * Rate-limited per `lib/ai/rate-limit.ts`: a per-transaction minimum
+ * interval (using the most recent `CategorySuggestion` row for this
+ * transaction, of any status, as `lastGeneratedAt`) plus the secondary
+ * per-user rolling-window cap above — both checked, and both must pass,
+ * before `categorization.ts` ever calls the model (Finding 6a/6b). Being
+ * rate-limited is an ordinary request-level rejection (the outer
+ * `ApiResult`, same as any other invalid-input case in this file) — not an
+ * AI-provider outcome, so it is never expressed through the inner
+ * `AiFeatureResult`.
+ */
+export async function requestCategorySuggestion(
+  input: unknown,
+): Promise<ApiResult<AiFeatureResult<ManualSuggestionResult>>> {
+  const user = await getCurrentUser()
+  if (!user) return fail("UNAUTHENTICATED")
+
+  const parsed = RequestCategorySuggestionSchema.safeParse(input)
+  if (!parsed.success) {
+    return fail(parsed.error.issues[0]?.message ?? "Invalid request")
+  }
+
+  const transactionId =
+    "transactionId" in parsed.data
+      ? parsed.data.transactionId
+      : parsed.data.splitLineItemId
+
+  const existing = await db.transaction.findFirst({
+    where: { id: transactionId, userId: user.id },
+    select: { id: true },
+  })
+  if (!existing) {
+    return fail("Transaction not found")
+  }
+
+  const lastSuggestion = await db.categorySuggestion.findFirst({
+    where: { userId: user.id, transactionId },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  })
+  if (!canRefreshNow(lastSuggestion?.createdAt ?? null, RECONSIDER_MIN_INTERVAL_MS)) {
+    return fail(
+      "Please wait a moment before requesting another suggestion for this transaction",
+    )
+  }
+
+  const callsInWindow = await db.categorySuggestion.count({
+    where: {
+      userId: user.id,
+      source: "MANUAL_RECONSIDER",
+      createdAt: { gte: rollingWindowStart(RECONSIDER_ROLLING_WINDOW_MS) },
+    },
+  })
+  if (
+    hasReachedRollingWindowCap(
+      callsInWindow,
+      RECONSIDER_MAX_CALLS_PER_ROLLING_WINDOW,
+    )
+  ) {
+    return fail("You've requested too many suggestions recently — try again later")
+  }
+
+  const result = await requestManualSuggestion(user.id, transactionId)
+  return ok(result)
+}
+
+/**
+ * Accepts a pending suggestion (AC4): sets the transaction's category
+ * immediately, via the SAME `updateTransaction` path a manual edit uses —
+ * this is the only code path that ever writes `Transaction.categoryId` as a
+ * result of a suggestion (ai-features-design.md §4.4's "no autonomous write
+ * path" structural rule).
+ *
+ * Per ai-features.md's own edge case, a suggestion whose category was
+ * deleted between generation and acceptance (`suggestedCategoryId` has gone
+ * `null` via the FK's `onDelete: SetNull`) is invalidated rather than
+ * accepted — the suggestion is marked `REJECTED` and the caller is told the
+ * category no longer exists.
+ */
+export async function acceptCategorySuggestion(
+  input: unknown,
+): Promise<ApiResult<Transaction>> {
+  const user = await getCurrentUser()
+  if (!user) return fail("UNAUTHENTICATED")
+
+  const parsed = SuggestionIdSchema.safeParse(input)
+  if (!parsed.success) {
+    return fail(parsed.error.issues[0]?.message ?? "Invalid suggestion id")
+  }
+  const { suggestionId } = parsed.data
+
+  const suggestion = await db.categorySuggestion.findFirst({
+    where: { id: suggestionId, userId: user.id },
+  })
+  if (!suggestion) {
+    return fail("Suggestion not found")
+  }
+  if (suggestion.status !== "PENDING") {
+    return fail("This suggestion has already been resolved")
+  }
+
+  if (!suggestion.suggestedCategoryId) {
+    await db.categorySuggestion.update({
+      where: { id: suggestion.id },
+      data: { status: "REJECTED", resolvedAt: new Date() },
+    })
+    return fail("This suggested category no longer exists")
+  }
+
+  const updateResult = await updateTransaction({
+    id: suggestion.transactionId,
+    categoryId: suggestion.suggestedCategoryId,
+  })
+  if (!updateResult.success) {
+    return updateResult
+  }
+
+  await db.categorySuggestion.update({
+    where: { id: suggestion.id },
+    data: { status: "ACCEPTED", resolvedAt: new Date() },
+  })
+
+  return updateResult
+}
+
+/**
+ * Rejects a pending suggestion (AC5): leaves the transaction Uncategorized
+ * (or however it was categorized before) and dismisses this specific
+ * suggestion — the same suggestion is not immediately re-offered
+ * automatically for this transaction, since `generateAutomaticSuggestionsForUser`'s
+ * own query only ever considers a transaction with no existing PENDING row.
+ */
+export async function rejectCategorySuggestion(
+  input: unknown,
+): Promise<ApiResult<{ suggestionId: string }>> {
+  const user = await getCurrentUser()
+  if (!user) return fail("UNAUTHENTICATED")
+
+  const parsed = SuggestionIdSchema.safeParse(input)
+  if (!parsed.success) {
+    return fail(parsed.error.issues[0]?.message ?? "Invalid suggestion id")
+  }
+  const { suggestionId } = parsed.data
+
+  const suggestion = await db.categorySuggestion.findFirst({
+    where: { id: suggestionId, userId: user.id },
+  })
+  if (!suggestion) {
+    return fail("Suggestion not found")
+  }
+  if (suggestion.status !== "PENDING") {
+    return fail("This suggestion has already been resolved")
+  }
+
+  await db.categorySuggestion.update({
+    where: { id: suggestion.id },
+    data: { status: "REJECTED", resolvedAt: new Date() },
+  })
+
+  return ok({ suggestionId: suggestion.id })
 }

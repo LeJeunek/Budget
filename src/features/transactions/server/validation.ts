@@ -386,3 +386,41 @@ export const ReceiptIdSchema = z.object({
 })
 
 export type ReceiptIdInput = z.infer<typeof ReceiptIdSchema>
+
+// ---------------------------------------------------------------------------
+// Transaction Auto-Categorization (Phase 4a) — ordinary Server-Action input
+// validation for `requestCategorySuggestion`/`acceptCategorySuggestion`/
+// `rejectCategorySuggestion` (server/actions.ts). Deliberately kept in THIS
+// file, not `categorization-schema.ts` — per naming-standards.md's Phase 4a
+// convention, `-schema.ts` is reserved exclusively for the Zod schema
+// describing what an AI call must *return*; what a user *submits* to these
+// Server Actions is ordinary input validation, exactly like every other
+// schema in this file.
+// ---------------------------------------------------------------------------
+
+/**
+ * `requestCategorySuggestion` input, per api-contracts.md's Feature 1
+ * section: `{ transactionId } | { splitLineItemId }`. Both branches resolve
+ * to the same underlying id — split line items are already ordinary
+ * `Transaction` rows via `parentTransactionId` (see
+ * `prisma/schema.prisma`'s `CategorySuggestion.transactionId` comment), so
+ * `server/actions.ts` collapses this union to a single id before calling
+ * `categorization.ts`.
+ */
+export const RequestCategorySuggestionSchema = z.union([
+  z.object({ transactionId: z.string().min(1, "Transaction id is required") }),
+  z.object({
+    splitLineItemId: z.string().min(1, "Split line item id is required"),
+  }),
+])
+
+export type RequestCategorySuggestionInput = z.infer<
+  typeof RequestCategorySuggestionSchema
+>
+
+/** `acceptCategorySuggestion`/`rejectCategorySuggestion` input. */
+export const SuggestionIdSchema = z.object({
+  suggestionId: z.string().min(1, "Suggestion id is required"),
+})
+
+export type SuggestionIdInput = z.infer<typeof SuggestionIdSchema>
