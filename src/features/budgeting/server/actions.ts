@@ -3,17 +3,32 @@
 import { getCurrentUser } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { ok, fail, type ApiResult } from "@/lib/api-response"
+import type { AiFeatureResult } from "@/lib/ai/types"
 
 import type { BudgetCategoryLine } from "../types"
+import type { BudgetAdvisorRecommendations } from "./advisor-schema"
+import { refreshBudgetAdvisorRecommendations } from "./advisor"
 import { getBudgetMonth } from "./service"
-import { SetAllocationSchema, isPastMonth, parseMonthToDate } from "./validation"
+import {
+  RefreshBudgetAdvisorSchema,
+  SetAllocationSchema,
+  isPastMonth,
+  parseMonthToDate,
+} from "./validation"
 
 /**
  * Mutating Server Actions for the Budgeting module. Per
  * docs/architecture/api-contracts.md's Budgeting section, `setCategoryAllocation`
- * is the module's only mutation — every read (`getBudgetMonth`,
- * `getBudgetHealthScore`, `getBudgetMonthSummary`) is a direct Server
- * Component call to `server/service.ts`.
+ * is the module's only mutation of `Budget`/`BudgetCategory` data — every read
+ * of that data (`getBudgetMonth`, `getBudgetHealthScore`, `getBudgetMonthSummary`)
+ * is a direct Server Component call to `server/service.ts`.
+ *
+ * **(Phase 4a)** `refreshBudgetAdvisor` below is this file's one other
+ * export — it triggers a write, but only ever to the AI Budget Advisor's own
+ * `BudgetAdvisorCache` row (via `./advisor.ts`), never to `Budget`/
+ * `BudgetCategory` themselves (Feature 2's own "read-only, by construction"
+ * Definition of Done — see `./advisor.ts`'s and `./advisor.test.ts`'s doc
+ * comments).
  *
  * Follows folder-tree.md's rule:
  *   1. Calls getCurrentUser() and fails closed with "UNAUTHENTICATED".
@@ -131,4 +146,47 @@ export async function setCategoryAllocation(
   }
 
   return ok(line)
+}
+
+// ---------------------------------------------------------------------------
+// AI Budget Advisor (Phase 4a) — per docs/architecture/api-contracts.md's
+// Feature 2 section and docs/architecture/ai-features-design.md. AI-generation
+// logic lives in `./advisor.ts`; this is the thin Server Action wrapper that
+// authenticates, validates input, and maps a rate-limit rejection to an
+// ordinary `ApiResult` failure — the same division of responsibility
+// `features/transactions/server/actions.ts`'s `requestCategorySuggestion`
+// already established for the categorization feature's own on-demand path.
+// ---------------------------------------------------------------------------
+
+/**
+ * Explicit "Refresh recommendations" action (Feature 2 AC4). Never regenerates
+ * a past month (AC5) or a month with zero budgeted categories — `./advisor.ts`'s
+ * `refreshBudgetAdvisorRecommendations` enforces both as its own structural
+ * safety net regardless of what this action is called with.
+ *
+ * Rate-limited by `./advisor.ts`'s atomic per-key cooldown check (never a
+ * read-then-write race, per ai-features-design.md §2 Finding 6b) — a rejected
+ * attempt is an ordinary request-level rejection, surfaced as an outer
+ * `ApiResult` failure, never expressed through the inner `AiFeatureResult`
+ * (matching `requestCategorySuggestion`'s identical convention).
+ */
+export async function refreshBudgetAdvisor(
+  input: unknown,
+): Promise<ApiResult<AiFeatureResult<BudgetAdvisorRecommendations>>> {
+  const user = await getCurrentUser()
+  if (!user) return fail("UNAUTHENTICATED")
+
+  const parsed = RefreshBudgetAdvisorSchema.safeParse(input)
+  if (!parsed.success) {
+    return fail(parsed.error.issues[0]?.message ?? "Invalid request")
+  }
+
+  const outcome = await refreshBudgetAdvisorRecommendations(user.id, parsed.data.month)
+  if (outcome.rateLimited) {
+    return fail(
+      "Please wait before refreshing recommendations again for this month",
+    )
+  }
+
+  return ok(outcome.result)
 }

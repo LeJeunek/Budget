@@ -121,3 +121,17 @@ export const SetAllocationSchema = z.object({
 })
 
 export type SetAllocationInput = z.infer<typeof SetAllocationSchema>
+
+/**
+ * `refreshBudgetAdvisor` Server Action input (docs/product/ai-features.md
+ * Feature 2, docs/architecture/api-contracts.md's Feature 2 section: `{
+ * month: string }`). Ordinary Server-Action *input* validation, per
+ * naming-standards.md's Phase 4a convention -- this is deliberately not in
+ * `advisor-schema.ts`, which is reserved exclusively for the shape the AI
+ * call itself must return.
+ */
+export const RefreshBudgetAdvisorSchema = z.object({
+  month: MonthSchema,
+})
+
+export type RefreshBudgetAdvisorInput = z.infer<typeof RefreshBudgetAdvisorSchema>
