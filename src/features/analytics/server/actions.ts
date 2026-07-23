@@ -3,9 +3,13 @@
 import { getCurrentUser } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { ok, fail, type ApiResult } from "@/lib/api-response"
+import type { AiFeatureResult } from "@/lib/ai/types"
 
+import type { SpendingInsight } from "../types"
+import { refreshSpendingInsights as refreshSpendingInsightsForUser } from "./insights"
 import {
   DismissSubscriptionCandidateSchema,
+  RefreshSpendingInsightsSchema,
   UndismissSubscriptionMerchantSchema,
 } from "./validation"
 
@@ -13,9 +17,10 @@ import {
  * Analytics' mutating Server Actions, per
  * docs/architecture/api-contracts.md's Analytics section: dismissing (and,
  * per the bugfix below, reversing the dismissal of) a false-positive
- * Subscription Cost Detection candidate. Every other Analytics metric is
- * read-only (Server Component direct calls to `server/*.ts`), so these two
- * are this module's only `actions.ts` exports.
+ * Subscription Cost Detection candidate, plus (Phase 4a) Spending Insights'
+ * "Refresh insights" action below. Every other Analytics metric is read-only
+ * (Server Component direct calls to `server/*.ts`), so these are this
+ * module's only `actions.ts` exports.
  */
 
 /**
@@ -95,4 +100,47 @@ export async function undismissSubscriptionMerchant(
   })
 
   return ok({ normalizedMerchantName })
+}
+
+// ---------------------------------------------------------------------------
+// Spending Insights (Phase 4a) -- per docs/architecture/api-contracts.md's
+// Feature 4 section and docs/architecture/ai-features-design.md.
+// AI-generation logic lives in `./insights.ts`; this is the thin Server
+// Action wrapper that authenticates, validates input, and maps a rate-limit
+// rejection to an ordinary `ApiResult` failure -- the same division of
+// responsibility `features/budgeting/server/actions.ts`'s
+// `refreshBudgetAdvisor` already established for the Budget Advisor's own
+// on-demand path.
+// ---------------------------------------------------------------------------
+
+/**
+ * Explicit "Refresh insights" action (Feature 4 AC4). Never regenerates with
+ * fewer than the minimum viable candidate count -- `./insights.ts`'s
+ * `refreshSpendingInsights` enforces this as its own structural safety net
+ * regardless of what this action is called with.
+ *
+ * Rate-limited by `./insights.ts`'s atomic per-key cooldown check plus the
+ * shared cross-feature `reasoningModel` rate limit (never a read-then-write
+ * race, per ai-features-design.md §2 Finding 6b) -- a rejected attempt is an
+ * ordinary request-level rejection, surfaced as an outer `ApiResult`
+ * failure, never expressed through the inner `AiFeatureResult` (matching
+ * `refreshBudgetAdvisor`'s identical convention).
+ */
+export async function refreshSpendingInsights(
+  input: unknown,
+): Promise<ApiResult<AiFeatureResult<SpendingInsight[]>>> {
+  const user = await getCurrentUser()
+  if (!user) return fail("UNAUTHENTICATED")
+
+  const parsed = RefreshSpendingInsightsSchema.safeParse(input)
+  if (!parsed.success) {
+    return fail(parsed.error.issues[0]?.message ?? "Invalid request")
+  }
+
+  const outcome = await refreshSpendingInsightsForUser(user.id, parsed.data.period)
+  if (outcome.rateLimited) {
+    return fail("Please wait before refreshing insights again for this period")
+  }
+
+  return ok(outcome.result)
 }

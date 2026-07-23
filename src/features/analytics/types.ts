@@ -273,3 +273,61 @@ export interface DismissedSubscriptionMerchantEntry {
    * isn't a calendar-date-only field. */
   dismissedAt: Date
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4a — Spending Insights (ai-features.md Feature 4, ai-features-design.md,
+// api-contracts.md's Feature 4 section). See `server/insights-candidates.ts`
+// (pure candidate selection), `server/insights-schema.ts` (AI structured-
+// output schema + prompt DTO), and `server/insights.ts` (orchestration) for
+// the implementation. Per folder-tree.md's Phase 4a note ("types.ts ...
+// [Phase 4a ADDS: SpendingInsight]"), the client-safe shape lives here rather
+// than in `insights-schema.ts` — unlike `advisor-schema.ts`/
+// `monthly-summary-schema.ts`, there is no pre-existing name collision in this
+// module forcing the client type into the AI-schema file instead.
+// ---------------------------------------------------------------------------
+
+/**
+ * The closed set of Analytics metrics an insight may be grounded in
+ * (ai-features.md Feature 4's "Concrete Example Insight Types" section /
+ * api-contracts.md's `SpendingInsight.sourceMetric`) — this feature computes
+ * nothing new, it only selects and narrates observations already derivable
+ * from these six existing metric functions (`spending-trends.getCategoryTrends`,
+ * `expense-breakdown.getTopMerchants`/`getLargestPurchases`,
+ * `subscriptions.getSubscriptionCandidates`,
+ * `spending-heatmap.getDailySpendingHeatmap`, `savings-growth.getSavingsGrowth`).
+ */
+export type SpendingInsightSourceMetric =
+  | "categoryTrends"
+  | "topMerchants"
+  | "largestPurchases"
+  | "subscriptionDetection"
+  | "dailySpendingHeatmap"
+  | "savingsGrowth"
+
+/**
+ * One AI-generated Spending Insight (Feature 4 AC1/AC2) — the client-safe
+ * shape returned by `server/insights.ts`'s `getSpendingInsights`/
+ * `refreshSpendingInsights`, matching api-contracts.md's Feature 4 section
+ * exactly. `text` must always render as a plain text node client-side, never
+ * `dangerouslySetInnerHTML` or a markdown pipeline
+ * (ai-features-design.md §4.3, Finding 1c) — restated here as a Frontend Lead
+ * handoff note, per that finding's own cross-feature requirement.
+ */
+export interface SpendingInsight {
+  text: string
+  citedFigures: { label: string; value: number }[]
+  sourceMetric: SpendingInsightSourceMetric
+}
+
+/**
+ * The period-key vocabulary `SpendingInsightsCache.period` persists (Feature
+ * 4 AC5): either Analytics' own shared `ReportingPeriod` (when the widget is
+ * surfaced on the Analytics page, reusing the exact same reporting-period
+ * control Analytics' charts already use — "no separate, competing period
+ * concept," per AC5) or the fixed `"DASHBOARD_DEFAULT"` sentinel (when
+ * surfaced on the Dashboard, per AC5's "defaults to the current month vs. the
+ * prior comparable period" rule). `server/insights.ts`'s
+ * `resolveInsightsPeriodRange` is the one place either value is resolved into
+ * a concrete `ReportingPeriodRange` to query against.
+ */
+export type SpendingInsightsPeriod = ReportingPeriod | "DASHBOARD_DEFAULT"

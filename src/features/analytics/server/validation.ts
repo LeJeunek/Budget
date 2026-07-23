@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import type { ReportingPeriod } from "../types"
+import type { ReportingPeriod, SpendingInsightsPeriod } from "../types"
 
 /**
  * Parses the shared reporting-period control's kebab-case searchParam value
@@ -98,3 +98,55 @@ export const DismissSubscriptionCandidateSchema = z.object({
 export const UndismissSubscriptionMerchantSchema = z.object({
   normalizedMerchantName: z.string().min(1, "normalizedMerchantName is required"),
 })
+
+// ---------------------------------------------------------------------------
+// Spending Insights' refresh action (Phase 4a)
+// ---------------------------------------------------------------------------
+
+/**
+ * Kebab-case wire values for `SpendingInsightsPeriod` (`../types.ts`) -- the
+ * same four `ReportingPeriod` values `PERIOD_PARAM_TO_ENUM` above already
+ * uses, plus one addition (`"dashboard-default"`) for the Dashboard's own
+ * fixed default (AC5). Deliberately a *separate* map from
+ * `PERIOD_PARAM_TO_ENUM` above rather than a shared/extended one: that map's
+ * job is parsing a possibly-stale/missing URL searchParam leniently (falling
+ * back to a default), while this one is a Server-Action *mutation* input --
+ * `RefreshSpendingInsightsSchema` below rejects an unrecognized value
+ * outright, matching `SetAllocationSchema`/`RefreshBudgetAdvisorSchema`'s
+ * strict-validation convention for Server Action inputs, rather than
+ * silently defaulting the way a resilient URL param must.
+ */
+const SPENDING_INSIGHTS_PERIOD_PARAMS = [
+  "this-year",
+  "last-12-months",
+  "year-to-date",
+  "all-time",
+  "dashboard-default",
+] as const
+
+const SPENDING_INSIGHTS_PERIOD_PARAM_TO_ENUM: Record<
+  (typeof SPENDING_INSIGHTS_PERIOD_PARAMS)[number],
+  SpendingInsightsPeriod
+> = {
+  "this-year": "THIS_YEAR",
+  "last-12-months": "LAST_12_MONTHS",
+  "year-to-date": "YEAR_TO_DATE",
+  "all-time": "ALL_TIME",
+  "dashboard-default": "DASHBOARD_DEFAULT",
+}
+
+/**
+ * `refreshSpendingInsights` Server Action input (docs/product/ai-features.md
+ * Feature 4 AC4, docs/architecture/api-contracts.md's Feature 4 section:
+ * `{ period }`). Ordinary Server-Action *input* validation, per
+ * naming-standards.md's Phase 4a convention -- this is deliberately not in
+ * `insights-schema.ts`, which is reserved exclusively for the shape the AI
+ * call itself must return.
+ */
+export const RefreshSpendingInsightsSchema = z.object({
+  period: z
+    .enum(SPENDING_INSIGHTS_PERIOD_PARAMS)
+    .transform((value) => SPENDING_INSIGHTS_PERIOD_PARAM_TO_ENUM[value]),
+})
+
+export type RefreshSpendingInsightsInput = z.infer<typeof RefreshSpendingInsightsSchema>
