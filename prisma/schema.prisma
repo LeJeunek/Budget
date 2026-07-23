@@ -8,9 +8,15 @@
 // tables and require no schema changes of their own, see below); the
 // Transaction Auto-Categorization suggestion/audit-trail table, the Budget
 // Advisor/Spending Insights refresh-cache rows, Monthly Summaries, and the
-// Financial Health Score's own historical snapshot table (Phase 4a — see
-// below; Phase 4a's actual AI provider/prompt/schema code has no Prisma
-// model of its own, it only reads/writes the tables below). Modeled per
+// Financial Health Score's own historical snapshot table (Phase 4a), plus a
+// Phase 4a follow-up: ReasoningModelCallLog, the shared cross-feature
+// call-log table backing the per-user and project-wide reasoningModel
+// rolling-window rate caps ai-features-design.md §2 Finding 6a/§6.1 require
+// once more than one reasoningModel-backed feature exists (flagged by both
+// the Budget Advisor and Automatic Monthly Summaries dispatches — see that
+// model's own comment below for the full reasoning). Phase 4a's actual AI
+// provider/prompt/schema code has no Prisma model of its own, it only
+// reads/writes the tables below). Modeled per
 // docs/product/{budgeting,savings-goals,bills,calendar-and-notifications,
 // debt-tracker,investments,recurring-income,financial-goals,analytics,
 // net-worth-history,ai-features}.md and docs/architecture/{api-contracts.md,
@@ -81,6 +87,9 @@ model User {
   monthlySummaries              MonthlySummary[]
   spendingInsightsCaches        SpendingInsightsCache[]
   financialHealthScoreSnapshots FinancialHealthScoreSnapshot[]
+
+  // FinanceOS domain data (Phase 4a follow-up)
+  reasoningModelCallLogs ReasoningModelCallLog[]
 
   @@map("user")
 }
@@ -1808,4 +1817,139 @@ model FinancialHealthScoreSnapshot {
   @@unique([userId, capturedDate])
   @@index([userId, capturedAt])
   @@map("financial_health_score_snapshot")
+}
+
+// ---------------------------------------------------------------------------
+// FinanceOS domain (Phase 4a follow-up) — reasoningModel cross-feature
+// rate-limiting: call log.
+// ---------------------------------------------------------------------------
+
+// ---- reasoningModel cross-feature rolling-window rate-limiting: call log ---
+//
+// Modeling decision (Phase 4a follow-up, flagged jointly by two AI Engineer
+// dispatches — features/budgeting/server/advisor.ts's own
+// MIN_REFRESH_INTERVAL_MS comment, escalated by
+// features/dashboard/server/monthly-summary.ts's MIN_REGENERATE_INTERVAL_MS
+// comment once it became the second reasoningModel-backed feature built —
+// and by ai-features-design.md §2 Finding 6a / §6.1's Gemini-swap addendum):
+// this closes the one gap those two files' own per-key cooldowns (a single
+// atomic conditional `UPDATE ... SET generatedAt = now() WHERE generatedAt <
+// cutoff` against BudgetAdvisorCache/MonthlySummary, Finding 6b) were
+// explicitly documented as unable to close on their own. A per-key cooldown
+// bounds one `(userId, month|period)` cache row's own call rate; nothing
+// before this table bounded (a) one user's TOTAL reasoningModel call volume
+// across every cache key/feature they might touch — many months across
+// Budget Advisor/Monthly Summaries, many periods across Spending Insights,
+// one snapshot cycle for the Health Score narrative — or (b) the whole app's
+// total reasoningModel call volume across every user, the actual dimension
+// Gemini's free-tier request quota is scoped to (§6.1: "the API key/project
+// backing the whole app, not... any one FinanceOS user").
+//
+// Shape: an APPEND-ONLY LOG — one row per reasoningModel call *attempt*,
+// success or failure, mirroring BudgetAdvisorCache.generatedAt/
+// MonthlySummary.generatedAt's own "every attempt consumes the quota, not
+// just a successful one" rule — not a mutable "counter + window start" row.
+// This is a deliberate departure from ai-features-design.md §7's own "one
+// row per (userId, feature) recording a rolling call count/window start"
+// suggestion, for a concrete reason: `lib/ai/rate-limit.ts`'s own
+// `rollingWindowStart()`/`hasReachedRollingWindowCap()` pair is already
+// written, today, against a plain `db.<table>.count({ where: { ...,
+// createdAt: { gte: rollingWindowStart(windowMs) } } })` query shape — that
+// file's own doc comment spells out this exact query against
+// `CategorySuggestion` as its worked example, the identical "count real rows
+// whose `createdAt` falls inside the window" pattern `CategorySuggestion`'s
+// own Success Metrics queries already use. An append-only log reuses that
+// exact, already-proven query shape unchanged for both new caps below; a
+// mutable counter row would instead require inventing a second, different
+// persistence pattern (a conditional increment-or-reset write, with its own
+// race-condition analysis) purely to avoid unbounded row growth — a genuine
+// cost (see the retention note below) but one this schema already accepts
+// elsewhere for far higher-volume append-only tables
+// (HoldingValueHistoryEntry, GoalContribution) precisely because "count rows
+// in a bounded, indexed range" is cheaper to reason about and reuse than
+// "correctly maintain a mutable rolling aggregate under concurrent writers."
+//
+// The two rolling-window checks this table backs (both plain `count()`
+// queries run BEFORE a reasoningModel call is attempted, never inside the
+// same atomic statement as the per-key cooldown claim above — that claim and
+// this count are two independent, sequential checks, exactly as
+// ai-features-design.md §2's `rate-limit.ts` entry describes "(a)" and "(b)"
+// as two distinct mechanisms):
+//
+//   - Per-user cap (Finding 6a): `count({ where: { userId, createdAt: { gte:
+//     rollingWindowStart(ONE_DAY_MS) } } })` — deliberately NOT additionally
+//     scoped by `feature`: §6.1's own framing ("every reasoningModel-backed
+//     action... windowed per rolling day... a handful of calls per user per
+//     rolling day") caps one user's TOTAL reasoningModel usage across all
+//     four features combined, not each feature independently — the quota
+//     this protects (Gemini's daily request count) does not distinguish
+//     which FinanceOS feature issued a given request, so neither should this
+//     check.
+//   - Project-wide cap (§6.1's Gemini-swap addendum, tagged
+//     `[Gemini swap, c]` in ai-features-design.md §2): the identical query
+//     with the `userId` filter dropped entirely — `count({ where: {
+//     createdAt: { gte: rollingWindowStart(ONE_DAY_MS) } } })` — scoped to
+//     nothing but the rolling window, since the quota this protects is
+//     scoped to the API key/project, not any user.
+//
+// `feature` is captured on every row for observability/debugging only (which
+// of the four reasoningModel features is actually consuming the shared daily
+// quota, at a glance) — mirroring CategorySuggestion.generatorModel's own
+// "cheap to capture now, expensive to reconstruct retroactively, not itself
+// required by either cap's query" precedent. Deliberately a plain `String`,
+// not a new enum: this column is meant to be populated with the exact same
+// `featureName` string every `generateStructuredOutput()` call site already
+// threads through today (e.g. `"budgeting.advisor"`,
+// `"dashboard.monthlySummary"` — `generate-structured-output.ts`'s own
+// `featureName: string` parameter, used there purely for its console log
+// line) — introducing a second, parallel closed vocabulary here that some
+// future call site would have to keep in exact sync with that pre-existing
+// string convention is a maintenance hazard this column avoids by
+// construction, not an oversight.
+//
+// Retention (flagged, not enforced by this migration): every row here is
+// worthless to both cap queries once it falls outside the largest configured
+// `rollingWindowStart()` window (currently on the order of one rolling day
+// per §6.1) — unlike CategorySuggestion (a permanent audit trail) or
+// MonthlySummary (permanent user-facing history), this table has NO
+// long-term product value and will grow forever, unbounded, if never pruned.
+// A periodic cleanup (e.g. a small cron step deleting rows older than a
+// modest multiple of the largest window, mirroring this codebase's existing
+// cron patterns) is recommended before this ships at real multi-user scale,
+// but is deliberately left as a follow-up rather than blocked on here — the
+// same "flag the requirement precisely, implementer's call on timing"
+// discipline ai-features-design.md §7 already used for CategorySuggestion's
+// own retention/pruning policy.
+model ReasoningModelCallLog {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // See this model's own header comment — a plain String, deliberately
+  // matching `generate-structured-output.ts`'s existing `featureName`
+  // convention verbatim. Observability-only: never filtered on by either
+  // rolling-window cap query above.
+  feature String
+
+  // The one column both rolling-window cap queries key off — this row IS the
+  // "a reasoningModel call attempt happened at this instant" fact, written
+  // once per attempt and never updated afterward (an immutable log row,
+  // unlike BudgetAdvisorCache.generatedAt/MonthlySummary.generatedAt, which
+  // are each a single mutable timestamp overwritten in place on their own
+  // cache/history row).
+  createdAt DateTime @default(now())
+
+  // Serves the per-user rolling-window count query above; its leftmost
+  // `userId` prefix also covers any plain userId-only lookup this table
+  // might need later, mirroring this schema's existing composite-index
+  // conventions (e.g. BudgetAdvisorCache.@@index([userId, month])).
+  @@index([userId, createdAt])
+  // A SEPARATE, non-composite index on `createdAt` alone — required because
+  // the project-wide cap's query has no `userId` predicate at all, and a
+  // leading-`userId` composite index cannot efficiently serve a
+  // `userId`-less range filter (Postgres would need to consult every
+  // distinct `userId`'s slice of the composite index, not a single
+  // contiguous range within it).
+  @@index([createdAt])
+  @@map("reasoning_model_call_log")
 }

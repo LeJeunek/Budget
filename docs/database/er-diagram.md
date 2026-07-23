@@ -1,4 +1,4 @@
-# FinanceOS — ER Diagram (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b + Phase 4a)
+# FinanceOS — ER Diagram (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b + Phase 4a + Phase 4a follow-up)
 
 ```mermaid
 erDiagram
@@ -70,6 +70,8 @@ erDiagram
 
     Transaction ||--o{ CategorySuggestion : "suggested for"
     Category ||--o{ CategorySuggestion : "optionally suggested (nullable, SetNull)"
+
+    User ||--o{ ReasoningModelCallLog : owns
 
     User {
         string id PK
@@ -356,6 +358,13 @@ erDiagram
         enum label "nullable"
         string narrative "nullable"
     }
+
+    ReasoningModelCallLog {
+        string id PK
+        string userId FK
+        string feature "observability only, not filtered by either cap query"
+        datetime createdAt "immutable log row; both rolling-window caps key off this"
+    }
 ```
 
 ## Design notes (Phase 0/1)
@@ -526,6 +535,24 @@ Unlike the two cache models above, `MonthlySummary` is a permanent, ever-growing
 ### Cross-cutting Phase 4a pattern, stated once: nullability-as-signal, used four times
 
 `CategorySuggestion.suggestedCategoryId`, `MonthlySummary.narrative`/`citedFigures`, `BudgetAdvisorCache.recommendations`, `SpendingInsightsCache.insights`, and `FinancialHealthScoreSnapshot`'s four component scores/`totalScore`/`label`/`narrative` all use the identical discipline: a `null` value **is** the degraded/undefined/not-yet-generated signal, never a separate boolean/enum flag duplicating what the nullable column's own state already says. This is not five independent choices — it's one discipline applied consistently across every Phase 4a model, chosen specifically because Cross-Cutting Product Requirement #1 (`ai-features.md`, graceful degradation) and Feature 5's own strongest-degradation guarantee both require that an AI-generation failure be structurally distinguishable from success at the data layer, and Prisma's own nullable-column semantics already provide exactly that distinction for free, without an extra column anywhere.
+
+## Design notes (Phase 4a follow-up) — `ReasoningModelCallLog`
+
+Flagged jointly by two AI Engineer dispatches after this phase's initial five tables shipped: `features/budgeting/server/advisor.ts`'s own `MIN_REFRESH_INTERVAL_MS` comment first documented that `ai-features-design.md` §2 Finding 6a/§6.1 call for a per-user rolling-window cap (spanning every cache key a user might touch, not just one) plus a project-wide rolling-window cap on `reasoningModel` calls — both explicitly deferred pending a not-yet-built counter table — and judged its own per-key cooldown an acceptable stand-in only because Budget Advisor was, at the time, the only `reasoningModel`-backed feature shipped. `features/dashboard/server/monthly-summary.ts`'s `MIN_REGENERATE_INTERVAL_MS` comment escalated the same flag once it became the *second* such feature, naming that as the exact moment "a real, cross-feature call-counter table becomes necessary and unavoidable." This table closes that gap.
+
+**Why one small table, not per-feature counters.** Every one of the four `reasoningModel` features (Budget Advisor, Monthly Summaries — both shipped; Spending Insights, Health Score narrative — not yet built) needs the identical two checks, and Gemini's free-tier quota (the resource being protected) doesn't distinguish which FinanceOS feature issued a request — so one shared table serves all four, mirroring this schema's own `DismissedSubscriptionMerchant`/`CategorySuggestion` precedent of "one purpose-built table, not a generic catch-all," just scoped to a cross-feature *mechanism* rather than a single feature's data.
+
+**Why an append-only log, not a mutable counter-plus-window-start row.** `ai-features-design.md` §7's own flagged note suggested "one row per `(userId, feature)` recording a rolling call count/window start." That shape was considered and rejected in favor of one row per call *attempt* instead, because `lib/ai/rate-limit.ts` already ships two pure helpers — `rollingWindowStart(windowMs)` and `hasReachedRollingWindowCap(callCountInWindow, maxCallsPerWindow)` — written, before this table existed, against a `db.<table>.count({ where: { ..., createdAt: { gte: rollingWindowStart(windowMs) } } })` query shape (that file's own doc comment uses `CategorySuggestion` as its worked example — the identical "count real rows in a `createdAt` range" pattern this table now reuses unchanged). A mutable counter row would need its own conditional increment-or-reset write and its own race-condition analysis to stay correct under concurrent writers; an append-only log needs neither — every write is a plain, always-succeeding `INSERT`, and every check is a plain, already-proven `count()`. The tradeoff this accepts (unbounded row growth over time) is a real cost, but one this schema already accepts for far higher-volume append-only tables (`HoldingValueHistoryEntry`, `GoalContribution`) for the same reason: simpler-to-reason-about persistence beats a smaller row count here.
+
+**Two independent queries, not one.** Per-user: `count({ where: { userId, createdAt: { gte: rollingWindowStart(ONE_DAY_MS) } } })` — deliberately not also filtered by `feature`, since §6.1 caps one user's *total* `reasoningModel` usage across all four features combined, matching the quota it protects. Project-wide: the identical query with the `userId` filter dropped — `count({ where: { createdAt: { gte: rollingWindowStart(ONE_DAY_MS) } } })` — scoped to nothing but the window, since Gemini's quota is scoped to the API key/project, not any one user. Both checks run sequentially, before a `reasoningModel` call is attempted, independent of — never inside the same atomic statement as — the existing per-key cooldown claim (`BudgetAdvisorCache`/`MonthlySummary`'s conditional `UPDATE`), consistent with `ai-features-design.md` §2's own framing of "(a)" and "(b)" as two distinct mechanisms.
+
+**Two indexes, not one composite.** `@@index([userId, createdAt])` serves the per-user query via its leftmost prefix; a *separate* `@@index([createdAt])` is required for the project-wide query, since that query has no `userId` predicate at all and a leading-`userId` composite index cannot efficiently serve a `userId`-less range scan (Postgres would need to walk every distinct `userId`'s slice of the composite index rather than one contiguous range).
+
+**`feature` is a plain `String`, deliberately not a new enum**, populated with the exact same `featureName` string every `generateStructuredOutput()` call site already threads through today (`"budgeting.advisor"`, `"dashboard.monthlySummary"`, etc.) — observability/debugging only, never filtered on by either cap query above. A new closed-vocabulary enum here would have to be kept in exact sync with that pre-existing, freer-form string convention for zero query benefit; `CategorySuggestion.generatorModel`'s identical "plain String, not an enum, for a value some other file already controls independently" reasoning applies verbatim.
+
+**Retention is flagged, not built.** Every row is worthless to both cap queries once older than the largest configured window (currently ~1 day per §6.1) — unlike every other Phase 4a table, this one has zero long-term product value and will grow unbounded if never pruned. A periodic cleanup cron (delete rows older than a small multiple of the largest window) is recommended before production use at real multi-user scale, but is deliberately left as a follow-up rather than blocking this migration on it, the same "flag precisely, implementer's call on timing" discipline already used for `CategorySuggestion`'s own retention policy above.
+
+**Ownership of the check-and-record logic is deliberately left open.** This table only defines the persistence shape; whether `lib/ai/rate-limit.ts` grows a shared `recordReasoningModelCall`/`checkReasoningModelCallCaps`-style function that all four features call (recommended, so the two not-yet-built features don't each reinvent the query) or whether each feature's own server file queries this table directly is a `lib/ai/` module-boundary decision belonging to the AI Engineer, not this Architect — `rate-limit.ts`'s own file header currently states it "holds no Prisma/persistence code of its own," which would need deliberate, documented revision if the former path is chosen. See this migration's handoff note (repository history / migration-strategy.md) for the exact follow-up this leaves for AI Engineer.
 
 ### No new caching-layer precedent, restated from the schema's own angle
 
