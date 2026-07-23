@@ -5,6 +5,10 @@ import { reasoningModel } from "@/lib/ai/client"
 import { generateStructuredOutput } from "@/lib/ai/generate-structured-output"
 import { buildUserPrompt } from "@/lib/ai/prompts/build-prompt"
 import { redactText } from "@/lib/ai/redact"
+import {
+  checkReasoningModelRateLimit,
+  recordReasoningModelCall,
+} from "@/lib/ai/rate-limit"
 import type { AiFeatureResult } from "@/lib/ai/types"
 
 import type { BudgetCategoryLine, BudgetHealthScore, BudgetMonthTotals } from "../types"
@@ -52,35 +56,34 @@ const INTERACTIVE_TIMEOUT_MS = 8_000
  * pattern below (ai-features-design.md §2/§6, Finding 6b) -- never a
  * read-then-write check.
  *
- * **Judgment call, flagged for the Database Architect:** ai-features-design.md
- * §2 Finding 6a / §6.1 also call for a *secondary*, per-user rolling-window
- * cap spanning every month a user might generate a cache row for, plus (per
- * the Gemini-swap addendum) a project-wide rolling-window cap across all
- * `reasoningModel` calls -- both explicitly deferred to a new, not-yet-built
- * counter table (§7's "flagged, not designed" note; confirmed absent from
- * `prisma/schema.prisma` as of this dispatch: only `BudgetAdvisorCache`
- * exists, a single upserted row per key with no history of individual
- * attempts, so it cannot itself answer "how many attempts happened in the
- * last rolling day"). Building that table is Database Architect-owned schema
- * work outside this file's boundary, not something to invent here.
- *
- * Until that table exists, this single per-key cooldown is deliberately set
- * conservatively (4 hours, i.e. at most 6 attempts/day for this one key) to
- * approximate §6.1's "a handful of calls per user per rolling day" bound.
- * This is a reasonable stand-in specifically *for this feature*: Feature 2
- * AC5 restricts generation to the current month only, so a given user only
- * ever has one refreshable cache key at any point in time -- unlike Spending
- * Insights (many reporting periods) or "reconsider" (many transactions),
- * there is no way for a user to multiply total call volume by cycling
- * through distinct keys, so this per-key cooldown already bounds this
- * feature's own total `reasoningModel` volume as tightly as a separate
- * per-user counter would. It does **not** protect the shared project-wide
- * Gemini free-tier quota once a second `reasoningModel`-backed feature
- * (Monthly Summaries, Spending Insights, Health Score narrative) is built --
- * at that point a real, cross-feature call-counter table becomes necessary
- * and unavoidable, and this comment should be revisited.
+ * **Gap closed (Phase 4a follow-up):** this comment previously flagged that
+ * ai-features-design.md §2 Finding 6a / §6.1 also call for a *secondary*,
+ * per-user rolling-window cap spanning every month a user might generate a
+ * cache row for, plus a project-wide rolling-window cap across all
+ * `reasoningModel` calls, and that both were deferred pending a not-yet-built
+ * cross-feature counter table. That table (`ReasoningModelCallLog`) now
+ * exists, and both checks are now enforced -- see
+ * `claimReasoningModelGenerationSlot` below, which runs
+ * `lib/ai/rate-limit.ts`'s `checkReasoningModelRateLimit` (the per-user +
+ * project-wide rolling-*day* checks) before ever attempting this per-key
+ * claim, and `generateAndPersist`'s call to `recordReasoningModelCall` after
+ * every attempt. This per-key cooldown itself is UNCHANGED and still needed:
+ * it remains the only thing preventing two near-simultaneous requests for the
+ * exact same `(userId, month)` key from both generating (`ReasoningModelCallLog`'s
+ * two rolling-window checks are a coarser, cross-feature/cross-key bound, not
+ * a substitute for this atomic per-key claim). Kept conservatively at 4 hours
+ * (at most 6 attempts/day for this one key) -- now a secondary belt-and-
+ * braces bound underneath the primary per-user/project-wide caps, rather than
+ * this feature's only protection against the shared Gemini free-tier quota.
  */
 const MIN_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000
+
+/** The exact `featureName` this feature threads through both
+ * `generateStructuredOutput` (its own console-log-only observability param)
+ * and `recordReasoningModelCall` (`ReasoningModelCallLog.feature`) -- a single
+ * shared constant so the two can never drift apart, per that column's own
+ * schema comment requiring they stay in exact sync. */
+const REASONING_MODEL_FEATURE_NAME = "budgeting.advisor"
 
 const ADVISOR_SYSTEM_PROMPT = [
   "You are a budgeting advisor for a personal finance app.",
@@ -179,6 +182,32 @@ async function claimGenerationSlot(
   return claimed.count === 1
 }
 
+/**
+ * The full generation gate (Phase 4a follow-up, closing the gap
+ * `MIN_REFRESH_INTERVAL_MS`'s own comment above flags): runs the cross-feature
+ * `reasoningModel` rate limit (`lib/ai/rate-limit.ts`'s
+ * `checkReasoningModelRateLimit` -- per-user + project-wide, both rolling-day)
+ * FIRST, and only calls `claimGenerationSlot`'s own per-key cooldown claim if
+ * that passes. Ordered this way (cheap read-only checks before the
+ * side-effecting per-key claim) so a request already blocked by the
+ * cross-feature cap never consumes/stamps this key's own cooldown window for
+ * no benefit. Both checks are independent and sequential, never combined
+ * into one atomic statement, per `ReasoningModelCallLog`'s own header
+ * comment. Returns `true` only if every check passed and this call won the
+ * per-key claim.
+ */
+async function claimReasoningModelGenerationSlot(
+  userId: string,
+  monthDate: Date,
+  now: Date,
+): Promise<boolean> {
+  const { allowed } = await checkReasoningModelRateLimit(userId, now)
+  if (!allowed) {
+    return false
+  }
+  return claimGenerationSlot(userId, monthDate, now)
+}
+
 /** Parses a persisted `BudgetAdvisorCache.recommendations` `Json?` value back
  * against the same schema the model's output was validated against at write
  * time -- a defensive re-validation (Finding 7's "catch your own non-AI
@@ -271,8 +300,18 @@ async function generateAndPersist(
     extractNarrativeStrings: (data) =>
       data.recommendations.map((recommendation) => recommendation.text),
     timeoutMs: INTERACTIVE_TIMEOUT_MS,
-    featureName: "budgeting.advisor",
+    featureName: REASONING_MODEL_FEATURE_NAME,
   })
+
+  // Phase 4a follow-up: every attempt -- success or failure -- consumes this
+  // user's/the project's shared `reasoningModel` daily quota, matching
+  // `ReasoningModelCallLog`'s own "one row per call attempt" append-only
+  // design (its header comment's explicit parallel to this same file's
+  // `generatedAt`-updated-on-every-attempt rule, just below). Recorded here,
+  // not inside `claimReasoningModelGenerationSlot`, since that function only
+  // decides whether to attempt -- this is the one place that actually calls
+  // `generateStructuredOutput`.
+  await recordReasoningModelCall(userId, REASONING_MODEL_FEATURE_NAME)
 
   if (result.status !== "ok") {
     // `claimGenerationSlot` already stamped `generatedAt` for this attempt
@@ -360,10 +399,14 @@ export async function getBudgetAdvisorRecommendations(
       return cacheRowToResult(existing)
     }
 
-    const claimed = await claimGenerationSlot(userId, monthDate, new Date())
+    const claimed = await claimReasoningModelGenerationSlot(userId, monthDate, new Date())
     if (!claimed) {
-      // Lost a race against a concurrent first-view request for this exact
-      // key -- read whatever the winner has written (or is about to write).
+      // Either the cross-feature reasoningModel rate limit rejected this
+      // attempt outright (no row to race against -- the caller simply gets
+      // "unavailable" this view, same as any other AI-unavailable trigger),
+      // or this call lost a race against a concurrent first-view request for
+      // this exact key -- read whatever the winner has written (or is about
+      // to write).
       const raced = await db.budgetAdvisorCache.findUnique({
         where: { userId_month: { userId, month: monthDate } },
         select: { recommendations: true, generatedAt: true },
@@ -405,10 +448,12 @@ export interface RefreshBudgetAdvisorOutcome {
  * authentication/input-validation and maps `rateLimited` to a user-facing
  * `ApiResult` failure message.
  *
- * Rate-limited via `claimGenerationSlot`'s atomic conditional update
- * (`MIN_REFRESH_INTERVAL_MS`, above) -- the same mechanism the implicit
- * first-view path uses, so there is exactly one place this cooldown is
- * enforced, never two independently-behaving checks.
+ * Rate-limited via `claimReasoningModelGenerationSlot` -- the cross-feature
+ * `reasoningModel` per-user/project-wide check plus `claimGenerationSlot`'s
+ * own atomic per-key conditional update (`MIN_REFRESH_INTERVAL_MS`, above) --
+ * the same mechanism the implicit first-view path uses, so there is exactly
+ * one place either cooldown is enforced, never independently-behaving checks
+ * per call site.
  */
 export async function refreshBudgetAdvisorRecommendations(
   userId: string,
@@ -433,7 +478,7 @@ export async function refreshBudgetAdvisorRecommendations(
       return { rateLimited: false, result: { status: "unavailable" } }
     }
 
-    const claimed = await claimGenerationSlot(userId, monthDate, new Date())
+    const claimed = await claimReasoningModelGenerationSlot(userId, monthDate, new Date())
     if (!claimed) {
       return { rateLimited: true, result: { status: "unavailable" } }
     }

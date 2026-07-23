@@ -181,3 +181,34 @@ describe("monthly-summary.ts is read-only against every other feature's data, by
     expect(SOURCE).toMatch(/db\.netWorthSnapshot\.findFirst\(/)
   })
 })
+
+// Phase 4a follow-up: verifies the retrofit that closes the gap
+// `MIN_REGENERATE_INTERVAL_MS`'s own comment previously flagged (a per-user +
+// project-wide `reasoningModel` rolling-day rate limit, now backed by
+// `ReasoningModelCallLog` via `lib/ai/rate-limit.ts`) -- mirrors
+// `advisor.test.ts`'s identical retrofit-verification suite. Source-level,
+// per this file's own standing "no integration-test database" convention
+// above -- `checkReasoningModelRateLimit`/`recordReasoningModelCall`
+// themselves are unit-tested directly in `lib/ai/rate-limit.test.ts`.
+describe("monthly-summary.ts is wired into the cross-feature reasoningModel rate limit", () => {
+  const SOURCE = readFileSync(join(__dirname, "monthly-summary.ts"), "utf-8")
+
+  it("gates generation on checkReasoningModelRateLimit before ever claiming the per-key cooldown slot", () => {
+    expect(SOURCE).toMatch(/checkReasoningModelRateLimit\(/)
+    const gateIndex = SOURCE.indexOf("checkReasoningModelRateLimit(")
+    const claimFnIndex = SOURCE.indexOf("async function claimGenerationSlot")
+    expect(gateIndex).toBeGreaterThan(-1)
+    expect(gateIndex).toBeGreaterThan(claimFnIndex)
+  })
+
+  it("records exactly one ReasoningModelCallLog row per generation attempt via recordReasoningModelCall", () => {
+    expect(SOURCE).toMatch(/recordReasoningModelCall\(/)
+  })
+
+  it("uses one shared featureName constant for both generateStructuredOutput and recordReasoningModelCall, never two independently-typed strings", () => {
+    expect(SOURCE).toMatch(/featureName: REASONING_MODEL_FEATURE_NAME/)
+    expect(SOURCE).toMatch(
+      /recordReasoningModelCall\(userId, REASONING_MODEL_FEATURE_NAME\)/,
+    )
+  })
+})

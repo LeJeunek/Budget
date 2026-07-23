@@ -48,3 +48,34 @@ describe("advisor.ts is read-only against Budget/BudgetCategory, by construction
     expect(ADVISOR_SOURCE).toMatch(/db\.budgetAdvisorCache\.(create|update|updateMany|findUnique)\(/)
   })
 })
+
+// Phase 4a follow-up: verifies the retrofit that closes the gap
+// `MIN_REFRESH_INTERVAL_MS`'s own comment previously flagged (a per-user +
+// project-wide `reasoningModel` rolling-day rate limit, now backed by
+// `ReasoningModelCallLog` via `lib/ai/rate-limit.ts`). Source-level, per this
+// file's own standing "no integration-test database" convention above --
+// `checkReasoningModelRateLimit`/`recordReasoningModelCall` themselves are
+// unit-tested directly in `lib/ai/rate-limit.test.ts`.
+describe("advisor.ts is wired into the cross-feature reasoningModel rate limit", () => {
+  it("gates generation on checkReasoningModelRateLimit before ever claiming the per-key cooldown slot", () => {
+    expect(ADVISOR_SOURCE).toMatch(/checkReasoningModelRateLimit\(/)
+    const gateIndex = ADVISOR_SOURCE.indexOf("checkReasoningModelRateLimit(")
+    const claimFnIndex = ADVISOR_SOURCE.indexOf("async function claimGenerationSlot")
+    expect(gateIndex).toBeGreaterThan(-1)
+    // The rate-limit check must be defined ahead of (textually precede) the
+    // per-key claim it gates, mirroring `claimReasoningModelGenerationSlot`'s
+    // own "cheap check before the side-effecting claim" ordering.
+    expect(gateIndex).toBeGreaterThan(claimFnIndex)
+  })
+
+  it("records exactly one ReasoningModelCallLog row per generation attempt via recordReasoningModelCall", () => {
+    expect(ADVISOR_SOURCE).toMatch(/recordReasoningModelCall\(/)
+  })
+
+  it("uses one shared featureName constant for both generateStructuredOutput and recordReasoningModelCall, never two independently-typed strings", () => {
+    expect(ADVISOR_SOURCE).toMatch(/featureName: REASONING_MODEL_FEATURE_NAME/)
+    expect(ADVISOR_SOURCE).toMatch(
+      /recordReasoningModelCall\(userId, REASONING_MODEL_FEATURE_NAME\)/,
+    )
+  })
+})

@@ -5,6 +5,10 @@ import { reasoningModel } from "@/lib/ai/client"
 import { generateStructuredOutput } from "@/lib/ai/generate-structured-output"
 import { buildUserPrompt } from "@/lib/ai/prompts/build-prompt"
 import { redactText } from "@/lib/ai/redact"
+import {
+  checkReasoningModelRateLimit,
+  recordReasoningModelCall,
+} from "@/lib/ai/rate-limit"
 import type { AiFeatureResult } from "@/lib/ai/types"
 
 import {
@@ -132,6 +136,14 @@ const MAX_TOP_CATEGORIES = 2
 const CRON_TIMEOUT_MS = 20_000
 const INTERACTIVE_TIMEOUT_MS = 8_000
 
+/** The exact `featureName` this feature threads through both
+ * `generateStructuredOutput` (its own console-log-only observability param)
+ * and `recordReasoningModelCall` (`ReasoningModelCallLog.feature`) -- a single
+ * shared constant so the two can never drift apart, per that column's own
+ * schema comment requiring they stay in exact sync. Mirrors `advisor.ts`'s
+ * identical `REASONING_MODEL_FEATURE_NAME` constant. */
+const REASONING_MODEL_FEATURE_NAME = "dashboard.monthlySummary"
+
 /**
  * Minimum interval between successive generation attempts for the SAME
  * `(userId, month)` key, enforced via the atomic conditional-update pattern
@@ -141,33 +153,28 @@ const INTERACTIVE_TIMEOUT_MS = 8_000
  * month that was just attempted) and the optional manual "regenerate this
  * summary" action.
  *
- * **Judgment call, flagged for the Database Architect -- escalating
- * `advisor.ts`'s identical flagged gap, not repeating it unchanged:**
- * `advisor.ts`'s own `MIN_REFRESH_INTERVAL_MS` comment already documented
- * that ai-features-design.md §2 Finding 6a/§6.1 call for a secondary
- * per-user rolling-window cap AND a project-wide `reasoningModel` rolling-
- * window cap, both explicitly deferred pending a not-yet-built cross-feature
- * call-counter table (confirmed still absent from `prisma/schema.prisma` as
- * of this dispatch) -- and that comment closed by saying this was an
- * acceptable stand-in *specifically* because Budget Advisor was, at the
- * time, the only `reasoningModel`-backed feature in production, so its own
- * per-key cooldown already bounded that feature's entire share of the
- * shared Gemini free-tier quota. **That condition no longer holds**: this
- * file is the SECOND `reasoningModel`-backed feature now built (Monthly
- * Summaries), and `advisor.ts`'s own comment named this exact moment as the
- * point after which "a real, cross-feature call-counter table becomes
- * necessary and unavoidable." This file reuses the same conservative,
- * per-key-only stand-in (a 24-hour cooldown -- generous headroom against
- * this feature's own naturally low call volume: once per user per month
- * automatically, plus whatever occasional manual regenerates a user
- * triggers) rather than inventing a different, ad hoc cross-feature
- * mechanism unilaterally -- but the absence of the project-wide counter
- * table §6.1 calls for is now flagged here a second time, more urgently,
- * for independent verification before Spending Insights and the Health
- * Score narrative (the remaining two `reasoningModel` features) make this a
- * three- and four-way gap. Building that table remains Database-Architect-
- * owned schema work outside this file's boundary, not something to invent
- * here.
+ * **Gap closed (Phase 4a follow-up):** this comment previously escalated
+ * `advisor.ts`'s identical flagged gap -- both files' per-key cooldowns were,
+ * at the time, the only protection either feature had against the shared
+ * per-user/project-wide `reasoningModel` rolling-day caps ai-features-design.md
+ * §2 Finding 6a/§6.1 require, pending a not-yet-built cross-feature
+ * call-counter table. That table (`ReasoningModelCallLog`) now exists, and
+ * both caps are now enforced for this feature too -- see
+ * `claimReasoningModelGenerationSlot` below, which runs
+ * `lib/ai/rate-limit.ts`'s `checkReasoningModelRateLimit` before ever
+ * attempting this per-key claim, and `generateAndPersist`'s call to
+ * `recordReasoningModelCall` after every attempt (mirrors `advisor.ts`'s
+ * identical retrofit exactly). This per-key cooldown itself is UNCHANGED and
+ * still needed -- it remains the only thing preventing a duplicate same-day
+ * cron re-invocation (or a manual regenerate racing it) from both generating
+ * for the exact same `(userId, month)` key; the new cross-feature checks are
+ * a coarser bound layered on top, not a replacement for this atomic per-key
+ * claim. Kept at 24 hours, generous headroom against this feature's own
+ * naturally low call volume (once per user per month automatically, plus
+ * occasional manual regenerates) -- now a secondary belt-and-braces bound
+ * underneath the primary per-user/project-wide caps shared with every other
+ * `reasoningModel` feature, rather than this feature's only protection
+ * against the shared Gemini free-tier quota.
  */
 const MIN_REGENERATE_INTERVAL_MS = 24 * 60 * 60 * 1000
 
@@ -420,6 +427,30 @@ async function claimGenerationSlot(
 }
 
 /**
+ * The full generation gate (Phase 4a follow-up, closing the gap
+ * `MIN_REGENERATE_INTERVAL_MS`'s own comment above flags): runs the
+ * cross-feature `reasoningModel` rate limit (`lib/ai/rate-limit.ts`'s
+ * `checkReasoningModelRateLimit` -- per-user + project-wide, both rolling-day)
+ * FIRST, and only calls `claimGenerationSlot`'s own per-key cooldown claim if
+ * that passes -- mirrors `advisor.ts`'s identical
+ * `claimReasoningModelGenerationSlot` exactly, including the "cheap read-only
+ * checks before the side-effecting per-key claim" ordering rationale. Returns
+ * `true` only if every check passed and this call won the per-key claim.
+ */
+async function claimReasoningModelGenerationSlot(
+  userId: string,
+  monthDate: Date,
+  isPartialMonth: boolean,
+  now: Date,
+): Promise<boolean> {
+  const { allowed } = await checkReasoningModelRateLimit(userId, now)
+  if (!allowed) {
+    return false
+  }
+  return claimGenerationSlot(userId, monthDate, isPartialMonth, now)
+}
+
+/**
  * Runs one generation attempt against the model and persists the result --
  * shared by both the cron and manual-regenerate paths below. Assumes the
  * caller has already won `claimGenerationSlot` for this exact
@@ -451,8 +482,16 @@ async function generateAndPersist(
     extractCitedFigures: (data) => data.citedFigures,
     extractNarrativeStrings: (data) => [data.narrative],
     timeoutMs,
-    featureName: "dashboard.monthlySummary",
+    featureName: REASONING_MODEL_FEATURE_NAME,
   })
+
+  // Phase 4a follow-up: every attempt -- success or failure -- consumes this
+  // user's/the project's shared `reasoningModel` daily quota, matching
+  // `ReasoningModelCallLog`'s own "one row per call attempt" append-only
+  // design. Mirrors `advisor.ts`'s identical `recordReasoningModelCall` call
+  // placement exactly (the one place that actually calls
+  // `generateStructuredOutput`, not the slot-claiming step above).
+  await recordReasoningModelCall(userId, REASONING_MODEL_FEATURE_NAME)
 
   if (result.status !== "ok") {
     // `claimGenerationSlot` already stamped `generatedAt` for this attempt
@@ -517,7 +556,12 @@ async function attemptGenerationForUserMonth(
 
   const isPartialMonth = computeIsPartialMonth(user.createdAt, monthDate)
 
-  const claimed = await claimGenerationSlot(userId, monthDate, isPartialMonth, now)
+  const claimed = await claimReasoningModelGenerationSlot(
+    userId,
+    monthDate,
+    isPartialMonth,
+    now,
+  )
   if (!claimed) {
     return { kind: "rate_limited" }
   }
