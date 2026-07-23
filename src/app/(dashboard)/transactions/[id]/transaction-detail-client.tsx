@@ -7,6 +7,11 @@
  * `bills/[billId]/bill-detail-client.tsx`'s split from its Server Component
  * `page.tsx` — see that file and this route's `page.tsx` for the pattern
  * this follows and why a dedicated route exists at all.
+ *
+ * **Phase 4a addition:** `pendingSuggestion` (nullable — most transactions
+ * have none) renders inline next to the category badge via the same
+ * `SuggestionBadge` used on the table row, so accept/reject behaves
+ * identically regardless of which surface the user resolves it from.
  */
 
 import Link from "next/link"
@@ -15,6 +20,8 @@ import { ArrowLeft } from "lucide-react"
 import type { TransactionDetail } from "@/features/transactions/types"
 import { ReceiptList } from "@/features/transactions/components/receipt-list"
 import { ReceiptUploader } from "@/features/transactions/components/receipt-uploader"
+import { SuggestionBadge } from "@/features/transactions/components/suggestion-badge"
+import type { PendingCategorySuggestion } from "@/features/transactions/server/categorization"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -22,9 +29,13 @@ import { cn, formatCurrency, formatDate } from "@/lib/utils"
 
 export interface TransactionDetailClientProps {
   transaction: TransactionDetail
+  pendingSuggestion: PendingCategorySuggestion | null
 }
 
-export function TransactionDetailClient({ transaction }: TransactionDetailClientProps) {
+export function TransactionDetailClient({
+  transaction,
+  pendingSuggestion,
+}: TransactionDetailClientProps) {
   const isExpense = transaction.amount < 0
 
   return (
@@ -49,6 +60,7 @@ export function TransactionDetailClient({ transaction }: TransactionDetailClient
                 />
                 {transaction.category?.name ?? "Uncategorized"}
               </Badge>
+              {pendingSuggestion && <SuggestionBadge suggestion={pendingSuggestion} />}
               {transaction.tags.map((tag) => (
                 <Badge key={tag.id} variant="secondary">
                   {tag.name}

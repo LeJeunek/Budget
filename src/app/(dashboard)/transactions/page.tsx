@@ -2,6 +2,7 @@ import { redirect } from "next/navigation"
 
 import { getCurrentUser } from "@/lib/auth"
 import { getCategories, getCategoryUsageCount } from "@/features/categories/server/service"
+import { getPendingSuggestions } from "@/features/transactions/server/categorization"
 
 import { TransactionsClient } from "./transactions-client"
 
@@ -30,6 +31,17 @@ import { TransactionsClient } from "./transactions-client"
  * per page load, not fetched live at delete-confirmation time; see
  * `CategoryManagerDialog`'s JSDoc for how it stays reasonably fresh
  * (`router.refresh()` on every dialog open and after every mutation).
+ *
+ * **Phase 4a addition (Transaction Auto-Categorization):** `pendingSuggestions`
+ * is fetched here for the same reason `categories` is — per
+ * docs/architecture/api-contracts.md's Feature 1 row, `getPendingSuggestions`
+ * is a plain Server Component direct call, not a client-fetchable route, so
+ * it can only be read from this Server Component and threaded down as a
+ * prop. It is intentionally unfiltered (every currently-PENDING suggestion
+ * for this user, both automatic and manual "reconsider" origin) — see
+ * `categorization.ts`'s own JSDoc on why the `importBatchId` scoping named in
+ * the API contract isn't implemented yet (no column exists to group
+ * transactions by import batch).
  */
 export default async function TransactionsPage() {
   const user = await getCurrentUser()
@@ -47,5 +59,13 @@ export default async function TransactionsPage() {
   )
   const categoryUsageCounts = Object.fromEntries(usageCountEntries)
 
-  return <TransactionsClient categories={categories} categoryUsageCounts={categoryUsageCounts} />
+  const pendingSuggestions = await getPendingSuggestions(user.id)
+
+  return (
+    <TransactionsClient
+      categories={categories}
+      categoryUsageCounts={categoryUsageCounts}
+      pendingSuggestions={pendingSuggestions}
+    />
+  )
 }

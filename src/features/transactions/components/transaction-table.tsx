@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import type { ColumnDef } from "@tanstack/react-table"
 import {
   ArrowDown,
@@ -11,6 +12,7 @@ import {
   Paperclip,
   Pencil,
   Scissors,
+  Sparkles,
   Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -49,6 +51,9 @@ import {
   useDeleteTransaction,
   useTransactions,
 } from "@/features/transactions/hooks/use-transactions"
+import { SuggestionBadge } from "@/features/transactions/components/suggestion-badge"
+import { requestCategorySuggestion } from "@/features/transactions/server/actions"
+import type { PendingCategorySuggestion } from "@/features/transactions/server/categorization"
 
 /**
  * Transaction table: the assembled `DataTable` (columns, server-driven
@@ -86,6 +91,16 @@ export interface TransactionTableProps {
    * from the joined `transaction.category` summary already returned by
    * `useTransactions`. */
   categories: Category[]
+  /** Every currently-PENDING `CategorySuggestion` for this user (Phase 4a,
+   * Server-Component-sourced — see page.tsx's JSDoc). Matched to a row by
+   * `transactionId` below and rendered inline via `SuggestionBadge`. */
+  pendingSuggestions: PendingCategorySuggestion[]
+  /** `true` when the caller (transactions-client.tsx's "Review N
+   * suggestions" button) wants this table instance to start filtered to
+   * Uncategorized — only read on mount (the caller forces a remount via
+   * `key` on every click, so this never needs to react to prop changes
+   * itself). */
+  jumpToUncategorized?: boolean
   onEdit: (transaction: Transaction) => void
   onSplit: (transaction: Transaction) => void
 }
@@ -131,13 +146,22 @@ function SortButton({
   )
 }
 
-export function TransactionTable({ categories, onEdit, onSplit }: TransactionTableProps) {
+export function TransactionTable({
+  categories,
+  pendingSuggestions,
+  jumpToUncategorized = false,
+  onEdit,
+  onSplit,
+}: TransactionTableProps) {
+  const router = useRouter()
   const { data: accounts } = useAccounts()
 
   const [pageIndex, setPageIndex] = React.useState(0)
   const [pageSize, setPageSize] = React.useState(DEFAULT_PAGE_SIZE)
   const [accountId, setAccountId] = React.useState<string | undefined>(undefined)
-  const [categoryId, setCategoryId] = React.useState<string | undefined>(undefined)
+  const [categoryId, setCategoryId] = React.useState<string | undefined>(
+    jumpToUncategorized ? UNCATEGORIZED_CATEGORY_ID : undefined,
+  )
   const [searchInput, setSearchInput] = React.useState("")
   const [search, setSearch] = React.useState("")
   const [dateFrom, setDateFrom] = React.useState("")
@@ -184,6 +208,67 @@ export function TransactionTable({ categories, onEdit, onSplit }: TransactionTab
 
   const { data, isLoading } = useTransactions(filters)
   const deleteTransaction = useDeleteTransaction()
+
+  // Phase 4a: PENDING suggestions keyed by transactionId so each row can
+  // look its own up in O(1) — `pendingSuggestions` is every one of this
+  // user's PENDING rows (unfiltered, see page.tsx's JSDoc), not scoped to
+  // the current page/filter, so this map is rebuilt only when the prop
+  // itself changes, not on every page/filter change.
+  const suggestionsByTransactionId = React.useMemo(() => {
+    const map = new Map<string, PendingCategorySuggestion>()
+    for (const suggestion of pendingSuggestions) {
+      map.set(suggestion.transactionId, suggestion)
+    }
+    return map
+  }, [pendingSuggestions])
+
+  // Tracks which transaction(s) currently have an in-flight manual
+  // "reconsider" request — disables that row's menu item so a slow request
+  // can't be fired twice, distinct from `SuggestionBadge`'s own
+  // accept/reject pending state (a different action, on an
+  // already-generated suggestion).
+  const [requestingSuggestionIds, setRequestingSuggestionIds] = React.useState<Set<string>>(
+    () => new Set(),
+  )
+
+  /**
+   * The manual "reconsider" action (ai-features.md AC6): requests a fresh
+   * suggestion for any transaction, categorized or not. Never throws — every
+   * outcome (ordinary request failure, e.g. rate-limited; or the AI
+   * provider being `"unavailable"`) is surfaced as a toast so the rest of
+   * the table keeps working regardless, per this feature's own fallback
+   * contract.
+   */
+  const handleRequestSuggestion = React.useCallback(
+    async (transaction: Transaction) => {
+      setRequestingSuggestionIds((prev) => new Set(prev).add(transaction.id))
+      try {
+        const result = await requestCategorySuggestion({ transactionId: transaction.id })
+
+        if (!result.success) {
+          toast.error(result.error)
+          return
+        }
+        if (result.data.status === "unavailable") {
+          toast.error("Couldn't generate a suggestion right now — try again later.")
+          return
+        }
+
+        toast.success(`Suggested category: ${result.data.data.categoryName}`)
+        // Re-runs the Transactions page's Server Component read of
+        // `getPendingSuggestions`, which is how the new suggestion reaches
+        // this table's `pendingSuggestions` prop.
+        router.refresh()
+      } finally {
+        setRequestingSuggestionIds((prev) => {
+          const next = new Set(prev)
+          next.delete(transaction.id)
+          return next
+        })
+      }
+    },
+    [router],
+  )
 
   const handleSortToggle = React.useCallback((field: TransactionSortField) => {
     setSort((prev) =>
@@ -249,15 +334,23 @@ export function TransactionTable({ categories, onEdit, onSplit }: TransactionTab
         ),
         cell: ({ row }) => {
           const category = row.original.category
+          // Phase 4a: a PENDING suggestion can exist regardless of whether
+          // this row already has a category — the automatic path only ever
+          // targets Uncategorized rows, but the manual "reconsider" action
+          // (ai-features.md AC6) is allowed on any transaction.
+          const suggestion = suggestionsByTransactionId.get(row.original.id)
           return (
-            <Badge variant="outline" className="gap-1.5">
-              <span
-                className="size-2 shrink-0 rounded-full"
-                style={{ backgroundColor: category?.color ?? "#94a3b8" }}
-                aria-hidden="true"
-              />
-              {category?.name ?? "Uncategorized"}
-            </Badge>
+            <div className="flex flex-col items-start gap-1">
+              <Badge variant="outline" className="gap-1.5">
+                <span
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: category?.color ?? "#94a3b8" }}
+                  aria-hidden="true"
+                />
+                {category?.name ?? "Uncategorized"}
+              </Badge>
+              {suggestion && <SuggestionBadge suggestion={suggestion} />}
+            </div>
           )
         },
       },
@@ -341,6 +434,13 @@ export function TransactionTable({ categories, onEdit, onSplit }: TransactionTab
           // all (`listTransactions`'s `EXCLUDE_SPLIT_PARENTS`), so this is
           // the only "already split" state a visible row can be in.
           const isSplitChild = transaction.parentTransactionId !== null
+          // Phase 4a AC6: "reconsider" is only offered when this row has no
+          // suggestion already awaiting review — once one exists, the
+          // inline `SuggestionBadge` next to its category is the action
+          // surface, so a second, redundant "Suggest a category" entry here
+          // would just duplicate it.
+          const hasPendingSuggestion = suggestionsByTransactionId.has(transaction.id)
+          const isRequestingSuggestion = requestingSuggestionIds.has(transaction.id)
           return (
             <div className="flex justify-end">
               <DropdownMenu>
@@ -377,6 +477,24 @@ export function TransactionTable({ categories, onEdit, onSplit }: TransactionTab
                       Split
                     </DropdownMenuItem>
                   )}
+                  {!hasPendingSuggestion && (
+                    <DropdownMenuItem
+                      disabled={isRequestingSuggestion}
+                      onSelect={(event) => {
+                        // Radix closes the menu on select by default, which
+                        // is fine here (the request runs in the background
+                        // and reports via toast), but `preventDefault` keeps
+                        // the menu open only long enough to reflect the
+                        // disabled state if this fires again before the
+                        // first request resolves.
+                        event.preventDefault()
+                        void handleRequestSuggestion(transaction)
+                      }}
+                    >
+                      <Sparkles className="size-4" aria-hidden="true" />
+                      {isRequestingSuggestion ? "Requesting..." : "Suggest a category"}
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem
                     variant="destructive"
                     onSelect={() => setDeletingTransaction(transaction)}
@@ -391,7 +509,16 @@ export function TransactionTable({ categories, onEdit, onSplit }: TransactionTab
         },
       },
     ],
-    [sortBy, sortDir, handleSortToggle, onEdit, onSplit],
+    [
+      sortBy,
+      sortDir,
+      handleSortToggle,
+      onEdit,
+      onSplit,
+      suggestionsByTransactionId,
+      requestingSuggestionIds,
+      handleRequestSuggestion,
+    ],
   )
 
   const total = data?.total ?? 0

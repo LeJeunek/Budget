@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { Plus, Settings2, Upload } from "lucide-react"
+import { Plus, Settings2, Sparkles, Upload } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { useAccounts } from "@/features/accounts/hooks/use-accounts"
@@ -12,6 +12,7 @@ import { ImportDialog } from "@/features/transactions/components/import-dialog"
 import { SplitDialog } from "@/features/transactions/components/split-dialog"
 import { TransactionForm } from "@/features/transactions/components/transaction-form"
 import { TransactionTable } from "@/features/transactions/components/transaction-table"
+import type { PendingCategorySuggestion } from "@/features/transactions/server/categorization"
 import type { Transaction } from "@/features/transactions/types"
 
 /**
@@ -28,16 +29,35 @@ import type { Transaction } from "@/features/transactions/types"
  * fetched here via `useAccounts()`, the existing Accounts feature's client
  * hook (default: non-archived only), and passed to every dialog that needs
  * an account picker.
+ *
+ * **Phase 4a addition:** `pendingSuggestions` (also Server-Component-sourced,
+ * same reasoning as `categories`) is threaded straight through to
+ * `TransactionTable`, which renders each one inline on its own row (see that
+ * file's JSDoc). The one piece of cross-component wiring owned here is the
+ * "Review suggestions" header button (ai-features.md AC7's "review across a
+ * batch without navigating to each transaction individually"): rather than
+ * building a second, separate review surface with its own incomplete data
+ * (`getPendingSuggestions` doesn't join in merchant/amount — see that
+ * function's own JSDoc on why), clicking it jumps the existing, already
+ * filterable/paginated table straight to the "Uncategorized" category
+ * filter, where every pending suggestion is already visible inline. `key`
+ * is bumped on each click to force `TransactionTable` to remount with that
+ * filter applied even if the user had since changed it away.
  */
 
 export interface TransactionsClientProps {
   categories: Category[]
   categoryUsageCounts: Record<string, number>
+  pendingSuggestions: PendingCategorySuggestion[]
 }
 
 type FormState = { mode: "create" } | { mode: "edit"; transaction: Transaction } | null
 
-export function TransactionsClient({ categories, categoryUsageCounts }: TransactionsClientProps) {
+export function TransactionsClient({
+  categories,
+  categoryUsageCounts,
+  pendingSuggestions,
+}: TransactionsClientProps) {
   const router = useRouter()
   const { data: accounts = [] } = useAccounts()
 
@@ -45,6 +65,7 @@ export function TransactionsClient({ categories, categoryUsageCounts }: Transact
   const [splittingTransaction, setSplittingTransaction] = React.useState<Transaction | null>(null)
   const [isImportOpen, setIsImportOpen] = React.useState(false)
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = React.useState(false)
+  const [uncategorizedJumpCount, setUncategorizedJumpCount] = React.useState(0)
 
   // Categories/usage counts are Server-Component-sourced (no client hook
   // exists for this feature) — `router.refresh()` re-runs page.tsx's fetch,
@@ -64,6 +85,16 @@ export function TransactionsClient({ categories, categoryUsageCounts }: Transact
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {pendingSuggestions.length > 0 && (
+            <Button
+              variant="outline"
+              onClick={() => setUncategorizedJumpCount((count) => count + 1)}
+            >
+              <Sparkles className="size-4" aria-hidden="true" />
+              Review {pendingSuggestions.length} suggestion
+              {pendingSuggestions.length === 1 ? "" : "s"}
+            </Button>
+          )}
           <Button variant="outline" onClick={() => setIsCategoryManagerOpen(true)}>
             <Settings2 className="size-4" aria-hidden="true" />
             Manage categories
@@ -80,7 +111,10 @@ export function TransactionsClient({ categories, categoryUsageCounts }: Transact
       </div>
 
       <TransactionTable
+        key={uncategorizedJumpCount}
         categories={categories}
+        pendingSuggestions={pendingSuggestions}
+        jumpToUncategorized={uncategorizedJumpCount > 0}
         onEdit={(transaction) => setFormState({ mode: "edit", transaction })}
         onSplit={(transaction) => setSplittingTransaction(transaction)}
       />

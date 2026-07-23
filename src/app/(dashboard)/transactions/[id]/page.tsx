@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation"
 
 import { getCurrentUser } from "@/lib/auth"
 import { getTransactionDetail } from "@/features/transactions/server/service"
+import { getPendingSuggestions } from "@/features/transactions/server/categorization"
 
 import { TransactionDetailClient } from "./transaction-detail-client"
 
@@ -38,6 +39,12 @@ import { TransactionDetailClient } from "./transaction-detail-client"
  * receipts (AC1-AC3), alongside a read-only summary of the transaction for
  * context.
  *
+ * **Phase 4a addition:** `pendingSuggestion` is looked up from the same
+ * `getPendingSuggestions(userId)` read `transactions/page.tsx` already uses
+ * (see that file's JSDoc — it's a Server-Component-only call, not a
+ * client-fetchable route, so it can only be resolved here). Filtered to this
+ * one transaction's id since the detail view only ever needs at most one.
+ *
  * `getTransactionDetail` returns `null` for both "doesn't exist" and
  * "belongs to another user" — deliberately non-distinguishable, the same
  * convention `getAccountById`/`getBillById` follow — so both cases render
@@ -61,5 +68,11 @@ export default async function TransactionDetailPage({
     notFound()
   }
 
-  return <TransactionDetailClient transaction={transaction} />
+  const pendingSuggestions = await getPendingSuggestions(user.id)
+  const pendingSuggestion =
+    pendingSuggestions.find((suggestion) => suggestion.transactionId === id) ?? null
+
+  return (
+    <TransactionDetailClient transaction={transaction} pendingSuggestion={pendingSuggestion} />
+  )
 }
