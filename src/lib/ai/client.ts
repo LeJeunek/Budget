@@ -56,7 +56,11 @@ export const fastModel: LanguageModel = google("gemini-flash-lite-latest")
 /**
  * `gemini-flash-latest` — used for the four narrative-synthesis features
  * (Budget Advisor, Monthly Summaries, Spending Insights, Health Score
- * narrative — none of which are built by this dispatch).
+ * narrative — all four now built; see `features/budgeting/server/advisor.ts`,
+ * `features/dashboard/server/monthly-summary.ts`,
+ * `features/analytics/server/insights.ts`, and
+ * `features/financial-health-score/server/health-score-narrative.ts`
+ * respectively).
  *
  * This design originally called for a "pro"-tier reasoning model here
  * (`gemini-2.5-pro`). Live verification (2026-07-22) found every dated
