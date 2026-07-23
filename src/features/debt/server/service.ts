@@ -181,6 +181,37 @@ export async function getTotalActiveDebtBalanceForNetWorth(userId: string): Prom
 }
 
 /**
+ * (Phase 4a) The Debt-to-Income component's numerator for the Financial
+ * Health Score (`docs/product/ai-features.md` Feature 5's formula: "sum of
+ * active, non-archived Debts' minimum payments"), per
+ * `docs/architecture/api-contracts.md`'s own anticipation of "a small new
+ * sibling read function if a minimum-payment total isn't already exposed" —
+ * added here, alongside `getTotalActiveDebtBalanceForNetWorth`, rather than
+ * in `features/financial-health-score/`, per this codebase's "only the
+ * owning module directly queries its own Prisma table" convention.
+ *
+ * Deliberately **no** `accountId: null` filter (unlike
+ * `getTotalActiveDebtBalanceForNetWorth` above): that filter exists solely to
+ * avoid double-counting a linked Credit Card's *balance*, which is already
+ * reflected once via the Account-balance sum elsewhere. A minimum monthly
+ * payment obligation has no such double-counting concern — a linked Credit
+ * Card Debt's minimum payment is a real, ongoing monthly obligation
+ * regardless of whether its balance is tracked via its own `Debt.balance`
+ * column or a linked `Account.balance` — so every active, non-archived Debt
+ * counts here, linked or not.
+ */
+export async function getTotalActiveMinimumPaymentsForHealthScore(
+  userId: string,
+): Promise<number> {
+  const result = await db.debt.aggregate({
+    where: { userId, archivedAt: null },
+    _sum: { minimumPayment: true },
+  })
+
+  return result._sum.minimumPayment?.toNumber() ?? 0
+}
+
+/**
  * Bug fix (Phase 3a Bug Hunter review, HIGH severity — "Net Worth liability
  * vanishes when a linked Credit Card Account is archived while its Debt
  * stays active"): unlinks the Debt (if any, and if still active) currently

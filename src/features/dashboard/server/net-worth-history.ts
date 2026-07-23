@@ -241,6 +241,37 @@ export async function getNetWorthHistory(
 }
 
 /**
+ * (Phase 4a) The most recently captured `NetWorthSnapshot.totalNetWorth`
+ * value on or before `date`, or `null` if no such snapshot exists yet —
+ * `features/financial-health-score/server/service.ts`'s one read need
+ * against this table for its Net Worth Trend component (`docs/product/
+ * ai-features.md` Feature 5's CTO-corrected formula: "change in total Net
+ * Worth over the trailing 3 months"). Added here, alongside
+ * `getNetWorthHistory`/`resolveDefaultRange`, rather than as a raw
+ * cross-module Prisma query from `financial-health-score`, per this
+ * codebase's "only the owning module directly queries its own table"
+ * convention (mirrors `debt.service.getTotalActiveMinimumPaymentsForHealthScore`'s
+ * identical placement reasoning).
+ *
+ * Deliberately a single indexed point-lookup (`findFirst` + `orderBy desc`),
+ * not a slice of `getNetWorthHistory`'s own (potentially thinned-for-chart-
+ * legibility) `points` array — the Financial Health Score's formula needs
+ * the exact closest-prior value, not a chart-legibility approximation.
+ */
+export async function getNetWorthValueOnOrBefore(
+  userId: string,
+  date: Date,
+): Promise<number | null> {
+  const row = await db.netWorthSnapshot.findFirst({
+    where: { userId, capturedDate: { lte: date } },
+    orderBy: { capturedDate: "desc" },
+    select: { totalNetWorth: true },
+  })
+
+  return row ? row.totalNetWorth.toNumber() : null
+}
+
+/**
  * Resolves AC3's default range — `"all"` when the user's earliest snapshot
  * is less than 90 days old, `"90d"` once it is 90 or more days old — via a
  * cheap `aggregate`(`min`)/`count` pair, not a full row fetch, so the initial
