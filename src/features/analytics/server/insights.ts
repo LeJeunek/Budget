@@ -431,6 +431,32 @@ async function generateAndPersist(
  * age, or its own already-fetched Analytics data) -- `AiFeatureResult` only
  * ever carries one `"unavailable"` state, by design (§5).
  *
+ * **Cache-hit-first ordering (Phase 4a frontend follow-up, `docs/performance/
+ * phase-4a-frontend-followup-review.md` Finding 2, same reorder as
+ * `advisor.ts`'s `getBudgetAdvisorRecommendations`).** The
+ * `SpendingInsightsCache` lookup runs FIRST; `gatherInsightCandidates` --
+ * which internally fans out to all six Analytics metric functions -- is only
+ * ever called on the path that has already confirmed no cache row exists and
+ * is therefore actually about to attempt generation. Previously
+ * `gatherInsightCandidates` ran unconditionally before the cache check,
+ * meaning the common "already generated this period, just show it" view paid
+ * the full six-metric cost for nothing -- doubly wasteful since
+ * `analytics/page.tsx` already computes all six metrics directly, one line
+ * above, for its own charts.
+ *
+ * **Judgment call:** identical in shape and resolution to
+ * `getBudgetAdvisorRecommendations`'s own documented judgment call (see that
+ * function's doc comment for the full reasoning) -- a period that already
+ * has a cached row from when it had enough candidates, but would now compute
+ * fewer than `MIN_CANDIDATES_TO_ATTEMPT` (e.g. a subscription was
+ * un-flagged, or a large purchase aged out of the window), returns the
+ * still-cached insights under this new ordering instead of `unavailable`.
+ * Accepted for the same reason: a previously-generated, validly-grounded
+ * insight set shouldn't disappear just because the live candidate count
+ * later dropped -- this function already never recomputes an already-cached
+ * result on its own (only `refreshSpendingInsights` does), so a cached
+ * result is already treated as stable regardless of later changes elsewhere.
+ *
  * [Finding 7] Catches its own non-AI errors (the candidate-gathering reads,
  * the cache-row reads/writes above, all outside
  * `generate-structured-output.ts`'s own try/catch) and maps them to
@@ -442,18 +468,21 @@ export async function getSpendingInsights(
   period: SpendingInsightsPeriod,
 ): Promise<AiFeatureResult<SpendingInsight[]>> {
   try {
-    const range = resolveInsightsPeriodRange(period)
-    const candidates = await gatherInsightCandidates(userId, range)
-    if (candidates.length < MIN_CANDIDATES_TO_ATTEMPT) {
-      return { status: "unavailable" }
-    }
-
+    // Cache check first (see this function's own doc comment above) -- only
+    // fall through to the expensive `gatherInsightCandidates` fetch below
+    // once we know there is no cached result to simply return.
     const existing = await db.spendingInsightsCache.findUnique({
       where: { userId_period: { userId, period } },
       select: { insights: true },
     })
     if (existing) {
       return cacheRowToResult(existing)
+    }
+
+    const range = resolveInsightsPeriodRange(period)
+    const candidates = await gatherInsightCandidates(userId, range)
+    if (candidates.length < MIN_CANDIDATES_TO_ATTEMPT) {
+      return { status: "unavailable" }
     }
 
     const claimed = await claimReasoningModelGenerationSlot(userId, period, new Date())
@@ -505,6 +534,15 @@ export interface RefreshSpendingInsightsOutcome {
  * the same mechanism the implicit first-view path uses, so there is exactly
  * one place either cooldown is enforced, never independently-behaving checks
  * per call site.
+ *
+ * **Not given `getSpendingInsights`'s cache-first reorder (Phase 4a frontend
+ * follow-up, Finding 2) -- deliberately, same reasoning as
+ * `refreshBudgetAdvisorRecommendations`'s identical note.** An explicit
+ * "Refresh" always intends to regenerate, never to return a stale cached
+ * value, so `gatherInsightCandidates` is unconditionally needed on every call
+ * to this function to build the very prompt input the refresh is
+ * regenerating from -- there is no cache-hit-avoids-the-fetch shortcut to
+ * apply here.
  */
 export async function refreshSpendingInsights(
   userId: string,

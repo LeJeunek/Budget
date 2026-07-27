@@ -3,6 +3,7 @@ import type { AiFeatureResult } from "@/lib/ai/types"
 
 import { getTotalActiveMinimumPaymentsForHealthScore } from "@/features/debt/server/service"
 import { getBudgetHealthScore } from "@/features/budgeting/server/service"
+import type { BudgetHealthScore } from "@/features/budgeting/types"
 import { getMonthlySummary, getNetWorth } from "@/features/dashboard/server/service"
 import { getNetWorthValueOnOrBefore } from "@/features/dashboard/server/net-worth-history"
 import { getActualReceivedIncomeBySource } from "@/features/recurring-income/server/service"
@@ -202,9 +203,24 @@ async function gatherSavingsRateComponent(userId: string, now: Date): Promise<nu
  * `budgeting.service.getBudgetHealthScore`, per Feature 5's own DoD
  * requirement ("never independently recomputed with new logic"). Its `null`
  * return ("zero categories with an allocation set this month") is Budget
- * Health Score's own existing undefined signal, propagated as-is. */
-async function gatherBudgetAdherenceComponent(userId: string, now: Date): Promise<number | null> {
-  const budgetHealthScore = await getBudgetHealthScore(userId, formatMonthKey(now))
+ * Health Score's own existing undefined signal, propagated as-is.
+ *
+ * **`precomputed` param (Phase 4a frontend follow-up, `docs/performance/
+ * phase-4a-frontend-followup-review.md` Finding 3).** When the caller already
+ * has this exact month's `BudgetHealthScore` in hand (the Dashboard page's
+ * own `getBudgetHealthScore` call, in the same `Promise.all` as its
+ * `getFinancialHealthScore` call), it can pass it here via
+ * `getFinancialHealthScore`'s own `precomputedBudgetHealthScore` parameter to
+ * skip this redundant re-fetch entirely — see that function's doc comment
+ * for why `undefined` (not passed) and `null` (passed, and genuinely absent)
+ * are distinguished. */
+async function gatherBudgetAdherenceComponent(
+  userId: string,
+  now: Date,
+  precomputed?: BudgetHealthScore | null,
+): Promise<number | null> {
+  const budgetHealthScore =
+    precomputed !== undefined ? precomputed : await getBudgetHealthScore(userId, formatMonthKey(now))
   return budgetHealthScore?.score ?? null
 }
 
@@ -249,15 +265,42 @@ async function gatherNetWorthTrendComponent(userId: string, now: Date): Promise<
  * propagate uncaught, matching every other plain deterministic read in this
  * codebase (`budgeting.service.getBudgetHealthScore`, `dashboard.service
  * .getNetWorth` — neither wraps itself in a try/catch either).
+ *
+ * **`precomputedBudgetHealthScore` (Phase 4a frontend follow-up,
+ * `docs/performance/phase-4a-frontend-followup-review.md` Finding 3, MEDIUM):
+ * optional, caller-supplied escape hatch for the one caller that already has
+ * this exact month's Budget Health Score in hand.** The Dashboard page
+ * (`app/(dashboard)/page.tsx`) calls `getBudgetHealthScore` directly for its
+ * own Budget Health Score badge, in the same `Promise.all` batch as its call
+ * to this function — without this parameter, `gatherBudgetAdherenceComponent`
+ * would independently re-run that same ~4-query call a second time, every
+ * Dashboard load. Passing the already-fetched value here (as long as it was
+ * computed for the same `now`/month this call uses) skips that duplicate
+ * fetch entirely.
+ *
+ * Deliberately `BudgetHealthScore | null | undefined` (via `?:`), not just
+ * `BudgetHealthScore | null`, so `undefined` (parameter omitted -- "I don't
+ * have one, go fetch it yourself") and `null` (parameter passed as `null` --
+ * "I already checked, there genuinely is no Budget Health Score this month,
+ * e.g. zero budgeted categories") are distinguishable by
+ * `gatherBudgetAdherenceComponent`'s own `precomputed !== undefined` check;
+ * collapsing them would force every non-Dashboard caller to also fetch and
+ * pass `null` explicitly just to opt out, or silently reintroduce the
+ * redundant fetch. The other caller, `/financial-health-score`'s own detail
+ * page, has no such precomputed value on hand and simply omits this
+ * parameter (`undefined`), falling through to the original unconditional
+ * fetch — this parameter is additive, and does not complicate that caller's
+ * own call site at all.
  */
 export async function getFinancialHealthScore(
   userId: string,
   now: Date = new Date(),
+  precomputedBudgetHealthScore?: BudgetHealthScore | null,
 ): Promise<FinancialHealthScoreBreakdown> {
   const [debtToIncome, savingsRate, budgetAdherence, netWorthTrend] = await Promise.all([
     gatherDebtToIncomeComponent(userId, now),
     gatherSavingsRateComponent(userId, now),
-    gatherBudgetAdherenceComponent(userId, now),
+    gatherBudgetAdherenceComponent(userId, now, precomputedBudgetHealthScore),
     gatherNetWorthTrendComponent(userId, now),
   ])
 

@@ -94,6 +94,16 @@ export default async function DashboardPage() {
 
   const currentMonth = currentMonthString()
 
+  // Issued once, then shared by both consumers below (this page's own Budget
+  // Health Score badge AND `getFinancialHealthScore`'s internal Budget
+  // Adherence component) — see the `.then` call below and
+  // `financial-health-score/server/service.ts`'s `precomputedBudgetHealthScore`
+  // doc comment (Phase 4a frontend follow-up, `docs/performance/
+  // phase-4a-frontend-followup-review.md` Finding 3) for why this avoids a
+  // second, independent `getBudgetHealthScore` fetch without serializing
+  // this page's overall load behind it.
+  const budgetHealthScorePromise = getBudgetHealthScore(user.id, currentMonth)
+
   const [
     netWorth,
     monthlySummary,
@@ -111,7 +121,7 @@ export default async function DashboardPage() {
     getSpendingByCategory(user.id, new Date()),
     getMonthlyTrends(user.id, 6),
     getBudgetMonthSummary(user.id, currentMonth),
-    getBudgetHealthScore(user.id, currentMonth),
+    budgetHealthScorePromise,
     resolveDefaultRange(user.id),
     // (Phase 4a) Automatic Monthly Summaries (ai-features.md Feature 3): the
     // most recent completed month's recap plus its full history, both plain
@@ -125,7 +135,19 @@ export default async function DashboardPage() {
     // feature's own service, not via a `dashboard.service` pass-through, per
     // that service's own documented circular-import avoidance (see
     // `app/(dashboard)/financial-health-score/page.tsx`'s identical note).
-    getFinancialHealthScore(user.id),
+    //
+    // Chained off `budgetHealthScorePromise` (rather than passed the
+    // already-destructured `budgetHealthScore` above, which isn't resolved
+    // yet at this point in the same `Promise.all` array) so
+    // `getFinancialHealthScore`'s own internal Budget Adherence component
+    // reuses this exact fetch instead of independently re-querying it
+    // (Finding 3) — this only sequences `getFinancialHealthScore` behind the
+    // single `getBudgetHealthScore` call it needs anyway, not behind this
+    // whole `Promise.all` batch, so the page's overall load time (bounded by
+    // the slowest entry here) is unaffected.
+    budgetHealthScorePromise.then((score) =>
+      getFinancialHealthScore(user.id, new Date(), score),
+    ),
   ])
 
   // Dependent on `defaultRangeResolution` above, so it can't join the

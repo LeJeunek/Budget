@@ -119,3 +119,61 @@ describe("insights.ts is wired into the cross-feature reasoningModel rate limit"
     expect(SOURCE).toMatch(/REASONING_MODEL_FEATURE_NAME = "analytics\.spendingInsights"/)
   })
 })
+
+// Phase 4a frontend follow-up (docs/performance/phase-4a-frontend-followup-review.md
+// Finding 2): verifies the cache-hit-first reorder in `getSpendingInsights`
+// -- the `SpendingInsightsCache` lookup must textually precede the
+// expensive `gatherInsightCandidates` fetch (which fans out to all six
+// Analytics metric functions), so a cache hit returns without ever calling
+// it. Source-level, same call-order-via-textual-position technique this
+// file's own `checkReasoningModelRateLimit` ordering test above already
+// uses -- there is no mock-call-count assertion available since nothing in
+// this suite spins up a Prisma client or mocks the Analytics metric
+// functions.
+describe("getSpendingInsights checks the cache before gathering insight candidates", () => {
+  const SOURCE = readFileSync(join(__dirname, "insights.ts"), "utf-8")
+  // Isolates just this function's body so the identically-shaped but
+  // deliberately-NOT-reordered `refreshSpendingInsights` below it (see that
+  // function's own doc comment for why) can never accidentally satisfy this
+  // assertion instead.
+  const functionBody = SOURCE.slice(
+    SOURCE.indexOf("export async function getSpendingInsights"),
+    SOURCE.indexOf("export async function refreshSpendingInsights"),
+  )
+
+  it("finds the cache row before ever calling gatherInsightCandidates in this function", () => {
+    const cacheCheckIndex = functionBody.indexOf("db.spendingInsightsCache.findUnique(")
+    const gatherIndex = functionBody.indexOf("gatherInsightCandidates(userId, range)")
+
+    expect(cacheCheckIndex).toBeGreaterThan(-1)
+    expect(gatherIndex).toBeGreaterThan(-1)
+    expect(cacheCheckIndex).toBeLessThan(gatherIndex)
+  })
+
+  it("returns cacheRowToResult(existing) immediately after the cache check, before resolveInsightsPeriodRange/gatherInsightCandidates run", () => {
+    const cacheCheckIndex = functionBody.indexOf("db.spendingInsightsCache.findUnique(")
+    const earlyReturnIndex = functionBody.indexOf(
+      "if (existing) {\n      return cacheRowToResult(existing)",
+    )
+    const rangeResolveIndex = functionBody.indexOf("resolveInsightsPeriodRange(period)")
+
+    expect(earlyReturnIndex).toBeGreaterThan(cacheCheckIndex)
+    expect(earlyReturnIndex).toBeLessThan(rangeResolveIndex)
+  })
+})
+
+// refreshSpendingInsights intentionally does NOT get the same reorder (see
+// its own doc comment: an explicit refresh always needs
+// gatherInsightCandidates to build the regeneration prompt, regardless of
+// any cache row) -- confirms it has no cache-row read at all ahead of its
+// own data fetch, so a future edit can't silently reintroduce a redundant
+// cache check there without a deliberate change to this test too.
+describe("refreshSpendingInsights has no cache check to reorder (regenerate-always by design)", () => {
+  const SOURCE = readFileSync(join(__dirname, "insights.ts"), "utf-8")
+  const functionBody = SOURCE.slice(SOURCE.indexOf("export async function refreshSpendingInsights"))
+
+  it("calls gatherInsightCandidates unconditionally, with no preceding db.spendingInsightsCache.findUnique", () => {
+    expect(functionBody).not.toMatch(/db\.spendingInsightsCache\.findUnique\(/)
+    expect(functionBody).toMatch(/gatherInsightCandidates\(userId, range\)/)
+  })
+})

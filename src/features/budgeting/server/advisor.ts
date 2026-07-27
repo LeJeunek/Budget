@@ -362,6 +362,36 @@ async function generateAndPersist(
  * identical `null`-return precedent), and every ordinary AI-unavailable
  * trigger (§5).
  *
+ * **Cache-hit-first ordering (Phase 4a frontend follow-up, `docs/performance/
+ * phase-4a-frontend-followup-review.md` Finding 1).** The `BudgetAdvisorCache`
+ * lookup runs FIRST, immediately after the cheap `month`/past-month checks --
+ * `getBudgetMonth`/`getBudgetHealthScore` (~8 DB queries) are only ever
+ * fetched on the path that has already confirmed no cache row exists and is
+ * therefore actually about to attempt generation. Previously these two calls
+ * ran unconditionally before the cache check, meaning the overwhelmingly
+ * common "already generated this month, just show it" view paid the full
+ * data-gathering cost for nothing -- doubly wasteful since the Server
+ * Component calling this (`budgeting/page.tsx`) already fetches the same
+ * `getBudgetMonth` data one line above for its own category table.
+ *
+ * **Judgment call, documented per this file's own convention of explaining
+ * every such call inline:** this reorder changes behavior in one edge case --
+ * a month that already has a cached row from when it had budgeted categories,
+ * but has since had every allocation removed (so `budgetedCategories.length`
+ * would now be `0`). Under the old ordering (categories checked before the
+ * cache), this returned `unavailable`; under this new ordering, the cache hit
+ * returns the still-cached recommendations before that category count is ever
+ * computed. Accepted as correct, not merely a side effect of the reorder: a
+ * recommendation set generated validly against that month's real data at the
+ * time shouldn't retroactively disappear just because allocations were
+ * cleared afterward -- the text itself is still an accurate description of
+ * what that month's budget looked like when it was generated, and the
+ * existing "only `refreshBudgetAdvisorRecommendations` regenerates, this
+ * function never recomputes an already-cached result" contract (this doc
+ * comment, above) already establishes that a cached result is treated as
+ * stable regardless of later changes elsewhere. (Same reasoning applies to
+ * `insights.ts`'s `getSpendingInsights`, Finding 2's identical pattern.)
+ *
  * [Finding 7] Catches its own non-AI errors (the `getBudgetMonth`/cache-row
  * reads/writes above, all outside `generate-structured-output.ts`'s own
  * try/catch) and maps them to `{ status: "unavailable" }` too, so a Server
@@ -382,6 +412,17 @@ export async function getBudgetAdvisorRecommendations(
       return { status: "unavailable" }
     }
 
+    // Cache check first (see this function's own doc comment above) -- only
+    // fall through to the expensive `getBudgetMonth`/`getBudgetHealthScore`
+    // fetch below once we know there is no cached result to simply return.
+    const existing = await db.budgetAdvisorCache.findUnique({
+      where: { userId_month: { userId, month: monthDate } },
+      select: { recommendations: true, generatedAt: true },
+    })
+    if (existing) {
+      return cacheRowToResult(existing)
+    }
+
     const [view, healthScore] = await Promise.all([
       getBudgetMonth(userId, month),
       getBudgetHealthScore(userId, month),
@@ -389,14 +430,6 @@ export async function getBudgetAdvisorRecommendations(
     const budgetedCategories = toBudgetedCategories(view.categories)
     if (budgetedCategories.length === 0) {
       return { status: "unavailable" }
-    }
-
-    const existing = await db.budgetAdvisorCache.findUnique({
-      where: { userId_month: { userId, month: monthDate } },
-      select: { recommendations: true, generatedAt: true },
-    })
-    if (existing) {
-      return cacheRowToResult(existing)
     }
 
     const claimed = await claimReasoningModelGenerationSlot(userId, monthDate, new Date())
@@ -454,6 +487,15 @@ export interface RefreshBudgetAdvisorOutcome {
  * the same mechanism the implicit first-view path uses, so there is exactly
  * one place either cooldown is enforced, never independently-behaving checks
  * per call site.
+ *
+ * **Not given `getBudgetAdvisorRecommendations`'s cache-first reorder (Phase
+ * 4a frontend follow-up, Finding 1) -- deliberately.** An explicit "Refresh"
+ * always intends to regenerate, never to return a stale cached value, so
+ * there is no cache-hit-avoids-the-fetch shortcut available here the way
+ * there is above: `getBudgetMonth`/`getBudgetHealthScore` are unconditionally
+ * needed on every call to this function to build the very prompt input the
+ * refresh is regenerating from. Moving a cache check in front of them would
+ * only add a lookup whose result this function would ignore anyway.
  */
 export async function refreshBudgetAdvisorRecommendations(
   userId: string,

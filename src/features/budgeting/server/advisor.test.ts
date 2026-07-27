@@ -79,3 +79,65 @@ describe("advisor.ts is wired into the cross-feature reasoningModel rate limit",
     )
   })
 })
+
+// Phase 4a frontend follow-up (docs/performance/phase-4a-frontend-followup-review.md
+// Finding 1): verifies the cache-hit-first reorder in
+// `getBudgetAdvisorRecommendations` -- the `BudgetAdvisorCache` lookup must
+// textually precede the expensive `getBudgetMonth`/`getBudgetHealthScore`
+// fetch, so a cache hit returns without ever calling either. Source-level,
+// per this file's own standing "no integration-test database" convention
+// above -- there is no mock-call-count assertion available since nothing in
+// this suite spins up a Prisma client, so call ORDER is verified the same
+// way `checkReasoningModelRateLimit`'s ordering already is above: by textual
+// position within the function body.
+describe("getBudgetAdvisorRecommendations checks the cache before gathering budget data", () => {
+  // Isolates just this function's body so the identically-ordered but
+  // deliberately-NOT-reordered `refreshBudgetAdvisorRecommendations` below it
+  // (see that function's own doc comment for why) can never accidentally
+  // satisfy this assertion instead.
+  const functionBody = ADVISOR_SOURCE.slice(
+    ADVISOR_SOURCE.indexOf("export async function getBudgetAdvisorRecommendations"),
+    ADVISOR_SOURCE.indexOf("export async function refreshBudgetAdvisorRecommendations"),
+  )
+
+  it("finds the cache row before ever calling getBudgetMonth/getBudgetHealthScore in this function", () => {
+    const cacheCheckIndex = functionBody.indexOf("db.budgetAdvisorCache.findUnique(")
+    const getBudgetMonthIndex = functionBody.indexOf("getBudgetMonth(userId, month)")
+    const getBudgetHealthScoreIndex = functionBody.indexOf("getBudgetHealthScore(userId, month)")
+
+    expect(cacheCheckIndex).toBeGreaterThan(-1)
+    expect(getBudgetMonthIndex).toBeGreaterThan(-1)
+    expect(getBudgetHealthScoreIndex).toBeGreaterThan(-1)
+    expect(cacheCheckIndex).toBeLessThan(getBudgetMonthIndex)
+    expect(cacheCheckIndex).toBeLessThan(getBudgetHealthScoreIndex)
+  })
+
+  it("returns cacheRowToResult(existing) immediately after the cache check, before the Promise.all data fetch", () => {
+    const cacheCheckIndex = functionBody.indexOf("db.budgetAdvisorCache.findUnique(")
+    const earlyReturnIndex = functionBody.indexOf(
+      "if (existing) {\n      return cacheRowToResult(existing)",
+    )
+    const promiseAllIndex = functionBody.indexOf("Promise.all([\n      getBudgetMonth")
+
+    expect(earlyReturnIndex).toBeGreaterThan(cacheCheckIndex)
+    expect(earlyReturnIndex).toBeLessThan(promiseAllIndex)
+  })
+})
+
+// refreshBudgetAdvisorRecommendations intentionally does NOT get the same
+// reorder (see its own doc comment: an explicit refresh always needs
+// getBudgetMonth/getBudgetHealthScore to build the regeneration prompt,
+// regardless of any cache row) -- confirms it has no cache-row read at all
+// ahead of its own data fetch, so a future edit can't silently reintroduce a
+// redundant cache check there without a deliberate change to this test too.
+describe("refreshBudgetAdvisorRecommendations has no cache check to reorder (regenerate-always by design)", () => {
+  const functionBody = ADVISOR_SOURCE.slice(
+    ADVISOR_SOURCE.indexOf("export async function refreshBudgetAdvisorRecommendations"),
+  )
+
+  it("calls getBudgetMonth/getBudgetHealthScore unconditionally, with no preceding db.budgetAdvisorCache.findUnique", () => {
+    expect(functionBody).not.toMatch(/db\.budgetAdvisorCache\.findUnique\(/)
+    expect(functionBody).toMatch(/getBudgetMonth\(userId, month\)/)
+    expect(functionBody).toMatch(/getBudgetHealthScore\(userId, month\)/)
+  })
+})

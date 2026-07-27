@@ -59,3 +59,24 @@ describe("service.ts is a pure downstream leaf consumer (acyclicity)", () => {
     expect(SOURCE).not.toMatch(/export (async )?function getFinancialHealthScoreCard/)
   })
 })
+
+// Phase 4a frontend follow-up (docs/performance/phase-4a-frontend-followup-review.md
+// Finding 3): verifies the optional `precomputedBudgetHealthScore` escape
+// hatch that lets a caller who already has this exact month's
+// `BudgetHealthScore` (the Dashboard page) skip `gatherBudgetAdherenceComponent`'s
+// own independent `getBudgetHealthScore` re-fetch. Source-level, per this
+// file's own standing "no integration-test database" convention above.
+describe("getFinancialHealthScore accepts an optional precomputed Budget Health Score to avoid a duplicate fetch", () => {
+  it("threads an optional precomputedBudgetHealthScore param through to gatherBudgetAdherenceComponent", () => {
+    expect(SOURCE).toMatch(
+      /export async function getFinancialHealthScore\(\s*userId: string,\s*now: Date = new Date\(\),\s*precomputedBudgetHealthScore\?: BudgetHealthScore \| null,/,
+    )
+    expect(SOURCE).toMatch(
+      /gatherBudgetAdherenceComponent\(userId, now, precomputedBudgetHealthScore\)/,
+    )
+  })
+
+  it("only skips the getBudgetHealthScore fetch when precomputed is not undefined -- distinguishing 'not passed' from 'passed as null'", () => {
+    expect(SOURCE).toMatch(/precomputed !== undefined \? precomputed : await getBudgetHealthScore/)
+  })
+})
