@@ -27,6 +27,7 @@
  */
 
 import * as React from "react"
+import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -211,6 +212,40 @@ export function Sidebar({
         className
       )}
     >
+      <div
+        className={cn(
+          "flex items-center gap-2 px-3 py-4",
+          !mobile && "justify-center lg:justify-start",
+          effectiveCollapsed && "justify-center"
+        )}
+      >
+        {/* Two emblem variants, swapped via Tailwind's `dark:` variant
+         * (pure CSS, no useTheme() hydration risk) — see login page's
+         * identical pattern/comment. */}
+        <Image
+          src="/brand/emblem-light.png"
+          alt=""
+          width={32}
+          height={32}
+          className="size-8 shrink-0 dark:hidden"
+        />
+        <Image
+          src="/brand/emblem-dark.png"
+          alt=""
+          width={32}
+          height={32}
+          className="hidden size-8 shrink-0 dark:block"
+        />
+        <span
+          className={cn(
+            "truncate text-sm font-semibold",
+            labelVisibilityClasses(mobile, effectiveCollapsed)
+          )}
+        >
+          LK Budget
+        </span>
+      </div>
+
       <nav
         aria-label="Main navigation"
         className="flex flex-1 flex-col gap-4 overflow-y-auto p-2"

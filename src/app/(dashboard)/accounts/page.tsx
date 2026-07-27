@@ -122,8 +122,8 @@ function EmptyAccountsState() {
           </p>
           <p className="max-w-sm text-sm text-muted-foreground">
             Add your first account to get started — every other part of
-            FinanceOS, from transactions to your dashboard, builds on the
-            accounts you add here.
+            LK Budget, from transactions to your dashboard, builds on
+            the accounts you add here.
           </p>
         </div>
         <AddAccountButton label="Add your first account" />

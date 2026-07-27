@@ -169,7 +169,7 @@ export function AccountFormDialog({
           <DialogDescription>
             {isEditMode
               ? "Update this account's details."
-              : "Add a financial account to start tracking it in FinanceOS."}
+              : "Add a financial account to start tracking it in LK Budget."}
           </DialogDescription>
         </DialogHeader>
 

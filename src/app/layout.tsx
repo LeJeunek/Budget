@@ -18,8 +18,27 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "FinanceOS",
+  title: "LK Budget",
   description: "A personal finance dashboard for tracking accounts, budgets, and financial goals in one place.",
+  // Two emblem variants (public/brand/emblem-{light,dark}.png), picked by the
+  // browser via `prefers-color-scheme` — the light-background mark for a
+  // light browser theme, the dark-background mark for a dark one, so the
+  // favicon always has legible contrast regardless of the user's OS/browser
+  // theme. `favicon.ico` (this route group's own convention favicon) stays
+  // as a plain fallback for browsers that don't evaluate `media` on `<link
+  // rel="icon">` at all.
+  icons: {
+    icon: [
+      {
+        url: "/brand/emblem-light.png",
+        media: "(prefers-color-scheme: light)",
+      },
+      {
+        url: "/brand/emblem-dark.png",
+        media: "(prefers-color-scheme: dark)",
+      },
+    ],
+  },
 }
 
 // Root layout: owns global providers only (theme, tooltips, toasts) and

@@ -14,6 +14,7 @@
 // the architecture.
 
 import { useState } from "react"
+import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -245,7 +246,28 @@ export default function LoginPage() {
   return (
     <Card className="w-full max-w-sm">
       <CardHeader>
-        <CardTitle>FinanceOS</CardTitle>
+        <div className="flex items-center gap-3">
+          {/* Two emblem variants (public/brand/emblem-{light,dark}.png),
+           * swapped via Tailwind's `dark:` variant (globals.css's
+           * `.dark`-ancestor custom-variant) rather than a client-side
+           * `useTheme()` read — pure CSS means no hydration-mismatch risk
+           * and no "flash of wrong emblem" before JS mounts. */}
+          <Image
+            src="/brand/emblem-light.png"
+            alt=""
+            width={40}
+            height={40}
+            className="size-10 shrink-0 dark:hidden"
+          />
+          <Image
+            src="/brand/emblem-dark.png"
+            alt=""
+            width={40}
+            height={40}
+            className="hidden size-10 shrink-0 dark:block"
+          />
+          <CardTitle>LK Budget</CardTitle>
+        </div>
         <CardDescription>Sign in to your account or create a new one.</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">
