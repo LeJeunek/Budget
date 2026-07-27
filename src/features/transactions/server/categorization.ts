@@ -499,21 +499,38 @@ export async function requestManualSuggestion(
       }
     }
 
-    const { suggested } = await generateSuggestionsForBatch(
-      userId,
-      [transaction],
-      categories,
-      "MANUAL_RECONSIDER",
-    )
-
-    if (suggested === 0) {
-      return { status: "unavailable" }
-    }
+    // [Phase 4a review-gate fix, Bug Hunter MEDIUM finding,
+    // manual-reconsider-race-false-unavailable.md] The old shape captured
+    // `generateSuggestionsForBatch`'s own `{ suggested }` count and returned
+    // `{ status: "unavailable" }` immediately whenever it was 0 -- but
+    // `suggested === 0` does NOT mean generation failed. It is also exactly
+    // what a concurrent "reconsider" request for this SAME transaction
+    // observes when it loses the insert race against the partial unique
+    // index (`category_suggestion_transactionId_pending_key`,
+    // prisma/schema.prisma): `generateSuggestionsForBatch`'s own P2002
+    // handling (`isPendingSuggestionAlreadyExistsError`) treats the loser's
+    // rejected `create` as an idempotent no-op, so its `suggested` count is 0
+    // even though a PENDING row now unambiguously exists for this
+    // transaction (the partial unique index's own guarantee: exactly one of
+    // two concurrent creates for the same transactionId succeeds). The fix:
+    // never branch on `suggested` at all -- unconditionally re-run the same
+    // "does a PENDING suggestion exist now" lookup this function already
+    // does above as its `existingPending` fast path. If the race winner's
+    // row is there (whether it is THIS call's own just-created row, or a
+    // concurrent winner's), this request's own "reconsider" intent was, in
+    // fact, satisfied, so it reports success referencing that row instead of
+    // a false negative. Only when NO suggestion exists even after this
+    // lookup does this genuinely mean generation itself failed (the model
+    // call errored, timed out, or returned zero confident suggestions). No
+    // `orderBy` is needed to disambiguate multiple PENDING rows here (unlike
+    // a plain "most recent" query might suggest) -- the partial unique index
+    // this whole fix relies on guarantees there can only ever be at most one
+    // PENDING row per `transactionId` in the first place.
+    await generateSuggestionsForBatch(userId, [transaction], categories, "MANUAL_RECONSIDER")
 
     const created = await db.categorySuggestion.findFirst({
       where: { userId, transactionId: transaction.id, status: "PENDING" },
       include: { suggestedCategory: { select: { name: true } } },
-      orderBy: { createdAt: "desc" },
     })
 
     if (!created?.suggestedCategoryId || !created.suggestedCategory) {

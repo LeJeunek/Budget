@@ -786,6 +786,49 @@ export async function requestCategorySuggestion(
  * `null` via the FK's `onDelete: SetNull`) is invalidated rather than
  * accepted — the suggestion is marked `REJECTED` and the caller is told the
  * category no longer exists.
+ *
+ * **Phase 4a review-gate fix (Bug Hunter HIGH finding,
+ * `docs/testing/bug-reports/accept-reject-category-suggestion-toctou-race.md`).**
+ * The initial `findFirst` + `status !== "PENDING"` check below is a
+ * best-effort fast path ONLY (a friendly, cheap "not found"/"already
+ * resolved" message for the common sequential case) — it is never trusted
+ * as the authority for whether THIS call is the one that gets to resolve
+ * the suggestion, because a concurrent Accept/Reject for the same
+ * `suggestionId` could read the identical PENDING snapshot at the same
+ * moment. The actual mutual-exclusion boundary is the atomic conditional
+ * `updateMany({ where: { ..., status: "PENDING" }, data: { status: ... } })`
+ * calls below (`claimed.count === 1` iff THIS call is the one that moved
+ * the row away from PENDING) — the same "claim by rows-affected" technique
+ * `lib/ai/rate-limit.ts`'s / `dashboard/server/monthly-summary.ts`'s
+ * `claimGenerationSlot` already establishes elsewhere in this codebase.
+ * Only after winning a claim does this function ever perform a
+ * transaction-mutating side effect; a losing caller gets an explicit
+ * "already resolved" failure instead of silently proceeding, which is what
+ * closes the original bug (a losing Accept could previously still change
+ * the transaction's category even though the suggestion's final, persisted
+ * status was `REJECTED`).
+ *
+ * **Ordering judgment call:** the ACCEPTED claim is taken *before*
+ * `updateTransaction` is called (not after), so the accept-vs-reject race
+ * above is closed even though `updateTransaction` can itself still fail
+ * (e.g. Bug Hunter LOW-MEDIUM finding below: the category was deleted in
+ * the narrow window between this function's own read and
+ * `updateTransaction`'s fresh category lookup). Reversing the order
+ * (`updateTransaction` first, claim second) would reopen the exact race
+ * this fix closes — two concurrent Accepts/Rejects could both pass an
+ * unclaimed `updateTransaction` call before either claimed anything. Taking
+ * the claim first instead means a specific, *known* failure mode
+ * (`updateTransaction` rejecting THIS exact category as "Category not
+ * found") must be handled by explicitly walking the claim back — see the
+ * "Category not found" branch below, which mirrors the already-null-at-read
+ * branch above by marking the row `REJECTED` instead of leaving it
+ * incorrectly `ACCEPTED`. Any OTHER `updateTransaction` failure (e.g. the
+ * transaction itself was deleted concurrently) instead reverts the claim
+ * back to `PENDING` — leaving the row `ACCEPTED` with no actual category
+ * change applied would misrepresent the persisted state exactly like the
+ * race this fix closes, and `PENDING` (rather than guessing `REJECTED`)
+ * keeps a retry possible for a failure this function cannot itself
+ * characterize as "the suggestion is invalid."
  */
 export async function acceptCategorySuggestion(
   input: unknown,
@@ -810,25 +853,79 @@ export async function acceptCategorySuggestion(
   }
 
   if (!suggestion.suggestedCategoryId) {
-    await db.categorySuggestion.update({
-      where: { id: suggestion.id },
+    // Already invalidated as of this read (the category was deleted before
+    // this request even started) — claim the REJECTED transition
+    // atomically too, rather than an unconditional write: a concurrent
+    // reject could be racing for this exact same outcome, and `count === 0`
+    // here just means it won first (the row ends up `REJECTED` either way,
+    // so there is no inconsistent-state risk on this branch — only the
+    // caller's own message needs to stay accurate).
+    const claimed = await db.categorySuggestion.updateMany({
+      where: { id: suggestion.id, userId: user.id, status: "PENDING" },
       data: { status: "REJECTED", resolvedAt: new Date() },
     })
+    if (claimed.count === 0) {
+      return fail("This suggestion has already been resolved")
+    }
     return fail("This suggested category no longer exists")
+  }
+
+  // The mutual-exclusion checkpoint (see this function's own doc comment
+  // above) — exactly one concurrent Accept/Reject can ever win this claim.
+  const claimed = await db.categorySuggestion.updateMany({
+    where: { id: suggestion.id, userId: user.id, status: "PENDING" },
+    data: { status: "ACCEPTED", resolvedAt: new Date() },
+  })
+  if (claimed.count === 0) {
+    return fail("This suggestion has already been resolved")
   }
 
   const updateResult = await updateTransaction({
     id: suggestion.transactionId,
     categoryId: suggestion.suggestedCategoryId,
   })
+
   if (!updateResult.success) {
+    // [Bug Hunter LOW-MEDIUM finding,
+    // accept-suggestion-category-deleted-mid-flight-stuck-pending.md] This
+    // `updateTransaction` call passes ONLY `categoryId` (never `accountId`),
+    // so a "Category not found" failure here can only mean its own fresh
+    // `assertOwnedCategory` lookup for THIS exact `suggestedCategoryId` came
+    // up empty — i.e. the category was deleted in the window between this
+    // function's read above and this call (the FK's `onDelete: SetNull`
+    // already nulled the column in the DB; this function was still holding
+    // the pre-delete id in `suggestion.suggestedCategoryId`). Treat this
+    // exactly like the already-null-at-read-time branch above: invalidate
+    // the suggestion and report the feature's own specific message, instead
+    // of leaving the row stuck on whatever the claim above just set it to
+    // and propagating `updateTransaction`'s generic error. This is a plain,
+    // uncontested write (not another atomic claim) — this request already
+    // owns the row exclusively, since it just won the ACCEPTED claim above
+    // and no concurrent Accept/Reject can still be racing for a row that
+    // has already left PENDING.
+    if (updateResult.error === "Category not found") {
+      await db.categorySuggestion.update({
+        where: { id: suggestion.id },
+        data: { status: "REJECTED", resolvedAt: new Date() },
+      })
+      return fail("This suggested category no longer exists")
+    }
+
+    // Any other failure (e.g. the transaction itself was deleted
+    // concurrently, surfacing as "Transaction not found") means the
+    // category-change side effect never actually took place, despite this
+    // request having just won the ACCEPTED claim above — release the claim
+    // back to PENDING (see this function's own doc comment on this
+    // ordering judgment call) rather than leaving the row ACCEPTED with no
+    // corresponding effect. Best-effort: if the row itself no longer exists
+    // (e.g. cascade-deleted alongside its transaction), this simply matches
+    // zero rows.
+    await db.categorySuggestion.updateMany({
+      where: { id: suggestion.id, userId: user.id, status: "ACCEPTED" },
+      data: { status: "PENDING", resolvedAt: null },
+    })
     return updateResult
   }
-
-  await db.categorySuggestion.update({
-    where: { id: suggestion.id },
-    data: { status: "ACCEPTED", resolvedAt: new Date() },
-  })
 
   return updateResult
 }
@@ -839,6 +936,13 @@ export async function acceptCategorySuggestion(
  * suggestion — the same suggestion is not immediately re-offered
  * automatically for this transaction, since `generateAutomaticSuggestionsForUser`'s
  * own query only ever considers a transaction with no existing PENDING row.
+ *
+ * **Phase 4a review-gate fix (Bug Hunter HIGH finding, see
+ * `acceptCategorySuggestion`'s doc comment above for the full defect and the
+ * shared atomic-claim technique):** the actual `PENDING -> REJECTED`
+ * transition is an atomic conditional `updateMany`, not a read-then-write —
+ * a concurrent Accept racing this exact `suggestionId` can now never "win"
+ * after this call has already claimed it.
  */
 export async function rejectCategorySuggestion(
   input: unknown,
@@ -852,20 +956,24 @@ export async function rejectCategorySuggestion(
   }
   const { suggestionId } = parsed.data
 
+  // Fast-path existence/ownership check only — see
+  // `acceptCategorySuggestion`'s doc comment on why this is never trusted
+  // as the authority for the actual state transition below.
   const suggestion = await db.categorySuggestion.findFirst({
     where: { id: suggestionId, userId: user.id },
+    select: { id: true },
   })
   if (!suggestion) {
     return fail("Suggestion not found")
   }
-  if (suggestion.status !== "PENDING") {
+
+  const claimed = await db.categorySuggestion.updateMany({
+    where: { id: suggestionId, userId: user.id, status: "PENDING" },
+    data: { status: "REJECTED", resolvedAt: new Date() },
+  })
+  if (claimed.count === 0) {
     return fail("This suggestion has already been resolved")
   }
 
-  await db.categorySuggestion.update({
-    where: { id: suggestion.id },
-    data: { status: "REJECTED", resolvedAt: new Date() },
-  })
-
-  return ok({ suggestionId: suggestion.id })
+  return ok({ suggestionId })
 }
