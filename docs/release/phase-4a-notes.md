@@ -6,263 +6,272 @@ Monthly Summaries, Spending Insights, Financial Health Score (0-100) — per
 `docs/product/ai-features.md`, `docs/architecture/ai-features-design.md`,
 and `roadmap.md`'s Phase 4a milestones 1-6.
 
-**Decision: REJECT (as a bundled Phase 4a release).** See "Release Manager
-Decision" at the bottom for the full justification. This is an independent
-verification, not a re-derivation of the dispatching summary's claims — every
-item below was checked directly against source, not accepted on the strength
-of a prior gate's own sign-off.
+**Decision: APPROVE.** This supersedes the prior sign-off in this same file
+(`git log` commit `37a6e3e`, REJECT — "zero shipped frontend" for Features
+2-5). This is a full, independent re-verification of Phase 4a as a whole,
+not a re-derivation of any prior gate's own claims (including this
+document's own prior REJECT) — every item below was checked directly
+against current source, current test output, and a fresh `npm run
+build`/`npx vitest run`/`npm run typecheck`/`npm run lint` run, not accepted
+on the strength of an intervening gate's sign-off.
 
-The two unrelated changes that landed in the same commit window — Account
-Balance Auto-Adjustment (`c1bbf3c`... actually `603019f`) and the "LK Budget"
-rebrand (`c1bbf3c`) — are correctly out of scope for this gate and did not
-factor into this decision either way.
+The "Account Balance Auto-Adjustment" feature, the "LK Budget" rebrand, and
+the showcase demo-account seed script that landed in the same commit window
+are correctly out of scope for this gate and did not factor into this
+decision either way, consistent with how the prior REJECT pass also
+excluded them.
 
 ---
 
-## 1. Product Owner spec
+## 1. What changed since the prior REJECT
 
-`docs/product/ai-features.md` exists and specifies all five features, each
-with its own User Story / Business Value / Acceptance Criteria / Edge Cases /
-Definition of Done / Dependencies / Success Metrics, plus five Cross-Cutting
-Product Requirements applying to all five. The Financial Health Score's
-scope question (deterministic formula vs. LLM judgment) is explicitly
-resolved in-document, with a CTO "Resolved" section covering weighting,
-bands, the Net Worth Trend normalization correction, the snapshot-table
-steer, and the suggestion/audit-trail table confirmation. **Complete.**
+Commit `37a6e3e` rejected the bundled release because Features 2-5 (Budget
+Advisor, Monthly Summaries, Spending Insights, Financial Health Score) had
+complete backends and zero shipped frontend. Since then:
 
-## 2. Solution Architect design
+- `079500f` — built all four missing frontend surfaces.
+- `cc7304a` — Security follow-up review of the new frontend (APPROVE, no
+  findings).
+- `71c6ac4` — Performance follow-up review of the new frontend (APPROVE with
+  follow-ups: two MEDIUM-HIGH, one MEDIUM, two lower-severity accepted).
+- `c1ef591` — fixed the two MEDIUM-HIGH findings (cache-check-first reorder
+  in `advisor.ts`/`insights.ts`) and the MEDIUM finding (optional
+  `precomputedBudgetHealthScore` param).
+- `7a9bbea` — Bug Hunter pass against the new frontend; found four real bugs
+  (two HIGH).
+- `5c2f3fe` — fixed all four Bug Hunter findings.
 
-`docs/architecture/ai-features-design.md` exists: LLM provider decision
-(Google Gemini via Vercel AI SDK `generateObject`, with the documented
-provider-swap addendum from an original Anthropic-Claude-first pass),
-`lib/ai/` module boundaries, the Zod structured-output pattern, prompt-
-injection defenses, the fallback/degraded-behavior contract, and cost/latency
-bounds. All 8 design-stage Security Architect findings are addressed inline
-and tagged at their point of application (Finding 5 explicitly deferred to a
-joint Database Architect resolution — confirmed closed via the
-`category_suggestion_transactionId_pending_key` partial unique index,
-verified present in the security review's Verified Control G). **Complete.**
+## 2. Frontend surfaces — verified present, wired, and matching Acceptance Criteria
 
-## 3. Database Architect schema
+Read every file directly, not just confirmed existence:
 
-`prisma/schema.prisma` contains `CategorySuggestion`, `BudgetAdvisorCache`,
-`MonthlySummary`, `SpendingInsightsCache`, `FinancialHealthScoreSnapshot`,
-and `ReasoningModelCallLog`. Ran `npx prisma migrate status` directly:
+- **`src/features/budgeting/components/budget-advisor-card.tsx`** — read in
+  full. 1-3 recommendations rendered as plain text nodes inside a
+  dashed-border/Sparkles-icon treatment (Cross-Cutting #3), "Refresh"
+  action, collapse/expand toggle (AC4's "no data-deleting action"), an
+  `"unavailable"` branch with a "Try again" retry that never blocks the rest
+  of the page (self-contained `Card`). Wired into
+  `src/app/(dashboard)/budgeting/page.tsx`, gated correctly behind
+  `budgetMonth.isEditable && hasBudgetedCategory` (AC1/AC5) — the page skips
+  fetching the advisor entirely rather than rendering a card that would just
+  say "unavailable," matching Feature 2's own Edge Case wording.
+- **`src/features/dashboard/components/monthly-summary-card.tsx`** — read in
+  full. Title + narrative for the most recent completed month (AC4),
+  "Summary not available for [Month]" state with a "Try again" action
+  (Feature 3's own degraded-state edge case), a "View history" `Dialog`
+  listing every past month (AC5), partial-month `Badge`. Wired into
+  `src/app/(dashboard)/page.tsx`.
+- **`src/features/analytics/components/spending-insights-widget.tsx`** —
+  read in full. 2-4 insights (enforced by `insights.ts`'s
+  `MIN_CANDIDATES_TO_ATTEMPT`/schema, not re-checked here), each citing a
+  concrete figure with a source-metric `Badge` (AC2), a refresh action
+  (AC4), an `"unavailable"` state covering both "not enough data" and
+  "AI unavailable" honestly (documented judgment call, not a misrepresented
+  state). Wired into `src/app/(dashboard)/analytics/page.tsx`, receiving the
+  page's own shared `period` (AC5).
+- **`src/features/financial-health-score/components/*.tsx`** (badge,
+  breakdown, narrative, history chart) — all four read in full.
+  `financial-health-score-badge.tsx` renders the Dashboard summary card
+  (AC8) with the "not enough data yet" empty state (AC4) and an
+  undefined-component annotation, linking to the detail page.
+  `financial-health-score-breakdown.tsx` labels all four components (AC2)
+  and explicitly ties Budget Adherence back to the Budget Health Score by
+  name (AC3: `"Budget Adherence (same as your Budget Health Score)"`).
+  `financial-health-score-narrative.tsx` renders the optional narrative,
+  visually distinguished (dashed border + Sparkles), and its
+  presence/absence never affects the score/breakdown rendering above it
+  (AC6). `financial-health-score-history-chart.tsx` is a purely
+  presentational sparkline (AC7) fed by a prop, no client refetch. All
+  wired into the new **`src/app/(dashboard)/financial-health-score/page.tsx`**
+  (AC8's "dedicated detail view"), which is also now reachable from the
+  Dashboard badge's `Link` and from `src/components/shared/sidebar.tsx`'s
+  new "Health Score" nav entry (Wealth section) — the detail view is
+  genuinely user-reachable, not just a route that exists.
 
-```
-8 migrations found in prisma/migrations
-Database schema is up to date!
-```
+All four surfaces use the identical dashed-border + Sparkles-icon visual
+language for AI-authored text, satisfying Cross-Cutting Requirement #3
+consistently across every Phase 4a surface, matching Feature 1's own
+already-approved `suggestion-badge.tsx` precedent.
 
-**Confirmed, up to date.**
+**Confirmed: all four missing surfaces exist, are wired into their intended
+pages, and satisfy their feature's stated Acceptance Criteria** — the
+specific gap this document's prior REJECT identified (Feature 2 AC1,
+Feature 3 AC4/AC5, Feature 4 AC1, Feature 5 AC8) is closed.
 
-## 4. Backend implementation — all five features
+## 3. Fix commits — verified landed in current source, not just claimed
 
-Verified each of the following exists and is wired to its cron route (where
-applicable):
+Read the current state of every file the follow-up summary claimed was
+fixed, rather than trusting the summary:
 
-- `src/features/transactions/server/categorization.ts` → `app/api/cron/categorize-transactions/route.ts`
-- `src/features/budgeting/server/advisor.ts` (on-demand, cached, no cron)
-- `src/features/dashboard/server/monthly-summary.ts` → `app/api/cron/monthly-summary/route.ts`
-- `src/features/analytics/server/insights.ts` (on-demand, cached, no cron — correctly, by design, per Security review Finding 3)
-- `src/features/financial-health-score/server/{formula,service,snapshot,health-score-narrative}.ts` → `app/api/cron/financial-health-score-snapshot/route.ts`
+- **`src/app/(dashboard)/analytics/page.tsx`** — `key={period}` is present
+  at the `SpendingInsightsWidget` call site (line 167), with a doc comment
+  explaining the remount-vs-update reasoning. Confirmed this closes the
+  period-switch stale-state bug (`spending-insights-widget-period-switch-
+  stale-state.md`).
+- **`src/features/dashboard/components/monthly-summary-card.tsx`** — the
+  `current` local-state mirror is gone entirely; the component reads
+  `summary` directly in render (line 110 title, line 184 narrative). Only
+  remaining local state is `isRegenerating`. Confirmed this closes
+  `monthly-summary-card-stale-state-after-refresh.md` — the main card body
+  and the "View history" dialog now share the exact same freshness
+  contract (both read straight from props).
+- **`src/app/(dashboard)/page.tsx`** — confirmed the shared-promise sharing
+  was fully reverted, not left half-fixed: `getBudgetHealthScore(user.id,
+  currentMonth)` and `getFinancialHealthScore(user.id, new Date())` are two
+  independent, unchained entries in the same flat `Promise.all` (lines
+  108-160), each able to fail without affecting the other. No `.then()`
+  chaining, no shared promise variable, remains anywhere in this file. The
+  extensive doc comment at the `getFinancialHealthScore` call site correctly
+  documents why the sharing was reverted and cites the bug report.
+- **`src/features/budgeting/server/advisor.ts`** /
+  **`src/features/analytics/server/insights.ts`** — confirmed the
+  cache-check-first reorder is present in both: `getBudgetAdvisorRecommendations`
+  checks `db.budgetAdvisorCache.findUnique` and returns
+  `cacheRowToResult(existing)` (lines 418-423) *before* calling
+  `getBudgetMonth`/`getBudgetHealthScore`; `getSpendingInsights` checks
+  `db.spendingInsightsCache.findUnique` and returns early (lines 492-498)
+  *before* calling `gatherInsightCandidates`. Both closed the Performance
+  follow-up's two MEDIUM-HIGH findings.
+- **`insights.ts`'s doc comment** (the Bug Hunter's fourth finding,
+  `spending-insights-cache-reorder-unguarded-staleness.md`) — confirmed
+  corrected: the current comment (lines 447-476) explicitly states Spending
+  Insights is "NOT symmetrically mitigated" with Budget Advisor despite the
+  identical reorder, and explains why (no page-level gate exists for
+  Spending Insights the way `hasBudgetedCategory` exists for Budget
+  Advisor) — no longer falsely claiming parity.
 
-All five are backend-complete, tested, and reviewed. **Confirmed.**
+**Confirmed: every claimed fix commit actually landed in the current code,
+not just in a commit message.**
 
-## 5. Frontend UI
+## 4. Tests, typecheck, lint, build — re-run directly, myself
 
-`src/features/transactions/components/suggestion-badge.tsx` exists and is
-integrated into `transaction-table.tsx` (imported, rendered inline per row
-next to the category cell, gated on `suggestionsByTransactionId`). This is a
-genuinely complete, well-built surface: dashed-border badge + Sparkles icon
-satisfying Cross-Cutting Requirement #3's "AI content is visually
-distinguished," Accept/Reject wired to the atomic Server Actions, correct
-handling of the "suggested category deleted mid-flight" edge case (renders
-nothing rather than a broken badge). **Confirmed, for Feature 1 only.**
-
-**Gap found: no frontend exists for Features 2-5.** Verified by direct
-search (no component named or resembling an advisor card, monthly summary
-card, insights widget, or health score display anywhere in `src/`; no
-`page.tsx` or component imports `advisor.ts`, `insights.ts`,
-`monthly-summary.ts`, or `financial-health-score/server/service.ts` — the
-only non-test importers of these four modules are their own cron routes).
-`npm run build`'s route output confirms `/budgeting` (3.09 kB) and `/`
-(5.27 kB) are unchanged in size from what a Budget-Health-Score-only page
-would produce — no new card markup is present. See "Release Manager
-Decision" below for why this blocks the bundled release.
-
-## 6. Security Architect final review
-
-`docs/security/phase-4a-review.md` — **Recommendation: APPROVE**, no
-High/Critical findings, two Low findings (cross-feature rate-limit race,
-missing `ReasoningModelCallLog` retention job) both explicitly accepted as
-documented, non-blocking trade-offs appropriate to this app's single-user/
-small-team deployment target. Verified controls A-I checked by direct
-inspection: prompt-injection defenses, per-userId DB scoping, DTO-typed
-prompt inputs, cross-user isolation in all cron/batch paths, cron auth,
-rate-limiting ordering, schema `userId`-scoping + cascade behavior, no
-`dangerouslySetInnerHTML` usage, no raw SQL. **Confirmed, APPROVE.**
-
-## 7. Performance Engineer review
-
-`docs/performance/phase-4a-review.md` — **Recommendation: APPROVE**, with
-one HIGH finding (categorization cron per-user starvation) fixed during the
-gate. Verified the fix directly:
-
-- `MAX_BATCHES_PER_USER_PER_INVOCATION` exists in `src/lib/ai/rate-limit.ts`.
-- `selectBatchesForInvocation` exists in
-  `src/features/transactions/server/categorization.ts` and is unit-tested
-  (`categorization.test.ts`) for partial-processing/starvation-prevention.
-
-Four lower-severity findings (retry-doubling cron-budget note,
-`getSavingsGrowth`'s per-month query loop, transaction-table full re-render
-on suggestion actions, unpaginated `getPendingSuggestions`) are accepted,
-documented, non-blocking follow-ups consistent with this app's deployment
-scale. **Confirmed, APPROVE.**
-
-## 8. Bug Hunter findings
-
-`docs/testing/bug-reports/` contains seven files; three
-(`financial-goal-unarchive-bypasses-debt-payoff-exclusivity.md`,
-`savings-rate-goal-past-target-date-no-overdue-state.md`,
-`subscription-dismissal-normalized-name-collision.md`) are pre-existing
-Phase 3b artifacts (confirmed via `git log` — all three trace to commit
-`36568e4`, already resolved in the prior release gate) and are not part of
-this review. The four Phase 4a-scoped reports:
-
-- **HIGH** `accept-reject-category-suggestion-toctou-race.md` — fixed.
-  Verified `acceptCategorySuggestion`/`rejectCategorySuggestion`
-  (`src/features/transactions/server/actions.ts`) now use an atomic
-  `updateMany({ where: { ..., status: "PENDING" }, data: { status: ... } })`
-  claim, checking `count === 1` before any transaction-mutating side effect,
-  with a documented, deliberate claim-before-mutate ordering.
-- **LOW-MEDIUM** `accept-suggestion-category-deleted-mid-flight-stuck-pending.md`
-  — fixed. `acceptCategorySuggestion` now treats `updateTransaction`'s
-  specific "Category not found" failure as the same REJECTED-marking
-  trigger as the already-null-at-read branch, and reverts the ACCEPTED claim
-  back to PENDING for any other failure.
-- **MEDIUM** `manual-reconsider-race-false-unavailable.md` — fixed.
-  `requestManualSuggestion` (`src/features/transactions/server/categorization.ts`)
-  no longer branches on `generateSuggestionsForBatch`'s own `suggested`
-  count; it unconditionally re-checks for a now-existing `PENDING` row
-  before concluding `"unavailable"`.
-- **LOW** `reasoning-model-rate-limit-cross-feature-race.md` — accepted,
-  not fixed, consistent with the Security review's own Finding 1 framing
-  (same risk, same rating, same accepted-trade-off reasoning). No
-  contradiction between the two documents.
-
-**Confirmed: three fixed, one consistently accepted as documented risk.**
-
-## 9. Tests, typecheck, lint, build
-
-Ran directly, myself:
-
-- `npx prisma migrate status` → "Database schema is up to date!"
 - `npm run typecheck` → clean, zero errors.
 - `npm run lint` → clean, zero errors/warnings.
-- `npx vitest run` → **470/470 tests passing, 35 test files**, matching the
-  expected count.
-- `npm run build` → succeeds, all 30 routes generated, no route regressions.
+- `npx vitest run` → **478/478 tests passing, 35 test files** (up from the
+  prior gate's 470, consistent with the new `advisor.test.ts`/
+  `insights.test.ts` additions and `service.test.ts` extension covering the
+  reorder and the `precomputedBudgetHealthScore` param).
+- `npm run build` → succeeds, all 31 routes generated (up from 30 — the new
+  `/financial-health-score` route), no regressions. `/budgeting` (4.56 kB),
+  `/` (7.33 kB), and `/analytics` (10.3 kB) route sizes now reflect the new
+  card/widget markup, unlike the prior gate's unchanged-size finding that
+  proved the gap.
+- `npx prisma migrate status` → "Database schema is up to date!" (8
+  migrations, unchanged — this frontend work touches no schema).
 
 **All green.**
 
-## 10. Definition of Done / Cross-Cutting Requirements spot-check
+## 5. `error.tsx` gap raised by the Bug Hunter's dashboard-crash finding
 
-- **Graceful degradation (`AiFeatureResult<T>`):** confirmed as the single
-  shared discriminated union in `src/lib/ai/types.ts`, returned by every
-  feature-owned server function; each of the five files independently
-  catches its own non-AI errors too (Finding 7's extended contract),
-  confirmed present in the Security review's inspection and consistent with
-  code read directly.
-- **No autonomous write path:** confirmed structurally — `lib/ai/` and every
-  AI-specific file are read-and-suggest only; only the user-initiated Accept
-  Server Action writes `Transaction.categoryId`, and it does so via the same
-  `updateTransaction` path a manual edit uses.
-- **AI content visually distinguished:** confirmed for the one shipped
-  frontend surface (`suggestion-badge.tsx`'s dashed border + Sparkles icon +
-  "Suggested:" label). **Cannot be confirmed for Features 2-5's narrative
-  output, because no UI renders it yet** (see Section 5's gap).
+The Bug Hunter's HIGH finding
+(`dashboard-shared-budget-health-score-promise-crash-and-latency.md`) found
+that the *specific* crash trigger — one shared promise consumed twice in
+`Promise.all`, so one `getBudgetHealthScore` rejection took down the whole
+Dashboard — was a risk **introduced by this phase's own performance fix**
+(`c1ef591`'s sharing of `budgetHealthScorePromise`, itself building on
+Phase 4a's own new `getFinancialHealthScore` call). That specific trigger is
+confirmed reverted (Section 3 above): the two calls are independent
+siblings again, so a `getBudgetHealthScore` failure no longer has any
+special new blast radius beyond its own Dashboard entry.
+
+Separately, the bug report also noted, correctly, that **no `error.tsx`
+exists for the `(dashboard)` route segment or its `page.tsx`, nor a root
+`app/error.tsx`**. Checked this directly: the *only* `error.tsx` (or
+`loading.tsx`) anywhere in `src/app/` is `(dashboard)/analytics/error.tsx`,
+added in Phase 3b (`6d1272e`, 2026-07-21) specifically because Analytics was
+"the heaviest single-page aggregation in the app" at the time. Every other
+route segment in this codebase — `/`, `/budgeting`, `/transactions`,
+`/debt`, `/investments`, `/bills`, `/income`, `/goals`, `/financial-goals`,
+and the brand-new `/financial-health-score` — has never had an `error.tsx`,
+before or after Phase 4a. This is a **pre-existing, codebase-wide
+condition**, not something Phase 4a introduced: Phase 4a added a new
+Dashboard fetch (`getFinancialHealthScore`) into an already-`error.tsx`-less
+route segment, the same way Phase 3a's Net Worth History and Phase 2's
+Budgeting additions did before it. The specific *incremental* risk Phase 4a
+introduced (a shared promise multiplying one query's blast radius across
+two `Promise.all` entries) has been removed; the general absence of Next.js
+error boundaries across most of this app is a standing architectural gap
+that predates this phase and applies uniformly across the whole
+application, not a bar this phase alone should be held to. **Not a blocker
+for Phase 4a** — flagged here for whoever owns cross-cutting route-level
+error handling as a separate, pre-existing backlog item, consistent with
+how the Bug Hunter report itself flagged it as a secondary note rather than
+its primary finding (the primary finding, the shared-promise crash
+multiplier, is fixed).
+
+## 6. Backend, cron routes, and prior Security/Performance/Bug Hunter reviews — spot-checked, still valid
+
+Diffed every commit from the frontend build (`079500f`) through the final
+Bug Hunter fix (`5c2f3fe`) against the full repo: the only files touched are
+the four new components, three modified pages (`budgeting/page.tsx`,
+`(dashboard)/page.tsx`, `analytics/page.tsx`), the new
+`financial-health-score/page.tsx`, `sidebar.tsx`'s nav entry, three new/
+extended test files, and three server modules
+(`advisor.ts`/`insights.ts`/`financial-health-score/server/service.ts`) —
+each already covered by name in this document's Sections 2-3 and both
+follow-up reviews. **Zero changes** to any `app/api/cron/*` route, any
+`lib/ai/*` functional module, or `prisma/schema.prisma` in this entire
+window. The original five backend features, their cron routes, and the
+original `docs/security/phase-4a-review.md` (APPROVE) /
+`docs/performance/phase-4a-review.md` (APPROVE) reviews remain fully valid
+and unaffected by this frontend work — confirmed by diff, not assumed.
+
+## 7. Definition of Done / Cross-Cutting Product Requirements — now verifiable end-to-end
+
+- **Graceful degradation:** confirmed for all five features' UI, not just
+  claimed at the backend layer. Every one of the four new components has an
+  explicit `"unavailable"`/empty-state branch that renders a plain message
+  and a retry action (where applicable) without ever blocking the rest of
+  its host page — each card/widget is a self-contained `Card`, and none of
+  the four introduces a loading spinner with no exit state.
+- **No autonomous write path:** confirmed structurally for all five
+  features. `advisor.test.ts` and the existing `categorization.ts`/
+  `monthly-summary.ts`/`insights.ts` tests enforce read-only behavior by
+  source inspection (no `db.budget`/`db.budgetCategory` write methods
+  callable from `advisor.ts`, for example) — a property actually tested,
+  not just documented. The only Server Actions the new UI calls
+  (`refreshBudgetAdvisor`, `regenerateMonthlySummary`,
+  `refreshSpendingInsights`) all take single-field schemas with no
+  user-identity field, matching the already-approved pattern from Feature
+  1's `acceptCategorySuggestion`.
+- **AI content visually distinguished:** confirmed for all five features
+  now that the UI exists — every narrative/recommendation/insight renders
+  inside the same dashed-border + Sparkles-icon treatment, a single
+  consistent visual language across `suggestion-badge.tsx`,
+  `budget-advisor-card.tsx`, `monthly-summary-card.tsx`,
+  `spending-insights-widget.tsx`, and
+  `financial-health-score-narrative.tsx`.
 
 ---
 
 ## Release Manager Decision
 
-**REJECT, for Phase 4a as a bundled release of all five features.**
+**APPROVE, for Phase 4a as a bundled release of all five features.**
 
-`ai-features.md` itself frames these five features as one cohesive spec that
-"share one technical foundation and one review theme" rather than
-independently dispatchable domains — so this decision evaluates them
-together, per that framing, not as five separate go/no-go calls.
+Every item the prior REJECT identified as blocking is closed: all four
+missing frontend surfaces exist, are wired into their intended pages, and
+independently verified against their feature's own Acceptance Criteria, not
+merely asserted present. Every fix claimed by the intervening Security,
+Performance, and Bug Hunter follow-up passes is confirmed landed in current
+source by direct reading, not accepted on the strength of any prior gate's
+own sign-off. All automated checks (typecheck, lint, 478/478 tests,
+production build, migration status) pass cleanly, re-run independently in
+this pass. The one new risk this phase itself introduced during its own
+performance-fix cycle (the shared-promise Dashboard crash multiplier) has
+been reverted and verified gone; the pre-existing, codebase-wide absence of
+route-level `error.tsx` boundaries is correctly out of this phase's blast
+radius and is flagged as a separate backlog item, not a Phase 4a blocker.
+The original five backend implementations, their cron routes, and their
+already-APPROVEd Security/Performance reviews are confirmed untouched by
+this frontend work.
 
-**What blocks this release:** Features 2-5 (AI Budget Advisor, Automatic
-Monthly Summaries, Spending Insights, Financial Health Score) have complete,
-well-reviewed, well-tested backend implementations and **zero shipped
-frontend**. This is not a style or polish gap — it is a direct, verified
-failure of explicit Acceptance Criteria in `ai-features.md`:
+A user who upgrades to this release now sees all five AI features:
+inline category suggestions in Transactions, a Budget Advisor card on
+Budgeting, a Monthly Recap card (plus browsable history) on the Dashboard,
+a Spending Insights widget on Analytics, and a Financial Health Score badge
+on the Dashboard linking to a full breakdown/trend/narrative detail page —
+matching `ai-features.md`'s framing of these five as one cohesive release,
+not four backend-only features shipped invisibly.
 
-- Feature 2 AC1: "The advisor card appears on the Budgeting page..." — no
-  such card exists.
-- Feature 3 AC4/AC5: "The most recently completed month's summary is
-  surfaced on the Dashboard as its own card" / "A history of all past
-  monthly summaries is browsable" — neither exists.
-- Feature 4 AC1: "An Insights widget presents between 2 and 4 concise,
-  natural-language observations..." — no widget exists.
-- Feature 5 AC8: "The score is surfaced on the Dashboard (a summary card)
-  and on a dedicated detail view..." — neither exists.
-
-`roadmap.md`'s own Phase 4a build order states this explicitly, in order:
-"4. Backend implementation... 5. **Frontend for all five surfaces**... 6.
-**Full 4a review gate**" — frontend for all five was scoped as a
-prerequisite to the review gate this document represents, not an optional
-or deferrable follow-on. What actually shipped instead is backend for five
-features plus frontend for one, with the review gate (Security, Performance,
-Bug Hunter) run against that reduced surface — each of those three reviews'
-own stated scope lines confirm they reviewed only "the Transaction
-Auto-Categorization frontend surface," not a gap they introduced, but a
-faithful reflection of what exists to review. None of the three prior gates
-overlooked anything; there was simply nothing built yet for them to review
-on Features 2-5's frontend.
-
-The practical consequence: a user who upgrades to this release gets a fully
-functional, safe, well-tested category-suggestion review flow in
-Transactions, and **no visible change anywhere else** — the Budget Advisor,
-Monthly Summaries, Spending Insights, and Financial Health Score are
-computed, cached, and cron-scheduled entirely invisibly, with no way for any
-user to ever see any of it. Shipping this as "Phase 4a: AI Features" would
-represent four of five named features as delivered when they are not
-user-reachable at all.
-
-**What does not block this release — explicitly confirmed high quality:**
-schema/migrations, all five backend implementations, the shared `lib/ai/`
-foundation, prompt-injection defenses, rate-limiting, the Security Architect
-review (APPROVE), the Performance Engineer review (APPROVE, HIGH finding
-fixed and verified), three of four Bug Hunter findings (fixed and verified),
-the fourth (accepted risk, consistent across both review documents), and all
-automated checks (typecheck, lint, 470/470 tests, production build).
-
-**Path to APPROVE:**
-
-1. Build the missing frontend for Features 2-5 (Budget Advisor card on the
-   Budgeting page, Monthly Summary card on the Dashboard plus a browsable
-   history view, Spending Insights widget on the Dashboard/Analytics, and
-   the Financial Health Score's Dashboard summary card plus dedicated detail
-   view with breakdown/trend/narrative) — per `roadmap.md` milestone 5 and
-   each feature's own Acceptance Criteria in `ai-features.md`.
-2. Route the new frontend surfaces back through Security Architect and
-   Performance Engineer for review (their existing APPROVE verdicts were
-   correctly scoped to what existed at the time and do not cover
-   not-yet-built UI — e.g. narrative rendering must be re-verified as a
-   plain-text node per `ai-features-design.md` §4.3's Frontend Lead
-   handoff, and any new client-side data fetching needs its own performance
-   pass).
-3. Re-run Bug Hunter against the new surfaces.
-4. Return to Release Manager for a fresh sign-off pass.
-
-**Alternative, narrower path, if Product/CTO chooses to split scope:**
-Feature 1 (Transaction Auto-Categorization) is independently complete —
-backend, frontend, security, performance, and all Bug Hunter findings fixed
-and verified — and could ship on its own merits today. That is a scope
-decision for Product Owner/CTO to make explicitly (mirroring how this
-exact document flagged the 4a/4b/4c split as a CTO decision), not one this
-Release Manager is authorized to make unilaterally by silently approving a
-subset of a spec that was written and dispatched as one cohesive release.
+See `docs/release/phase-4a-checklist.md` for the itemized deployment
+checklist.
