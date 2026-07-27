@@ -1,6 +1,6 @@
 "use server"
 
-import type { Prisma, PrismaClient } from "@prisma/client"
+import type { AccountType, Prisma, PrismaClient } from "@prisma/client"
 
 import { getCurrentUser } from "@/lib/auth"
 import { db } from "@/lib/db"
@@ -31,6 +31,11 @@ import {
   requestManualSuggestion,
   type ManualSuggestionResult,
 } from "@/features/transactions/server/categorization"
+import {
+  adjustBalanceForTransactionAmount,
+  reverseBalanceForTransactionAmount,
+  applyAggregateBalanceDelta,
+} from "@/features/transactions/server/balance-adjustment"
 
 /**
  * Mutating Server Actions for the Transactions module. Per
@@ -54,6 +59,12 @@ import {
 // client interchangeably.
 type DbClient = PrismaClient | Prisma.TransactionClient
 
+/** Minimal account shape `assertUsableAccount` returns on success — just
+ * enough for `balance-adjustment.ts`'s functions (which only need `id` and
+ * `type`), so callers don't need a second `db.account` round-trip purely to
+ * learn the account's type for the balance-adjustment sign rule. */
+type UsableAccount = { id: string; type: AccountType }
+
 /**
  * Verifies an account exists, belongs to `userId`, and is not archived.
  * Shared by `createTransaction` and `updateTransaction` (when reassigning
@@ -61,11 +72,16 @@ type DbClient = PrismaClient | Prisma.TransactionClient
  * archived account: must be blocked" rule
  * (docs/product/accounts.md edge case, referenced by
  * docs/product/transactions.md AC12) lives in exactly one place.
+ *
+ * Returns the account's `id`/`type` on success (Account Balance
+ * Auto-Adjustment addition, docs/product/accounts-balance-auto-adjustment.md)
+ * so every caller that needs to adjust this account's balance already has
+ * the `type` its sign rule depends on, without a second query.
  */
 async function assertUsableAccount(
   userId: string,
   accountId: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; account: UsableAccount } | { ok: false; error: string }> {
   const account = await db.account.findFirst({
     where: { id: accountId, userId },
   })
@@ -78,7 +94,7 @@ async function assertUsableAccount(
       error: "Cannot assign a transaction to an archived account",
     }
   }
-  return { ok: true }
+  return { ok: true, account: { id: account.id, type: account.type } }
 }
 
 /**
@@ -145,6 +161,16 @@ async function resolveTagIds(
  * owned by another user (see `assertOwnedCategory`) — both are
  * cross-resource ownership/state checks Zod cannot express, so they happen
  * here rather than in `CreateTransactionSchema`.
+ *
+ * Account Balance Auto-Adjustment (Criterion 1,
+ * docs/product/accounts-balance-auto-adjustment.md): the new transaction's
+ * signed `amount` is applied to `accountId`'s balance atomically with the
+ * row's creation — both live in the same `db.$transaction`, so a
+ * transaction can never be recorded without its balance effect (or vice
+ * versa). `adjustBalanceForTransactionAmount` itself no-ops for an
+ * Investment/Retirement/Crypto account (Criterion 6's guard), so this call
+ * is unconditional here rather than branching on `accountCheck.account.type`
+ * first.
  */
 export async function createTransaction(
   input: unknown,
@@ -170,17 +196,29 @@ export async function createTransaction(
     }
   }
 
-  const created = await db.transaction.create({
-    data: {
-      userId: user.id,
+  const created = await db.$transaction(async (tx) => {
+    const row = await tx.transaction.create({
+      data: {
+        userId: user.id,
+        accountId,
+        categoryId: categoryId ?? null,
+        merchant,
+        amount,
+        date,
+        notes: notes ?? null,
+      },
+      include: TRANSACTION_INCLUDE,
+    })
+
+    await adjustBalanceForTransactionAmount(
+      tx,
+      user.id,
       accountId,
-      categoryId: categoryId ?? null,
-      merchant,
+      accountCheck.account.type,
       amount,
-      date,
-      notes: notes ?? null,
-    },
-    include: TRANSACTION_INCLUDE,
+    )
+
+    return row
   })
 
   return ok(toTransaction(created))
@@ -204,6 +242,38 @@ export async function createTransaction(
  * account remains fully editable for every other field — the archived check
  * only applies when `accountId` is present in this update (i.e. actually
  * being reassigned), never as a blanket block on editing the transaction.
+ *
+ * Account Balance Auto-Adjustment (Criterion 2,
+ * docs/product/accounts-balance-auto-adjustment.md): re-derives the balance
+ * impact for every combination of `amount`/`accountId` changing, in the same
+ * `$transaction` as the row update itself (no intermediate state where only
+ * one side has been applied):
+ *   - Amount-only change: the pre-edit amount's effect on the (unchanged)
+ *     account is reversed and the post-edit amount's effect is applied
+ *     fresh, on that same account.
+ *   - Account-only change: the pre-edit amount's effect is reversed on the
+ *     OLD account (using the old account's own sign rule) and the SAME
+ *     amount's effect is applied fresh on the NEW account (using the new
+ *     account's own sign rule) — never the old account's arithmetic carried
+ *     over (Edge Case: "Reassigning a transaction between two different
+ *     account types").
+ *   - Both change together: old account/old amount reversed, new
+ *     account/new amount applied — the general case both bullets above fall
+ *     out of.
+ * `reverseBalanceForTransactionAmount`/`adjustBalanceForTransactionAmount`
+ * both no-op for an Investment/Retirement/Crypto account (Criterion 6),
+ * which is what correctly leaves the out-of-scope side of a
+ * reassignment-to/from-such-an-account untouched while still adjusting the
+ * in-scope side (Edge Case: "Reassigning ... to/from an out-of-scope
+ * account type").
+ *
+ * A split PARENT's `amount` has been purely informational (zero balance
+ * effect) since the moment it was split (Criterion 4) — `isSplitParent`
+ * skips this entire block for such a row, so editing a split parent's
+ * amount/account (if ever reachable) cannot create an effect that never
+ * existed. An ordinary transaction or a split CHILD both go through the
+ * normal path above, per the spec's "a split child is an ordinary
+ * transaction once created" rule.
  */
 export async function updateTransaction(
   input: unknown,
@@ -220,16 +290,24 @@ export async function updateTransaction(
 
   const existing = await db.transaction.findFirst({
     where: { id, userId: user.id },
+    include: {
+      account: { select: { id: true, type: true } },
+      splits: { select: { id: true }, take: 1 },
+    },
   })
   if (!existing) {
     return fail("Transaction not found")
   }
 
+  const isSplitParent = existing.splits.length > 0
+
+  let newAccount: UsableAccount | null = null
   if (accountId !== undefined) {
     const accountCheck = await assertUsableAccount(user.id, accountId)
     if (!accountCheck.ok) {
       return fail(accountCheck.error)
     }
+    newAccount = accountCheck.account
   }
 
   if (categoryId) {
@@ -264,6 +342,31 @@ export async function updateTransaction(
           data: tagIds.map((tagId) => ({ transactionId: id, tagId })),
         })
       }
+    }
+
+    if (!isSplitParent && (amount !== undefined || accountId !== undefined)) {
+      const oldAmount = existing.amount.toNumber()
+      const oldAccountId = existing.accountId
+      const oldAccountType = existing.account.type
+
+      const newAmount = amount ?? oldAmount
+      const newAccountId = accountId ?? oldAccountId
+      const newAccountType = newAccount?.type ?? oldAccountType
+
+      await reverseBalanceForTransactionAmount(
+        tx,
+        user.id,
+        oldAccountId,
+        oldAccountType,
+        oldAmount,
+      )
+      await adjustBalanceForTransactionAmount(
+        tx,
+        user.id,
+        newAccountId,
+        newAccountType,
+        newAmount,
+      )
     }
 
     return tx.transaction.findUniqueOrThrow({
@@ -306,6 +409,26 @@ export async function updateTransaction(
  * user can simply retry, rather than risking a storage failure *after* the
  * DB rows are already gone (which would permanently orphan the files with no
  * row left to ever reference them).
+ *
+ * **Account Balance Auto-Adjustment addition (Criterion 3,
+ * docs/product/accounts-balance-auto-adjustment.md):** reverses this
+ * transaction's balance effect atomically with the row's deletion — both
+ * live in the same `db.$transaction` below.
+ *
+ * If this row is a split PARENT (has one or more rows pointing at it via
+ * `parentTransactionId`), its own `amount` has had zero balance effect since
+ * the moment it was split (Criterion 4) — there is nothing of the parent's
+ * own to reverse. Instead, each CHILD's own *current* balance effect is
+ * reversed (Criterion 3's cascade rule / the Edge Case "a split child's
+ * category or amount was later changed... the cascade-delete must reverse
+ * whatever each child's *current* balance effect is at time of deletion, not
+ * its original as-created effect" — reading each child's own `amount` and
+ * `account.type` fresh here, rather than assuming it still matches whatever
+ * the split created it with, is exactly what satisfies that). A plain
+ * (non-parent) transaction — including an ordinary split CHILD being
+ * deleted on its own, which is how "un-splitting" works per the spec's "no
+ * merge back" limitation — reverses its own current effect the same way any
+ * ordinary transaction delete would.
  */
 export async function deleteTransaction(
   input: unknown,
@@ -321,10 +444,16 @@ export async function deleteTransaction(
 
   const existing = await db.transaction.findFirst({
     where: { id, userId: user.id },
+    include: { account: { select: { id: true, type: true } } },
   })
   if (!existing) {
     return fail("Transaction not found")
   }
+
+  const splitChildren = await db.transaction.findMany({
+    where: { parentTransactionId: id },
+    include: { account: { select: { id: true, type: true } } },
+  })
 
   const attachedReceipts = await db.receipt.findMany({
     where: {
@@ -347,7 +476,29 @@ export async function deleteTransaction(
     }
   }
 
-  await db.transaction.delete({ where: { id } })
+  await db.$transaction(async (tx) => {
+    if (splitChildren.length > 0) {
+      for (const child of splitChildren) {
+        await reverseBalanceForTransactionAmount(
+          tx,
+          user.id,
+          child.accountId,
+          child.account.type,
+          child.amount.toNumber(),
+        )
+      }
+    } else {
+      await reverseBalanceForTransactionAmount(
+        tx,
+        user.id,
+        existing.accountId,
+        existing.account.type,
+        existing.amount.toNumber(),
+      )
+    }
+
+    await tx.transaction.delete({ where: { id } })
+  })
 
   return ok({ id })
 }
@@ -410,6 +561,20 @@ function formatCentsAsDollars(cents: number): string {
  * `amount` becomes purely informational once split children exist; see the
  * schema comment) — `listTransactions`'s `EXCLUDE_SPLIT_PARENTS` is what
  * keeps it out of the default table view once this returns.
+ *
+ * **Account Balance Auto-Adjustment addition (Criterion 4,
+ * docs/product/accounts-balance-auto-adjustment.md):** the parent's
+ * original create-time balance effect is reversed at the moment of
+ * splitting (its `amount` stops being real, so its effect on the balance
+ * must stop too), and every split child's own signed amount is applied as
+ * its own effect on that same account (split children always share the
+ * parent's `accountId`) — both inside the same `$transaction` as the child
+ * rows' creation. Because `splits` was just validated above to sum EXACTLY
+ * to the parent's original amount, "reverse the parent + apply every
+ * child" is mathematically guaranteed to net to exactly zero change on the
+ * account's balance (see `balance-adjustment.test.ts`'s exact-equality
+ * test) — this is what makes splitting a transaction balance-neutral by
+ * construction, never merely by coincidence.
  */
 export async function splitTransaction(
   input: unknown,
@@ -425,6 +590,7 @@ export async function splitTransaction(
 
   const existing = await db.transaction.findFirst({
     where: { id, userId: user.id },
+    include: { account: { select: { id: true, type: true } } },
   })
   if (!existing) {
     return fail("Transaction not found")
@@ -460,8 +626,19 @@ export async function splitTransaction(
     )
   }
 
-  const created = await db.$transaction((tx) =>
-    Promise.all(
+  const created = await db.$transaction(async (tx) => {
+    // Reverse the parent's original create-time effect first (Criterion 4)
+    // — see this function's JSDoc for why this, combined with applying every
+    // child's own effect below, is guaranteed to net to zero.
+    await reverseBalanceForTransactionAmount(
+      tx,
+      user.id,
+      existing.accountId,
+      existing.account.type,
+      existing.amount.toNumber(),
+    )
+
+    const rows = await Promise.all(
       splits.map((split) =>
         tx.transaction.create({
           data: {
@@ -476,8 +653,23 @@ export async function splitTransaction(
           include: TRANSACTION_INCLUDE,
         }),
       ),
-    ),
-  )
+    )
+
+    // All split children share the parent's accountId (enforced above) —
+    // applied as one aggregate atomic increment rather than one call per
+    // child, the same "aggregate rather than per-row" performance allowance
+    // Criterion 5 grants CSV import, for the same reason (avoids an N-write
+    // pattern on a split with many line items).
+    await applyAggregateBalanceDelta(
+      tx,
+      user.id,
+      existing.accountId,
+      existing.account.type,
+      splits.map((split) => split.amount),
+    )
+
+    return rows
+  })
 
   return ok(created.map(toTransaction))
 }

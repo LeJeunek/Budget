@@ -2,6 +2,7 @@ import { db } from "@/lib/db"
 import { ok, fail, type ApiResult } from "@/lib/api-response"
 import type { TransactionImportSummary } from "@/features/transactions/types"
 import { amountSchema, dateOnlySchema, merchantSchema } from "@/features/transactions/server/validation"
+import { applyAggregateBalanceDelta } from "@/features/transactions/server/balance-adjustment"
 
 /**
  * CSV parsing, per-row validation, duplicate detection, and category
@@ -393,16 +394,44 @@ export async function importTransactionsFromCsv(
   })
 
   if (toInsert.length > 0) {
-    await db.transaction.createMany({
-      data: toInsert.map((t) => ({
+    // Account Balance Auto-Adjustment (Criterion 5,
+    // docs/product/accounts-balance-auto-adjustment.md): every successfully
+    // imported row must adjust `accountId`'s balance exactly as manual entry
+    // would. Applied here as ONE aggregate atomic increment for the whole
+    // batch (Criterion 5 explicitly allows this: "free to apply the whole
+    // import's net effect as a single aggregate balance update ... provided
+    // the net result is identical to summing every valid row's individual
+    // effect" — see `balance-adjustment.ts`'s `computeAggregateBalanceDelta`
+    // for why that equality holds by construction) rather than one update
+    // per row, which is what keeps a large CSV import a fixed, small number
+    // of writes instead of an N+1 write pattern (Performance Engineer
+    // concern called out in this spec's Definition of Done). Both the
+    // `createMany` and the balance adjustment run inside the same
+    // `$transaction`, so a batch of transactions can never be recorded
+    // without its combined balance effect, or vice versa (Criterion 1's
+    // atomicity requirement, applied identically to the import path). Rows
+    // skipped as invalid or duplicate never reach `toInsert`, so they
+    // correctly contribute nothing to this aggregate.
+    await db.$transaction(async (tx) => {
+      await tx.transaction.createMany({
+        data: toInsert.map((t) => ({
+          userId,
+          accountId,
+          categoryId: t.categoryId,
+          merchant: t.merchant,
+          amount: t.amount,
+          date: t.date,
+          notes: t.notes,
+        })),
+      })
+
+      await applyAggregateBalanceDelta(
+        tx,
         userId,
         accountId,
-        categoryId: t.categoryId,
-        merchant: t.merchant,
-        amount: t.amount,
-        date: t.date,
-        notes: t.notes,
-      })),
+        account.type,
+        toInsert.map((t) => t.amount),
+      )
     })
   }
 

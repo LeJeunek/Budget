@@ -424,3 +424,19 @@ export const SuggestionIdSchema = z.object({
 })
 
 export type SuggestionIdInput = z.infer<typeof SuggestionIdSchema>
+
+// ---------------------------------------------------------------------------
+// Account Balance Auto-Adjustment — one-time historical reconciliation
+// (docs/product/accounts-balance-auto-adjustment.md's "Historical Data
+// Reconciliation" section). `getAccountBalanceReconciliationPreview`'s input
+// (server/actions.ts).
+// ---------------------------------------------------------------------------
+
+/** `getAccountBalanceReconciliationPreview` input. */
+export const AccountBalanceReconciliationSchema = z.object({
+  accountId: z.string().min(1, "Account id is required"),
+})
+
+export type AccountBalanceReconciliationInput = z.infer<
+  typeof AccountBalanceReconciliationSchema
+>
