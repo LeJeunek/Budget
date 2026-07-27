@@ -24,6 +24,23 @@
  *
  * `narrative` always renders as a plain text node (never
  * `dangerouslySetInnerHTML`/a markdown pipeline), per Finding 1c.
+ *
+ * **Bugfix (docs/testing/bug-reports/
+ * monthly-summary-card-stale-state-after-refresh.md):** this card used to
+ * seed its main body from a `useState(summary)` local mirror (`current`),
+ * which — like `SpendingInsightsWidget`'s identical bug — only applied on
+ * first mount; a later `summary` prop change from any `router.refresh()`
+ * this card didn't itself trigger (e.g. a concurrent regenerate attempt from
+ * another tab/the monthly cron winning `monthly-summary.ts`'s
+ * `claimGenerationSlot` race) was silently never reflected, letting the main
+ * card body permanently disagree with the "View history" dialog (which
+ * always read the fresh `history` prop directly) for the same month. Fixed
+ * by removing the local mirror entirely and reading `summary` directly in
+ * render — `isRegenerating` remains the only local state, and
+ * `router.refresh()` (already called unconditionally after every
+ * `handleRegenerate` attempt, success or failure) is the single source of
+ * truth for the displayed narrative, matching the "View history" dialog's
+ * existing (correct) behavior.
  */
 
 import { useState } from "react"
@@ -59,24 +76,27 @@ export interface MonthlySummaryCardProps {
 
 export function MonthlySummaryCard({ summary, history }: MonthlySummaryCardProps) {
   const router = useRouter()
-  const [current, setCurrent] = useState(summary)
   const [isRegenerating, setIsRegenerating] = useState(false)
 
   async function handleRegenerate() {
-    if (!current) return
+    if (!summary) return
     setIsRegenerating(true)
     try {
-      const response = await regenerateMonthlySummary({ month: current.month })
+      const response = await regenerateMonthlySummary({ month: summary.month })
       if (!response.success) {
         toast.error(response.error)
         return
       }
       if (response.data.status === "ok") {
-        setCurrent(response.data.data)
         toast.success("Recap regenerated.")
       } else {
         toast.error("Summary isn't available right now — try again later.")
       }
+      // Single source of truth for the displayed narrative: re-fetches
+      // `summary`/`history` from the Server Component regardless of which
+      // branch above ran, so a concurrent regenerate attempt that won the
+      // generation-slot race (see this file's module doc) is reflected here
+      // too, not just in the already-fresh "View history" dialog.
       router.refresh()
     } finally {
       setIsRegenerating(false)
@@ -87,7 +107,7 @@ export function MonthlySummaryCard({ summary, history }: MonthlySummaryCardProps
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
         <CardTitle>
-          {current ? `Your ${formatMonthLabel(current.month)} Recap` : "Monthly Recap"}
+          {summary ? `Your ${formatMonthLabel(summary.month)} Recap` : "Monthly Recap"}
         </CardTitle>
         <Dialog>
           <DialogTrigger asChild>
@@ -121,19 +141,19 @@ export function MonthlySummaryCard({ summary, history }: MonthlySummaryCardProps
         </Dialog>
       </CardHeader>
       <CardContent>
-        {current === null ? (
+        {summary === null ? (
           // Feature 3 edge case: a brand-new user has no completed month yet
           // — never a fabricated recap for a month they weren't present for.
           <p className="text-sm text-muted-foreground">
             No monthly recap yet — check back after your first full month of
             activity.
           </p>
-        ) : current.narrative === null ? (
+        ) : summary.narrative === null ? (
           // Edge Case: "Summary not available for [Month]" — never a blank
           // space or a silently missing month.
           <div className="flex flex-col items-start gap-2">
             <p className="text-sm text-muted-foreground">
-              Summary not available for {formatMonthLabel(current.month)}.
+              Summary not available for {formatMonthLabel(summary.month)}.
             </p>
             <Button
               type="button"
@@ -151,7 +171,7 @@ export function MonthlySummaryCard({ summary, history }: MonthlySummaryCardProps
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            {current.isPartialMonth && (
+            {summary.isPartialMonth && (
               <div>
                 <Badge variant="secondary">Partial month</Badge>
               </div>
@@ -161,7 +181,7 @@ export function MonthlySummaryCard({ summary, history }: MonthlySummaryCardProps
                 className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
                 aria-hidden="true"
               />
-              <span>{current.narrative}</span>
+              <span>{summary.narrative}</span>
             </p>
           </div>
         )}

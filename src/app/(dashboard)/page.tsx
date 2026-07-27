@@ -69,6 +69,17 @@ import { FinancialHealthScoreBadge } from "@/features/financial-health-score/com
  * they join the existing `Promise.all` batch below rather than needing a
  * separate fetch waterfall.
  *
+ * `getBudgetHealthScore` and `getFinancialHealthScore` are deliberately two
+ * independent, unchained entries in the same `Promise.all` batch (each a
+ * plain sibling call, `getFinancialHealthScore`'s Budget Adherence component
+ * re-fetching Budget Health Score on its own) rather than one sharing a
+ * single fetch — see docs/testing/bug-reports/
+ * dashboard-shared-budget-health-score-promise-crash-and-latency.md for why
+ * an earlier attempt at sharing this fetch was reverted: it let one
+ * `getBudgetHealthScore` failure crash this entire batch (no `error.tsx` in
+ * this route segment) and didn't reliably deliver the latency win it was
+ * built for.
+ *
  * **Phase 3b addition (docs/product/net-worth-history.md):** the Net Worth
  * History chart's *initial* range/data are resolved here too, via
  * `resolveDefaultRange` (AC3) then `getNetWorthHistory` for that resolved
@@ -94,16 +105,6 @@ export default async function DashboardPage() {
 
   const currentMonth = currentMonthString()
 
-  // Issued once, then shared by both consumers below (this page's own Budget
-  // Health Score badge AND `getFinancialHealthScore`'s internal Budget
-  // Adherence component) — see the `.then` call below and
-  // `financial-health-score/server/service.ts`'s `precomputedBudgetHealthScore`
-  // doc comment (Phase 4a frontend follow-up, `docs/performance/
-  // phase-4a-frontend-followup-review.md` Finding 3) for why this avoids a
-  // second, independent `getBudgetHealthScore` fetch without serializing
-  // this page's overall load behind it.
-  const budgetHealthScorePromise = getBudgetHealthScore(user.id, currentMonth)
-
   const [
     netWorth,
     monthlySummary,
@@ -121,7 +122,7 @@ export default async function DashboardPage() {
     getSpendingByCategory(user.id, new Date()),
     getMonthlyTrends(user.id, 6),
     getBudgetMonthSummary(user.id, currentMonth),
-    budgetHealthScorePromise,
+    getBudgetHealthScore(user.id, currentMonth),
     resolveDefaultRange(user.id),
     // (Phase 4a) Automatic Monthly Summaries (ai-features.md Feature 3): the
     // most recent completed month's recap plus its full history, both plain
@@ -136,18 +137,26 @@ export default async function DashboardPage() {
     // that service's own documented circular-import avoidance (see
     // `app/(dashboard)/financial-health-score/page.tsx`'s identical note).
     //
-    // Chained off `budgetHealthScorePromise` (rather than passed the
-    // already-destructured `budgetHealthScore` above, which isn't resolved
-    // yet at this point in the same `Promise.all` array) so
-    // `getFinancialHealthScore`'s own internal Budget Adherence component
-    // reuses this exact fetch instead of independently re-querying it
-    // (Finding 3) — this only sequences `getFinancialHealthScore` behind the
-    // single `getBudgetHealthScore` call it needs anyway, not behind this
-    // whole `Promise.all` batch, so the page's overall load time (bounded by
-    // the slowest entry here) is unaffected.
-    budgetHealthScorePromise.then((score) =>
-      getFinancialHealthScore(user.id, new Date(), score),
-    ),
+    // Bugfix: docs/testing/bug-reports/
+    // dashboard-shared-budget-health-score-promise-crash-and-latency.md — this
+    // used to be chained behind a `budgetHealthScorePromise` shared with the
+    // `getBudgetHealthScore` entry above (so `getFinancialHealthScore`'s
+    // internal Budget Adherence component could reuse that one fetch instead
+    // of independently re-querying it). That sharing meant a single
+    // `getBudgetHealthScore` rejection (it has no internal try/catch, by
+    // design) took down this entire `Promise.all` — every other Dashboard
+    // card along with it — since there's no `error.tsx` in this route
+    // segment to contain it; it also serialized this function's other three
+    // component gathers behind `getBudgetHealthScore` via `.then()`,
+    // contradicting the "load time unaffected" rationale that justified the
+    // sharing (see that service's `precomputedBudgetHealthScore` param's own
+    // doc comment for the accepted trade-off going forward). Reverted to a
+    // plain, unchained sibling call: `getFinancialHealthScore`'s Budget
+    // Adherence component independently re-fetches Budget Health Score
+    // again, restoring this codebase's own stated principle that "every
+    // metric degrades independently... one failing metric never blanks out
+    // the others."
+    getFinancialHealthScore(user.id, new Date()),
   ])
 
   // Dependent on `defaultRangeResolution` above, so it can't join the

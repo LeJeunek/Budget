@@ -444,18 +444,36 @@ async function generateAndPersist(
  * `analytics/page.tsx` already computes all six metrics directly, one line
  * above, for its own charts.
  *
- * **Judgment call:** identical in shape and resolution to
- * `getBudgetAdvisorRecommendations`'s own documented judgment call (see that
- * function's doc comment for the full reasoning) -- a period that already
- * has a cached row from when it had enough candidates, but would now compute
- * fewer than `MIN_CANDIDATES_TO_ATTEMPT` (e.g. a subscription was
+ * **Judgment call, NOT symmetrically mitigated with `getBudgetAdvisorRecommendations`
+ * despite the identical reorder (`docs/testing/bug-reports/
+ * spending-insights-cache-reorder-unguarded-staleness.md`).** A period that
+ * already has a cached row from when it had enough candidates, but would now
+ * compute fewer than `MIN_CANDIDATES_TO_ATTEMPT` (e.g. a subscription was
  * un-flagged, or a large purchase aged out of the window), returns the
  * still-cached insights under this new ordering instead of `unavailable`.
- * Accepted for the same reason: a previously-generated, validly-grounded
- * insight set shouldn't disappear just because the live candidate count
- * later dropped -- this function already never recomputes an already-cached
- * result on its own (only `refreshSpendingInsights` does), so a cached
- * result is already treated as stable regardless of later changes elsewhere.
+ * Accepted for the same reason `advisor.ts` accepts its own version of this:
+ * a previously-generated, validly-grounded insight set shouldn't disappear
+ * just because the live candidate count later dropped -- this function
+ * already never recomputes an already-cached result on its own (only
+ * `refreshSpendingInsights` does), so a cached result is already treated as
+ * stable regardless of later changes elsewhere.
+ *
+ * Where this genuinely differs from Budget Advisor: `budgeting/page.tsx` has
+ * a page-level `hasBudgetedCategory` gate that (as a side effect, not by
+ * design) makes its own version of this edge case unreachable in practice --
+ * that page only ever calls `getBudgetAdvisorRecommendations` when a fresh
+ * check confirms the month currently has budgeted categories. **Spending
+ * Insights has no analogous gate** -- `analytics/page.tsx` calls this
+ * function unconditionally on every page view regardless of live candidate
+ * count -- so the staleness accepted above is not a narrow, rarely-hit edge
+ * case here the way it effectively is for Budget Advisor; it is this
+ * feature's actual default behavior any time a period's candidate set
+ * shrinks after a cache row already exists, surfacing on every ordinary page
+ * view with no staleness indicator, recoverable only by an explicit
+ * "Refresh" click (itself rate-limited). This is accepted as a deliberate
+ * cache-vs-correctness trade-off pending any future product decision on a
+ * staleness indicator/TTL -- not a claim that the two features are protected
+ * the same way today.
  *
  * [Finding 7] Catches its own non-AI errors (the candidate-gathering reads,
  * the cache-row reads/writes above, all outside

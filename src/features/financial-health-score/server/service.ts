@@ -267,16 +267,29 @@ async function gatherNetWorthTrendComponent(userId: string, now: Date): Promise<
  * .getNetWorth` — neither wraps itself in a try/catch either).
  *
  * **`precomputedBudgetHealthScore` (Phase 4a frontend follow-up,
- * `docs/performance/phase-4a-frontend-followup-review.md` Finding 3, MEDIUM):
- * optional, caller-supplied escape hatch for the one caller that already has
- * this exact month's Budget Health Score in hand.** The Dashboard page
- * (`app/(dashboard)/page.tsx`) calls `getBudgetHealthScore` directly for its
- * own Budget Health Score badge, in the same `Promise.all` batch as its call
- * to this function — without this parameter, `gatherBudgetAdherenceComponent`
- * would independently re-run that same ~4-query call a second time, every
- * Dashboard load. Passing the already-fetched value here (as long as it was
- * computed for the same `now`/month this call uses) skips that duplicate
- * fetch entirely.
+ * `docs/performance/phase-4a-frontend-followup-review.md` Finding 3, MEDIUM)
+ * — currently unused by any caller; kept as a documented, opt-in escape
+ * hatch, not dead code to be deleted.** This was originally wired up from
+ * `app/(dashboard)/page.tsx`, which shared one `getBudgetHealthScore` fetch
+ * between its own Budget Health Score badge and this function's Budget
+ * Adherence component via a `.then()`-chained promise. That sharing was
+ * reverted (`docs/testing/bug-reports/
+ * dashboard-shared-budget-health-score-promise-crash-and-latency.md`): a
+ * single `getBudgetHealthScore` rejection took down the entire Dashboard
+ * `Promise.all` (no `error.tsx` in that route segment to contain it) instead
+ * of failing independently the way this codebase's "every metric degrades
+ * independently" principle requires, and the `.then()` chaining actually
+ * serialized this function's other three component gathers behind
+ * `getBudgetHealthScore` rather than keeping them concurrent — the opposite
+ * of this parameter's own performance rationale. `page.tsx` now calls this
+ * function with no third argument, so `gatherBudgetAdherenceComponent`
+ * always re-fetches Budget Health Score independently again, restoring
+ * per-component failure isolation at the accepted cost of ~4 duplicate
+ * queries per Dashboard load. The parameter itself is left in place
+ * (harmless, optional, backward-compatible) in case a future caller can
+ * safely share the fetch without reintroducing this failure-isolation
+ * regression — e.g. by passing an already-`.catch()`-guarded promise rather
+ * than a bare one.
  *
  * Deliberately `BudgetHealthScore | null | undefined` (via `?:`), not just
  * `BudgetHealthScore | null`, so `undefined` (parameter omitted -- "I don't
@@ -284,13 +297,8 @@ async function gatherNetWorthTrendComponent(userId: string, now: Date): Promise<
  * "I already checked, there genuinely is no Budget Health Score this month,
  * e.g. zero budgeted categories") are distinguishable by
  * `gatherBudgetAdherenceComponent`'s own `precomputed !== undefined` check;
- * collapsing them would force every non-Dashboard caller to also fetch and
- * pass `null` explicitly just to opt out, or silently reintroduce the
- * redundant fetch. The other caller, `/financial-health-score`'s own detail
- * page, has no such precomputed value on hand and simply omits this
- * parameter (`undefined`), falling through to the original unconditional
- * fetch — this parameter is additive, and does not complicate that caller's
- * own call site at all.
+ * collapsing them would force a future caller to also fetch and pass `null`
+ * explicitly just to opt out, or silently reintroduce the redundant fetch.
  */
 export async function getFinancialHealthScore(
   userId: string,

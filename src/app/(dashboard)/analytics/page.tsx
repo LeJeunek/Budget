@@ -153,7 +153,18 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
         <ReportingPeriodSelector period={period} />
       </div>
 
-      <SpendingInsightsWidget period={period} initialResult={spendingInsights} />
+      {/* Bugfix: docs/testing/bug-reports/
+          spending-insights-widget-period-switch-stale-state.md — the widget
+          seeds its displayed result from `initialResult` via `useState`,
+          which only applies on first mount. Without a `key`, switching the
+          shared reporting-period control re-rendered this same instance with
+          a fresh `initialResult` prop that was silently never applied, so
+          the widget kept showing whichever period was active on first
+          mount. `key={period}` forces React to remount (not update) this
+          instance whenever `period` changes, matching every other
+          period-aware metric on this page, which are all plain
+          Server-Component-rendered props with no local state to go stale. */}
+      <SpendingInsightsWidget key={period} period={period} initialResult={spendingInsights} />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <YearlySpendingChart data={yearlySpending} />
