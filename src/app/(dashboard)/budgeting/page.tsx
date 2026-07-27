@@ -6,6 +6,7 @@ import {
   getBudgetHealthScore,
   getBudgetMonth,
 } from "@/features/budgeting/server/service"
+import { getBudgetAdvisorRecommendations } from "@/features/budgeting/server/advisor"
 import {
   currentMonthString,
   formatMonthLabel,
@@ -13,6 +14,7 @@ import {
 import { BudgetMonthNav } from "@/features/budgeting/components/budget-month-nav"
 import { BudgetSummaryCards } from "@/features/budgeting/components/budget-summary-cards"
 import { BudgetHealthScoreBadge } from "@/features/budgeting/components/budget-health-score-badge"
+import { BudgetAdvisorCard } from "@/features/budgeting/components/budget-advisor-card"
 import { BudgetCategoryRow } from "@/features/budgeting/components/budget-category-row"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
@@ -76,6 +78,21 @@ export default async function BudgetingPage({
     categories.map((category) => [category.id, category.color]),
   )
 
+  // Feature 2 AC1/AC5/Edge Cases: the advisor only ever appears for the
+  // current, editable month, and only once at least one category has an
+  // allocation set — `getBudgetAdvisorRecommendations` itself already
+  // enforces both server-side, but per its own Edge Case ("the advisor card
+  // does not render at all... rather than attempting to generate advice from
+  // nothing"), this page skips fetching/rendering it entirely in either
+  // case, rather than rendering a card that would just show "unavailable."
+  const hasBudgetedCategory = budgetMonth.categories.some(
+    (line) => line.allocated !== null,
+  )
+  const showBudgetAdvisor = budgetMonth.isEditable && hasBudgetedCategory
+  const advisorResult = showBudgetAdvisor
+    ? await getBudgetAdvisorRecommendations(user.id, month)
+    : null
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -126,6 +143,10 @@ export default async function BudgetingPage({
             />
             <BudgetHealthScoreBadge score={healthScore} />
           </div>
+
+          {showBudgetAdvisor && advisorResult && (
+            <BudgetAdvisorCard month={month} initialResult={advisorResult} />
+          )}
 
           <Card>
             <CardContent>

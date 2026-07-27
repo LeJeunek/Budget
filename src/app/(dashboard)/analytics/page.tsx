@@ -21,8 +21,10 @@ import {
   getDismissedSubscriptionMerchants,
   getSubscriptionCandidates,
 } from "@/features/analytics/server/subscriptions"
+import { getSpendingInsights } from "@/features/analytics/server/insights"
 
 import { ReportingPeriodSelector } from "@/features/analytics/components/reporting-period-selector"
+import { SpendingInsightsWidget } from "@/features/analytics/components/spending-insights-widget"
 import { YearlySpendingChart } from "@/features/analytics/components/yearly-spending-chart"
 import { CategoryTrendsChart } from "@/features/analytics/components/category-trends-chart"
 import { ExpenseDistributionChart } from "@/features/analytics/components/expense-distribution-chart"
@@ -100,6 +102,7 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     savingsGrowth,
     subscriptionCandidates,
     dismissedSubscriptionMerchants,
+    spendingInsights,
   ] = await Promise.all([
     getYearlySpending(user.id),
     getCategoryTrends(user.id, range),
@@ -118,6 +121,10 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     // this page) and handed to `SubscriptionsList` so it can render an
     // "Undismiss" affordance next to the candidates it excludes from.
     getDismissedSubscriptionMerchants(user.id),
+    // (Phase 4a) Spending Insights (ai-features.md Feature 4 AC5): respects
+    // this same shared reporting-period control when surfaced on the
+    // Analytics page — no separate, competing period concept.
+    getSpendingInsights(user.id, period),
   ])
 
   // Both derived in-memory from results already fetched above — no extra
@@ -145,6 +152,8 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
         </div>
         <ReportingPeriodSelector period={period} />
       </div>
+
+      <SpendingInsightsWidget period={period} initialResult={spendingInsights} />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <YearlySpendingChart data={yearlySpending} />

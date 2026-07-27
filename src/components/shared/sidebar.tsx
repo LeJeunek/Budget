@@ -39,6 +39,7 @@ import {
   ChevronsRight,
   CreditCard,
   Flag,
+  HeartPulse,
   LayoutDashboard,
   PiggyBank,
   Target,
@@ -116,6 +117,17 @@ export const NAV_SECTIONS: NavSection[] = [
       // own Boundary section: the two "goal" concepts must never read as
       // the same interaction model, even in the nav.
       { label: "Financial Goals", href: "/financial-goals", icon: Flag },
+      // (Phase 4a) Financial Health Score placement decision, made by the
+      // Frontend Lead — docs/architecture/api-contracts.md's Feature 5
+      // section specifies the read functions/detail-view requirement (AC8)
+      // but leaves nav placement to frontend composition, same as Recurring
+      // Income/Financial Goals before it. Placed in "Wealth" alongside
+      // Debt/Investments/Analytics/Financial Goals: this score is an
+      // aggregate whole-picture read *over* every one of those domains'
+      // already-computed figures (debt, net worth, budget, savings), so it
+      // belongs with the other whole-picture/analytical surfaces, not
+      // "Planning" alongside the forward-looking cash-flow tools.
+      { label: "Health Score", href: "/financial-health-score", icon: HeartPulse },
     ],
   },
 ]

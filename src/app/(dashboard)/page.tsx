@@ -34,6 +34,13 @@ import { IncomeVsExpenseChart } from "@/features/dashboard/components/income-vs-
 import { MonthlyTrendsChart } from "@/features/dashboard/components/monthly-trends-chart"
 import { NetWorthHistoryChart } from "@/features/dashboard/components/net-worth-history-chart"
 import { SpendingByCategoryChart } from "@/features/dashboard/components/spending-by-category-chart"
+import { MonthlySummaryCard } from "@/features/dashboard/components/monthly-summary-card"
+import {
+  getMostRecentSummary,
+  getSummaryHistory,
+} from "@/features/dashboard/server/monthly-summary"
+import { getFinancialHealthScore } from "@/features/financial-health-score/server/service"
+import { FinancialHealthScoreBadge } from "@/features/financial-health-score/components/financial-health-score-badge"
 
 /**
  * Dashboard Overview — Phase 1 (docs/product/dashboard-overview.md).
@@ -95,6 +102,9 @@ export default async function DashboardPage() {
     budgetSummary,
     budgetHealthScore,
     defaultRangeResolution,
+    mostRecentMonthlyRecap,
+    monthlyRecapHistory,
+    financialHealthScore,
   ] = await Promise.all([
     getNetWorth(user.id),
     getMonthlySummary(user.id, new Date()),
@@ -103,6 +113,19 @@ export default async function DashboardPage() {
     getBudgetMonthSummary(user.id, currentMonth),
     getBudgetHealthScore(user.id, currentMonth),
     resolveDefaultRange(user.id),
+    // (Phase 4a) Automatic Monthly Summaries (ai-features.md Feature 3): the
+    // most recent completed month's recap plus its full history, both plain
+    // row reads (never an AI call on this path — see
+    // `monthly-summary.ts`'s own "persisted, never regenerated on view"
+    // note), so they join this same independent Promise.all batch.
+    getMostRecentSummary(user.id),
+    getSummaryHistory(user.id),
+    // (Phase 4a) Financial Health Score (ai-features.md Feature 5): zero AI
+    // dependency, a plain deterministic read — called directly from this
+    // feature's own service, not via a `dashboard.service` pass-through, per
+    // that service's own documented circular-import avoidance (see
+    // `app/(dashboard)/financial-health-score/page.tsx`'s identical note).
+    getFinancialHealthScore(user.id),
   ])
 
   // Dependent on `defaultRangeResolution` above, so it can't join the
@@ -210,6 +233,13 @@ export default async function DashboardPage() {
                 "zero allocations set" condition as the card above), so no
                 extra branching is needed here. */}
             <BudgetHealthScoreBadge score={budgetHealthScore} />
+            {/* (Phase 4a) Feature 5 AC8: "surfaced on the Dashboard (a
+                summary card)" — `FinancialHealthScoreBadge` already renders
+                its own "Not enough data yet" state for the null-score case
+                (same zero-computable-components condition as the Budget
+                Health Score card above), so no extra branching is needed
+                here. */}
+            <FinancialHealthScoreBadge breakdown={financialHealthScore} />
           </div>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -228,6 +258,13 @@ export default async function DashboardPage() {
           <NetWorthHistoryChart
             initialRange={defaultRangeResolution.defaultRange}
             initialData={netWorthHistory}
+          />
+
+          {/* (Phase 4a) Feature 3 AC4: "the most recently completed month's
+              summary is surfaced on the Dashboard as its own card." */}
+          <MonthlySummaryCard
+            summary={mostRecentMonthlyRecap}
+            history={monthlyRecapHistory}
           />
         </>
       )}
