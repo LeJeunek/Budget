@@ -270,3 +270,55 @@ export async function recordReasoningModelCall(
  * explicitly assigns this constant to `rate-limit.ts`.
  */
 export const CATEGORIZATION_BATCH_SIZE = 40
+
+/**
+ * **Phase 4a review-gate fix (Performance Engineer HIGH finding):** the
+ * per-user cap on how many `CATEGORIZATION_BATCH_SIZE`-sized batches
+ * `categorization.ts`'s `generateAutomaticSuggestionsForUser` will process
+ * for ANY ONE user within a single invocation of the cron entry point
+ * (`generateAutomaticSuggestionsForAllUsers`) -- §6's original design bounded
+ * *per-batch* cost (`ceil(rows / CATEGORIZATION_BATCH_SIZE)` calls "not
+ * `rows` calls") but left the number of batches attempted **per invocation**
+ * unbounded, so a single user's large backlog (e.g. a 2,000-row CSV import,
+ * `ceil(2000/40) = 50` batches) could alone consume the entire cron
+ * invocation's wall-clock budget before the sequential per-user loop
+ * (`app/api/cron/categorize-transactions/route.ts`'s `maxDuration = 60`)
+ * ever reached the next user -- starving every user after it in
+ * `db.user.findMany`'s result order, and, because the eligibility query only
+ * excludes transactions with an existing `PENDING` suggestion, doing so again
+ * on every subsequent invocation until that one user's backlog was fully
+ * drained. This constant is the fix: `generateAutomaticSuggestionsForUser`
+ * now processes at most this many batches per invocation and simply leaves
+ * any remaining eligible transactions untouched -- they get no
+ * `CategorySuggestion` row this invocation, so the unchanged
+ * `categorySuggestions: { none: { status: "PENDING" } }` eligibility filter
+ * naturally re-includes them on the next invocation, carrying the remainder
+ * forward with zero additional persistence/cursor logic (approach (a) from
+ * the Performance Engineer's review, chosen over a round-robin restructure
+ * as the smaller, more locally-reasoned change against this file's existing
+ * per-batch-size-cap precedent immediately above).
+ *
+ * **Judgment call -- cap value derivation.** `generate-structured-output.ts`
+ * runs a single stricter-prompt retry on any failure (including a timeout),
+ * so one batch call can take up to `2 * CRON_TIMEOUT_MS` (`categorization.ts`'s
+ * own 20s cron timeout, doubled by that one retry) = 40s in the worst case
+ * of a slow/degraded provider -- not the "a few seconds" typical case. Against
+ * `maxDuration = 60` (the same route's own ceiling): `2 * 40s = 80s` already
+ * exceeds 60s on its own, so no cap greater than 1 can ever be justified by
+ * this worst-case arithmetic alone -- `1 * 40s = 40s` is the only value that
+ * both (a) keeps one user's worst-case total comfortably under the 60s
+ * ceiling and (b) still leaves a real ~20s of headroom within the same
+ * invocation for at least one more user's own minimum processing (their own
+ * first batch, or simply the cost of the eligibility query finding nothing
+ * for them), which is exactly the property this fix needs -- one user's
+ * worst case must never be able to consume the entire budget. Under the
+ * ordinary, non-degraded case (a batch call taking "a few seconds," per the
+ * review's own framing) this same cap of 1 leaves most of the 60s budget
+ * unspent per user, so in practice far more than "one more user" gets
+ * attempted per invocation -- this cap only bites in the specific adversarial
+ * combination the review flagged (a large single-user backlog plus a
+ * degraded provider), not in the common case. Flagged, same as this file's
+ * other judgment-call constants above, for revisiting once real production
+ * cron latency/timeout data exists.
+ */
+export const MAX_BATCHES_PER_USER_PER_INVOCATION = 1
