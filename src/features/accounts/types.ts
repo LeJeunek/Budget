@@ -29,9 +29,22 @@ export type { AccountType }
  * enforcement of the "well-formed currency value" rules (precision, range)
  * and docs/product/accounts.md for the full sign convention.
  */
-export type Account = Omit<PrismaAccount, "balance" | "interestRate"> & {
+export type Account = Omit<
+  PrismaAccount,
+  "balance" | "interestRate" | "lowBalanceThresholdOverride"
+> & {
   balance: number
   interestRate: number | null
+  // (Phase 4b) Also a decimal.js `Decimal` on the Prisma row — converted to
+  // `number` for the same cross-boundary-safety reason as `balance`/
+  // `interestRate` above. Read by
+  // `features/notifications/server/triggers/low-balance-trigger.ts` as the
+  // per-account override of `NotificationThresholdSettings.lowBalanceThreshold`
+  // (prisma/schema.prisma §7.4) — this field predates that trigger's own
+  // read of it (the Database Architect's schema pass), so converting it here
+  // is completing that existing column's client-safe wiring, not a new
+  // Notifications-owned addition to Accounts.
+  lowBalanceThresholdOverride: number | null
 }
 
 /**

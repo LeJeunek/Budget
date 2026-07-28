@@ -112,8 +112,16 @@ export async function updateAccount(
   if (!parsed.success) {
     return fail(parsed.error.issues[0]?.message ?? "Invalid account data")
   }
-  const { id, name, type, institution, balance, interestRate, color } =
-    parsed.data
+  const {
+    id,
+    name,
+    type,
+    institution,
+    balance,
+    interestRate,
+    color,
+    lowBalanceThresholdOverride,
+  } = parsed.data
 
   const existing = await db.account.findFirst({
     where: { id, userId: user.id },
@@ -137,6 +145,11 @@ export async function updateAccount(
       ...(balance !== undefined ? { balance } : {}),
       ...(interestRate !== undefined ? { interestRate } : {}),
       ...(color !== undefined ? { color } : {}),
+      // (Phase 4b) `!== undefined` (not a truthiness check) so an explicit
+      // `null` clears this account's override back to the user's global
+      // Low Balance threshold — same "null is a real, distinct value from
+      // 'omitted'" convention as `interestRate` immediately above.
+      ...(lowBalanceThresholdOverride !== undefined ? { lowBalanceThresholdOverride } : {}),
     },
   })
 

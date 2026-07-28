@@ -31,6 +31,10 @@ export type Notification =
   | BudgetOverNotification
   | BillDueSoonNotification
   | BillLateNotification
+  | GoalAchievedNotification
+  | LargePurchaseNotification
+  | LowBalanceNotification
+  | MonthlySummaryReadyNotification
 
 interface NotificationBase {
   id: string
@@ -85,4 +89,99 @@ export interface BillDueSoonNotification extends BillNotificationBase {
  * prisma/schema.prisma). */
 export interface BillLateNotification extends BillNotificationBase {
   type: "BILL_LATE"
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4b (Notifications v2) — four new trigger types, per
+// docs/product/notifications-v2.md and docs/architecture/
+// phase-4b-technical-design.md §6-§7. Each interface below carries exactly
+// the fields its equivalent in-app card needs to render without a second
+// fetch (the same "denormalize the joined display fields onto this type"
+// convention as `BudgetOverNotification`/`BillNotificationBase` above), and
+// — per the design doc §5's data-minimization rule — exactly the fields its
+// equivalent email template is allowed to show, never more.
+// ---------------------------------------------------------------------------
+
+/** A `FinancialGoal` transitioned from active to Completed (notifications-v2.md's
+ * Goal Achieved trigger, AC1-4). Links to that goal's detail view. */
+export interface GoalAchievedNotification extends NotificationBase {
+  type: "GOAL_ACHIEVED"
+  financialGoalId: string
+  goalName: string
+}
+
+/** A single expense transaction (or split line item) whose amount met or
+ * exceeded the user's Large Purchase threshold at the moment it was recorded
+ * or edited (notifications-v2.md's Large Purchase trigger, AC1-6). `amount`
+ * is stored/shown as a positive magnitude (the trigger only ever evaluates
+ * expense transactions, whose stored `Transaction.amount` is negative) so the
+ * inbox/email can read "a $X purchase at Y" without the caller re-deriving
+ * the sign. */
+export interface LargePurchaseNotification extends NotificationBase {
+  type: "LARGE_PURCHASE"
+  transactionId: string
+  merchant: string
+  amount: number
+  date: Date
+}
+
+/** An eligible (Checking/Savings/Cash) `Account`'s balance crossed below its
+ * threshold (notifications-v2.md's Low Balance trigger, AC1-6). Unlike
+ * `BudgetOverNotification.allocated` (a value fixed for the life of its
+ * `BudgetCategory` row), neither the account's balance at the moment of
+ * crossing nor the threshold that applied then has anywhere to be persisted
+ * on `Notification` (prisma/schema.prisma's Phase 4b section adds no such
+ * columns) — `accountName`/`balance` are therefore a live join through
+ * `accountId` at read time, reflecting the account's *current* state, which
+ * in practice still reads correctly for the common case (the notification
+ * stays in the inbox while the account remains below threshold, per the
+ * re-arm-on-recovery design) even though it is not a frozen historical
+ * snapshot the way the budget fields above are. */
+export interface LowBalanceNotification extends NotificationBase {
+  type: "LOW_BALANCE"
+  accountId: string
+  accountName: string
+  balance: number
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4b — notification preferences / threshold settings, per
+// docs/architecture/api-contracts.md's Phase 4b section. Read/written by
+// `server/preferences.ts` and `server/actions.ts`'s
+// `updateNotificationPreference`/`updateNotificationThresholdSettings`.
+// ---------------------------------------------------------------------------
+
+/**
+ * One trigger type's in-app/email preference — always exactly 6 of these
+ * (one per `NotificationType`) come back from `getNotificationPreferences`,
+ * row-absence-means-default already resolved (api-contracts.md's
+ * `NotificationPreferenceView` shape).
+ */
+export interface NotificationPreferenceView {
+  type: NotificationType
+  inAppEnabled: boolean
+  emailEnabled: boolean
+}
+
+/**
+ * The two user-adjustable dollar thresholds Large Purchase/Low Balance
+ * evaluate against — always resolved to a real number (row/column absence
+ * already resolved to the system default), never `null`, per
+ * `server/preferences.ts`'s `getNotificationThresholdSettings`.
+ */
+export interface NotificationThresholdSettingsView {
+  largePurchaseThreshold: number
+  lowBalanceThreshold: number
+}
+
+/** A `MonthlySummary` row's `narrative` became non-null for the first time —
+ * fires once per calendar month, only ever for the most recently generated
+ * month (notifications-v2.md's Monthly Summary trigger, AC1-4). `narrative`
+ * is included verbatim (never paraphrased, per AC4) so the inbox card can
+ * show the exact recap text alongside a link to the full Dashboard card. */
+export interface MonthlySummaryReadyNotification extends NotificationBase {
+  type: "MONTHLY_SUMMARY_READY"
+  monthlySummaryId: string
+  month: string
+  narrative: string
 }

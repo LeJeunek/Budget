@@ -49,6 +49,33 @@ const eslintConfig = [
       ],
     },
   },
+  {
+    // Phase 4b, `features/notifications/` — the same build-time enforcement
+    // as `features/reports/**` above, for the identical reason
+    // (docs/architecture/phase-4b-technical-design.md §8's recommendation,
+    // restated for this module): Large Purchase and Low Balance are
+    // deterministic, numeric-threshold-only triggers (notifications-v2.md's
+    // binding constraint 1), and the Monthly Summary trigger only ever reads
+    // the already-persisted `MonthlySummary.narrative` field verbatim — zero
+    // new `lib/ai/` call sites anywhere in this feature. This rule turns
+    // that "verified by construction, not convention" requirement into a
+    // build-time-enforced guarantee.
+    files: ["src/features/notifications/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/lib/ai", "@/lib/ai/*"],
+              message:
+                "features/notifications/** must never import from lib/ai/, directly or transitively — notifications-v2.md's binding constraint 1 (Large Purchase/Low Balance are deterministic-only) and binding constraint 2 (Monthly Summary is a verbatim, read-only reuse of MonthlySummary.narrative, never a newly generated one).",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ];
 
 export default eslintConfig;

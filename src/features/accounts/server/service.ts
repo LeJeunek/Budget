@@ -23,6 +23,10 @@ export function toAccount(row: PrismaAccountRow): Account {
     ...row,
     balance: row.balance.toNumber(),
     interestRate: row.interestRate === null ? null : row.interestRate.toNumber(),
+    // (Phase 4b) See `Account.lowBalanceThresholdOverride`'s own JSDoc in
+    // ../types.ts — same Decimal -> number conversion as the two fields above.
+    lowBalanceThresholdOverride:
+      row.lowBalanceThresholdOverride === null ? null : row.lowBalanceThresholdOverride.toNumber(),
   }
 }
 

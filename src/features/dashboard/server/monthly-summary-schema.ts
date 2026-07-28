@@ -165,6 +165,15 @@ export type MonthlySummaryNarrativeOutput = z.infer<
  * comment.
  */
 export interface MonthlyRecap {
+  /** (Phase 4b) The underlying `MonthlySummary` row's id — additive, not part
+   * of api-contracts.md's original Feature 3 wire shape, but required by
+   * `features/notifications/server/triggers/monthly-summary-trigger.ts`
+   * (phase-4b-technical-design.md §6) to set `Notification.monthlySummaryId`
+   * without a second, independently-scoped lookup of "this user's most
+   * recent summary" — the same in-memory row this function's caller already
+   * read is reused as-is for the notification (and, later, the email), per
+   * that design doc §5's "exactly one data object per user per event" rule. */
+  id: string
   /** `"yyyy-MM"`, always a fully-closed month (Feature 3 AC3). */
   month: string
   narrative: string | null

@@ -503,7 +503,7 @@ async function generateAndPersist(
     return { status: "unavailable" }
   }
 
-  await db.monthlySummary.update({
+  const updated = await db.monthlySummary.update({
     where: { userId_month: { userId, month: monthDate } },
     data: { narrative: result.data.narrative, citedFigures: result.data.citedFigures },
   })
@@ -511,6 +511,8 @@ async function generateAndPersist(
   return {
     status: "ok",
     data: {
+      // (Phase 4b) See `MonthlyRecap.id`'s own JSDoc.
+      id: updated.id,
       month: monthKey,
       narrative: result.data.narrative,
       citedFigures: result.data.citedFigures,
@@ -761,6 +763,11 @@ export async function regenerateMonthlySummary(
 // ---------------------------------------------------------------------------
 
 interface MonthlySummaryRow {
+  // (Phase 4b) See `MonthlyRecap.id`'s own JSDoc — threaded through here so
+  // every caller of `toMonthlyRecap` (including `getMostRecentSummary`,
+  // which the Monthly Summary notification trigger reads) gets the row's
+  // real id for free, with no second query.
+  id: string
   month: Date
   narrative: string | null
   citedFigures: Prisma.JsonValue | null
@@ -778,7 +785,7 @@ function toMonthlyRecap(row: MonthlySummaryRow): MonthlyRecap {
   const monthKey = formatMonthKey(row.month)
 
   if (row.narrative === null) {
-    return { month: monthKey, narrative: null, citedFigures: null, isPartialMonth: row.isPartialMonth }
+    return { id: row.id, month: monthKey, narrative: null, citedFigures: null, isPartialMonth: row.isPartialMonth }
   }
 
   const parsed = MonthlySummaryNarrativeSchema.safeParse({
@@ -786,10 +793,11 @@ function toMonthlyRecap(row: MonthlySummaryRow): MonthlyRecap {
     citedFigures: row.citedFigures,
   })
   if (!parsed.success) {
-    return { month: monthKey, narrative: null, citedFigures: null, isPartialMonth: row.isPartialMonth }
+    return { id: row.id, month: monthKey, narrative: null, citedFigures: null, isPartialMonth: row.isPartialMonth }
   }
 
   return {
+    id: row.id,
     month: monthKey,
     narrative: parsed.data.narrative,
     citedFigures: parsed.data.citedFigures,

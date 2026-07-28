@@ -23,7 +23,7 @@ import * as React from "react"
 import { Bell, X } from "lucide-react"
 import { toast } from "sonner"
 
-import { cn, formatDate } from "@/lib/utils"
+import { cn, formatCurrency, formatDate } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -67,6 +67,14 @@ function formatNotificationMessage(notification: Notification): string {
     }
     case "BILL_LATE":
       return `${notification.billName} is late.`
+    case "GOAL_ACHIEVED":
+      return `You achieved your goal: ${notification.goalName}!`
+    case "LARGE_PURCHASE":
+      return `A ${formatCurrency(notification.amount)} purchase at ${notification.merchant} exceeded your Large Purchase threshold.`
+    case "LOW_BALANCE":
+      return `${notification.accountName}'s balance dropped below your Low Balance threshold — now ${formatCurrency(notification.balance)}.`
+    case "MONTHLY_SUMMARY_READY":
+      return `Your summary for ${notification.month} is ready.`
     default: {
       const exhaustiveCheck: never = notification
       throw new Error(`Unsupported notification type: ${String((exhaustiveCheck as Notification).type)}`)

@@ -73,6 +73,17 @@ const interestRateSchema = decimalPrecision("Interest rate")
     `Interest rate must be ${MAX_INTEREST_RATE} or less — enter a percentage like 4.25, not 425`,
   )
 
+// (Phase 4b) Notifications v2's Low Balance trigger per-account override —
+// see prisma/schema.prisma's `Account.lowBalanceThresholdOverride` and
+// docs/architecture/api-contracts.md's Phase 4b `updateAccount` row ("gains
+// one optional field ... not a new action"). Same currency-precision shape
+// as `balanceSchema` (a real dollar threshold, `Decimal(14, 2)`), but with
+// its own non-negative floor — a negative "balance below which to alert me"
+// threshold is not a meaningful concept for any account type.
+const lowBalanceThresholdOverrideSchema = decimalPrecision("Low balance threshold")
+  .min(0, "Low balance threshold cannot be negative")
+  .max(MAX_BALANCE_ABS, `Low balance threshold must be no larger than ${MAX_BALANCE_ABS.toLocaleString("en-US")}`)
+
 const colorSchema = z
   .string()
   .regex(HEX_COLOR_PATTERN, "Color must be a 6-digit hex value, e.g. #6366f1")
@@ -125,7 +136,10 @@ export type CreateAccountInput = z.infer<typeof CreateAccountSchema>
  * `interestRate: null` is accepted (via `.nullable()`) so a client can
  * explicitly clear a previously-set rate, e.g. after correcting the account
  * type away from an interest-bearing one — plain `.optional()` alone cannot
- * distinguish "leave unchanged" from "clear it".
+ * distinguish "leave unchanged" from "clear it". `lowBalanceThresholdOverride`
+ * (Phase 4b) follows the identical nullable-clear pattern — `null` reverts
+ * this one account to the user's global `NotificationThresholdSettings.lowBalanceThreshold`
+ * (or the system default), per that column's own schema comment.
  */
 export const UpdateAccountSchema = z.object({
   id: z.string().min(1, "Account id is required"),
@@ -135,6 +149,7 @@ export const UpdateAccountSchema = z.object({
   balance: balanceSchema.optional(),
   interestRate: interestRateSchema.nullable().optional(),
   color: colorSchema.optional(),
+  lowBalanceThresholdOverride: lowBalanceThresholdOverrideSchema.nullable().optional(),
 })
 
 export type UpdateAccountInput = z.infer<typeof UpdateAccountSchema>

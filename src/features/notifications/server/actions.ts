@@ -1,23 +1,24 @@
 "use server"
 
-import { z } from "zod"
-
 import { getCurrentUser } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { ok, fail, type ApiResult } from "@/lib/api-response"
 
-import type { Notification } from "../types"
-import { NOTIFICATION_INCLUDE, toNotification } from "./service"
+import type { Notification, NotificationPreferenceView } from "../types"
+import { NOTIFICATION_INCLUDE, toNotification } from "./notification-mapper"
+import { getNotificationThresholdSettings } from "./preferences"
+import {
+  NotificationIdSchema,
+  UpdateNotificationPreferenceSchema,
+  UpdateNotificationThresholdSettingsSchema,
+} from "./validation"
 
 /**
  * Mutating Server Actions for the Notifications module, per
  * docs/architecture/api-contracts.md's Notifications section:
- * `dismissNotification`, `markNotificationRead`, `markAllNotificationsRead`.
- *
- * No separate `validation.ts` — per folder-tree.md's Phase 2 note, this
- * module has no complex input to validate (two of the three actions take
- * just an id); the single small id schema lives here instead of a dedicated
- * file that would otherwise hold nothing else.
+ * `dismissNotification`, `markNotificationRead`, `markAllNotificationsRead`
+ * (Notifications v1), plus Phase 4b's `updateNotificationPreference`/
+ * `updateNotificationThresholdSettings`.
  *
  * Every action, per folder-tree.md's rule:
  *   1. Calls getCurrentUser() and fails closed with "UNAUTHENTICATED".
@@ -31,10 +32,6 @@ import { NOTIFICATION_INCLUDE, toNotification } from "./service"
  *      below touches only the `Notification` row's own `readAt`/`dismissedAt`
  *      columns.
  */
-
-const NotificationIdSchema = z.object({
-  id: z.string().min(1, "Notification id is required"),
-})
 
 /**
  * Marks a single notification as read (AC4). Idempotent — marking an
@@ -135,4 +132,89 @@ export async function markAllNotificationsRead(): Promise<
   })
 
   return ok({ count: result.count })
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4b — notification preferences / threshold settings, per
+// docs/architecture/api-contracts.md's Phase 4b section.
+// ---------------------------------------------------------------------------
+
+/**
+ * Updates one trigger type's in-app/email preference (notifications-v2.md's
+ * preferences screen). Upserts on `(userId, type)` — a caller flipping a
+ * toggle for a trigger type with no existing row yet is exactly the "lazy
+ * materialization" case `preferences.ts`'s own JSDoc describes (row absence
+ * = defaults; this is the point at which a row first becomes explicit).
+ * Only the field(s) actually present in the parsed input are written, same
+ * "undefined means leave unchanged" convention as `updateAccount` — a caller
+ * flipping only the Email toggle for an as-yet-unmaterialized row still
+ * needs the OTHER column's create-time value to be its own documented
+ * default, not an accidental `undefined`/DB-default mismatch, so the
+ * `create` branch below always supplies both columns' documented defaults
+ * explicitly.
+ */
+export async function updateNotificationPreference(
+  input: unknown,
+): Promise<ApiResult<NotificationPreferenceView>> {
+  const user = await getCurrentUser()
+  if (!user) return fail("UNAUTHENTICATED")
+
+  const parsed = UpdateNotificationPreferenceSchema.safeParse(input)
+  if (!parsed.success) {
+    return fail(parsed.error.issues[0]?.message ?? "Invalid notification preference input")
+  }
+  const { type, inAppEnabled, emailEnabled } = parsed.data
+
+  const row = await db.notificationPreference.upsert({
+    where: { userId_type: { userId: user.id, type } },
+    create: {
+      userId: user.id,
+      type,
+      inAppEnabled: inAppEnabled ?? true,
+      emailEnabled: emailEnabled ?? false,
+    },
+    update: {
+      ...(inAppEnabled !== undefined ? { inAppEnabled } : {}),
+      ...(emailEnabled !== undefined ? { emailEnabled } : {}),
+    },
+  })
+
+  return ok({ type: row.type, inAppEnabled: row.inAppEnabled, emailEnabled: row.emailEnabled })
+}
+
+/**
+ * Updates the caller's Large Purchase / Low Balance dollar thresholds.
+ * Upserts on `userId` (one row per user, per `NotificationThresholdSettings`'s
+ * `@@unique` on that column) — same lazy-materialization-on-first-customization
+ * convention as `updateNotificationPreference` above. Returns the fully
+ * resolved view (via `preferences.getNotificationThresholdSettings`, not the
+ * raw row) so a `null` column the caller didn't touch still comes back as
+ * its resolved system default, exactly what the settings screen displays.
+ */
+export async function updateNotificationThresholdSettings(
+  input: unknown,
+): Promise<ApiResult<{ largePurchaseThreshold: number; lowBalanceThreshold: number }>> {
+  const user = await getCurrentUser()
+  if (!user) return fail("UNAUTHENTICATED")
+
+  const parsed = UpdateNotificationThresholdSettingsSchema.safeParse(input)
+  if (!parsed.success) {
+    return fail(parsed.error.issues[0]?.message ?? "Invalid threshold settings input")
+  }
+  const { largePurchaseThreshold, lowBalanceThreshold } = parsed.data
+
+  await db.notificationThresholdSettings.upsert({
+    where: { userId: user.id },
+    create: {
+      userId: user.id,
+      largePurchaseThreshold,
+      lowBalanceThreshold,
+    },
+    update: {
+      ...(largePurchaseThreshold !== undefined ? { largePurchaseThreshold } : {}),
+      ...(lowBalanceThreshold !== undefined ? { lowBalanceThreshold } : {}),
+    },
+  })
+
+  return ok(await getNotificationThresholdSettings(user.id))
 }
