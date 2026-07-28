@@ -38,10 +38,12 @@ import {
   ChevronsLeft,
   ChevronsRight,
   CreditCard,
+  FileText,
   Flag,
   HeartPulse,
   LayoutDashboard,
   PiggyBank,
+  Settings,
   Target,
   TrendingUp,
   Wallet,
@@ -103,6 +105,22 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Debt", href: "/debt", icon: CreditCard },
       { label: "Investments", href: "/investments", icon: TrendingUp },
       { label: "Analytics", href: "/analytics", icon: BarChart3 },
+      // (Phase 4b) Reports placement decision, made by the Frontend Lead —
+      // docs/architecture/api-contracts.md's Phase 4b Reports row specifies
+      // the route (`GET /api/reports`) but leaves nav placement to frontend
+      // composition, same as every prior phase's own domain feature.
+      // Placed in "Wealth" immediately after Analytics, not a new top-level
+      // section: reports.md's own Business Value section frames this
+      // feature explicitly as taking data that "already exists somewhere in
+      // the app today — the Dashboard, Analytics, Debt Tracker,
+      // Investments, Budgeting" and making it a downloadable document,
+      // never computing anything new of its own (Cross-Cutting Requirement
+      // #2, "no independently duplicated numbers") — it is a presentation
+      // layer *over* this section's own aggregate/analytical surfaces, the
+      // same reasoning Health Score below already uses for its own
+      // placement here, so grouping the two together keeps every
+      // "whole-picture read over other domains' data" surface in one place.
+      { label: "Reports", href: "/reports", icon: FileText },
       // (Phase 3b) Financial Goals placement decision, made by the Frontend
       // Lead — docs/architecture/api-contracts.md's Financial Goals section
       // specifies the route (`/financial-goals`) but, like Recurring
@@ -128,6 +146,32 @@ export const NAV_SECTIONS: NavSection[] = [
       // belongs with the other whole-picture/analytical surfaces, not
       // "Planning" alongside the forward-looking cash-flow tools.
       { label: "Health Score", href: "/financial-health-score", icon: HeartPulse },
+    ],
+  },
+  {
+    // (Phase 4b) Notification Preferences placement decision, made by the
+    // Frontend Lead — docs/product/notifications-v2.md's Email Delivery
+    // Channel AC2 introduces this product's first settings-style screen,
+    // with no route/nav placement specified by the architecture doc (same
+    // "left to frontend composition" pattern as every prior phase's own
+    // domain feature). Deliberately a new, separate "Account" section
+    // rather than folded into "Planning" or "Wealth": every other section
+    // here groups a *domain* (data the user tracks — bills, debt,
+    // investments), while this page configures how the app notifies the
+    // user about all of them at once — an account-level, cross-cutting
+    // concern with no balance-sheet or cash-flow figure of its own to sit
+    // alongside. Placed here in the Sidebar (via `NAV_SECTIONS`, this
+    // file's own documented, safe extension point for a new nav item)
+    // rather than as a new slot on `TopNav`: `TopNav`
+    // (`components/shared/top-nav.tsx`) is a shared, domain-agnostic
+    // primitive outside the Frontend Lead's "assemble, never build/modify
+    // reusable components" mandate — adding a new prop/slot to it is a
+    // structural change to that component, not page composition, so it's
+    // the wrong extension point for this decision even though the feature
+    // brief floated it as an option.
+    title: "Account",
+    items: [
+      { label: "Notification Preferences", href: "/settings/notifications", icon: Settings },
     ],
   },
 ]
