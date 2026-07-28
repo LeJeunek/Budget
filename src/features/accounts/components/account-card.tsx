@@ -23,6 +23,7 @@ import {
   unarchiveAccount,
 } from "@/features/accounts/server/actions"
 import { AccountFormDialog } from "@/features/accounts/components/account-form"
+import { ReconciliationPrompt } from "@/features/accounts/components/reconciliation-prompt"
 import { ACCOUNT_TYPE_LABELS } from "@/features/accounts/components/account-form-schema"
 import { cn, formatCurrency } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -140,6 +141,12 @@ export function AccountCard({ account }: AccountCardProps) {
               Manually updated balance
             </span>
           )}
+          {/* One-time historical reconciliation prompt (docs/product/
+              accounts-balance-auto-adjustment.md Criterion 8) — renders
+              nothing unless this account has a non-zero transaction-derived
+              vs. stored balance difference and hasn't been dismissed; see
+              reconciliation-prompt.tsx for the full eligibility logic. */}
+          <ReconciliationPrompt account={account} />
         </CardContent>
       </Card>
 
