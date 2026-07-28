@@ -1,6 +1,6 @@
-# FinanceOS — Folder Tree (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b + Phase 4a foundation)
+# FinanceOS — Folder Tree (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b + Phase 4a + Phase 4b foundation)
 
-Phase 0/1 files are listed concretely below, unchanged from the original design. Phase 2 additions are listed in their own section. Phase 3a additions (Debt Tracker, Investments, Recurring Income, Net Worth aggregation update, Net Worth Snapshot job) are listed in their own section further down. Phase 3b additions (Net Worth History chart, Analytics, Financial Goals) are listed in their own section. Phase 4a additions (`lib/ai/` plus all five AI features: Transaction Auto-Categorization, AI Budget Advisor, Automatic Monthly Summaries, Spending Insights, Financial Health Score) are listed in the final section, per `docs/product/ai-features.md` and `docs/architecture/ai-features-design.md`.
+Phase 0/1 files are listed concretely below, unchanged from the original design. Phase 2 additions are listed in their own section. Phase 3a additions (Debt Tracker, Investments, Recurring Income, Net Worth aggregation update, Net Worth Snapshot job) are listed in their own section further down. Phase 3b additions (Net Worth History chart, Analytics, Financial Goals) are listed in their own section. Phase 4a additions (`lib/ai/` plus all five AI features: Transaction Auto-Categorization, AI Budget Advisor, Automatic Monthly Summaries, Spending Insights, Financial Health Score) are listed in their own section, per `docs/product/ai-features.md` and `docs/architecture/ai-features-design.md`. Phase 4b additions (`features/reports/`, `lib/email/`, and Notifications v2's extension of `features/notifications/`) are listed in the final section, per `docs/product/reports.md`, `docs/product/notifications-v2.md`, and `docs/architecture/phase-4b-technical-design.md`.
 
 ```
 Budget/
@@ -50,14 +50,16 @@ Budget/
 │   │   ├── debt/ … investments/ … recurring-income/                # Phase 3a — see below
 │   │   ├── analytics/                 # Phase 3b — see below
 │   │   ├── financial-goals/           # Phase 3b — see below
-│   │   └── financial-health-score/    # Phase 4a — NEW module, see below
+│   │   ├── financial-health-score/    # Phase 4a — NEW module, see below
+│   │   └── reports/                   # Phase 4b — NEW module, see below
 │   │
 │   ├── lib/
 │   │   ├── db.ts                     # Prisma singleton
 │   │   ├── auth.ts                   # Better Auth instance + getCurrentUser()
 │   │   ├── api-response.ts           # { success, data } | { success, error } helper
 │   │   ├── utils.ts                  # cn(), formatCurrency(), formatDate()
-│   │   └── ai/                       # Phase 4a — NOW POPULATED, see below (was reserved/empty)
+│   │   ├── ai/                       # Phase 4a — populated, see below (was reserved/empty)
+│   │   └── email/                    # Phase 4b — NEW, see below
 │   │
 │   └── tests/
 │       ├── integration/              # Integration Test Engineer — reserved
@@ -256,7 +258,7 @@ src/
 │       │   │                         #   dashboard.server/net-worth-history.ts.getNetWorthHistory,
 │       │   │                         #   accounts.service.getAccounts, dashboard.service
 │       │   │                         #   .getMonthlySummary (x3, rolling average) — see
-│       │   │                         #   Architecture.md's full call list. Also owns the private
+│       │   │                         #   Architecture.md for the full call list. Also owns the private
 │       │   │                         #   Debt Payoff exclusivity check (no shared lib/ guard needed).
 │       │   ├── actions.ts            # createFinancialGoal, updateFinancialGoal,
 │       │   │                         #   archiveFinancialGoal, unarchiveFinancialGoal —
@@ -363,8 +365,12 @@ src/
 │   │       │                         #   monthly aggregates, Net Worth History, and Analytics'
 │   │       │                         #   Category Trends/Largest Purchases; persists once per
 │   │       │                         #   user/month, never regenerated automatically (AC2)
+│   │       │                         #   [Phase 4b ADDS: getSummaryForMonth(userId, month) —
+│   │       │                         #   see the Phase 4b section below]
 │   │       └── service.ts            # UPDATED: adds getFinancialHealthScoreCard(userId), a thin
 │   │                                 #   pass-through mirroring getBudgetHealthScoreCard exactly
+│   │                                 #   [Phase 4b ADDS: net-worth-history.ts gains
+│   │                                 #   getNetWorthAsOf(userId, date) — see below]
 │   │
 │   ├── analytics/                    # existing Phase 3b module — Phase 4a adds (see the Phase 3b
 │   │   │                             #   tree above for exact insertion points):
@@ -374,6 +380,9 @@ src/
 │   │       │                         #   only; owns its own (userId, reportingPeriod)-keyed
 │   │       │                         #   refresh-cache row (schema TBD, Database Architect)
 │   │       └── actions.ts            # UPDATED: adds refreshSpendingInsights
+│   │                                 #   [Phase 4b: every period-aware metric function's `period`
+│   │                                 #   param is widened to also accept a resolved
+│   │                                 #   { start, end } range — see the Phase 4b section below]
 │   │
 │   └── financial-health-score/       # NEW MODULE — see Architecture.md's module-placement
 │       │                             #   resolution for why this is its own module, not a
@@ -438,3 +447,157 @@ src/
 - **No new `hooks/` folder is added to any of the five features.** Every on-demand action (refresh, reconsider) is a Server Action followed by `revalidatePath`, the same mutation flow every other domain in this app already uses — none of the five features has a Net-Worth-History-style client-side toggle-and-refetch requirement. See Architecture.md's Server/client boundary section.
 - **Three new cron Route Handlers, zero new session-authenticated ones.** `app/api/cron/categorize-transactions/`, `app/api/cron/monthly-summary/`, and `app/api/cron/financial-health-score-snapshot/` all follow `net-worth-snapshot`'s already-established shared-secret/plain-JSON exception pattern exactly — this is the third, fourth, and fifth instance of that pattern, not three new ones invented independently.
 - **`app/(dashboard)/monthly-recap/` and `app/(dashboard)/financial-health-score/` are the only two brand-new top-level routes this phase** — Transactions/Budgeting/Analytics/Dashboard's existing pages are updated in place, not given new routes, since their AI features are additive widgets/cards on pages that already exist.
+
+---
+
+## Phase 4b additions
+
+Per `docs/product/reports.md`, `docs/product/notifications-v2.md`, and `docs/architecture/phase-4b-technical-design.md`. One new feature module (`reports`), one new shared `lib/` module (`lib/email/`), touches to two existing feature modules (`dashboard`, `investments`, `analytics` — small, additive read functions only), and an extension of the existing `notifications` module (four new trigger files, the email-dispatch step, the preferences/threshold-settings surface).
+
+```
+src/
+├── app/
+│   ├── (dashboard)/
+│   │   ├── reports/
+│   │   │   └── page.tsx              # NEW: report type + period picker, download button
+│   │   │                             #   (features/reports/components/)
+│   │   └── settings/
+│   │       └── notifications/
+│   │           └── page.tsx          # NEW: the six-trigger-type, two-channel preferences screen
+│   │                                 #   (AC2/AC3/AC4) + the two threshold settings (AC of Large
+│   │                                 #   Purchase/Low Balance)
+│   │
+│   └── api/
+│       ├── reports/
+│       │   └── route.ts              # NEW — GET, session-authenticated, query-string driven
+│       │                             #   (?type=&month=/&year=/&period=/&start=&end=). Returns raw
+│       │                             #   application/pdf bytes on success (a deliberate, narrow
+│       │                             #   exception to ApiResult<T> on the success path only — see
+│       │                             #   phase-4b-technical-design.md §3), ApiResult<never> JSON
+│       │                             #   on failure.
+│       ├── notifications/
+│       │   └── unsubscribe/
+│       │       └── route.ts          # NEW — GET, token-authenticated (a signed, single-purpose
+│       │                             #   (userId, type) token — NOT a session, NOT the shared cron
+│       │                             #   secret), sets that one trigger type's emailEnabled to
+│       │                             #   false. See phase-4b-technical-design.md §5.
+│       └── cron/
+│           └── evaluate-notifications/
+│               └── route.ts          # NEW — POST, shared-secret authenticated, the fifth instance
+│                                     #   of the Phase 3a cron exception. Loops every user, calling
+│                                     #   the same ensureNotifications(userId) a user's own request
+│                                     #   would call — see phase-4b-technical-design.md §6.
+│
+├── features/
+│   ├── reports/                      # NEW MODULE — see phase-4b-technical-design.md §2–§3 for the
+│   │   │                             #   full PDF-library decision and layout reasoning
+│   │   ├── types.ts                  # ReportType, ReportPeriodInput, per-report-type data DTOs
+│   │   ├── server/
+│   │   │   ├── validation.ts         # GenerateReportRequestSchema (Zod discriminated union on
+│   │   │   │                         #   `type`; enforces the custom-range upper bound, Risk #22)
+│   │   │   ├── period.ts             # resolveReportPeriod(input) — delegates to
+│   │   │   │                         #   analytics/server/period.ts's resolveReportingPeriodRange
+│   │   │   │                         #   for the four shared presets; handles the single-month,
+│   │   │   │                         #   single-year, and custom-range cases itself
+│   │   │   ├── data/
+│   │   │   │   ├── monthly-report-data.ts       # assembleMonthlyReportData(userId, month)
+│   │   │   │   ├── yearly-report-data.ts        # assembleYearlyReportData(userId, year)
+│   │   │   │   ├── tax-summary-report-data.ts   # assembleTaxSummaryReportData(userId, year)
+│   │   │   │   ├── income-report-data.ts        # assembleIncomeReportData(userId, range)
+│   │   │   │   ├── expense-report-data.ts       # assembleExpenseReportData(userId, range)
+│   │   │   │   └── cash-flow-report-data.ts     # assembleCashFlowReportData(userId, range)
+│   │   │   │                                    # — each ONLY calls other domains' existing,
+│   │   │   │                                    #   already-reviewed read functions; zero new
+│   │   │   │                                    #   aggregation logic, zero lib/ai/ import
+│   │   │   ├── pdf/
+│   │   │   │   ├── document-shell.tsx    # <ReportDocument> — shared header/footer/disclaimer slot
+│   │   │   │   ├── report-table.tsx      # <ReportTable> — shared table primitive
+│   │   │   │   ├── report-section.tsx    # <ReportSection> — titled block wrapper
+│   │   │   │   ├── no-data-state.tsx     # <NoDataState> — shared empty-state renderer
+│   │   │   │   └── templates/
+│   │   │   │       ├── monthly-report-template.tsx
+│   │   │   │       ├── yearly-report-template.tsx
+│   │   │   │       ├── tax-summary-report-template.tsx
+│   │   │   │       ├── income-report-template.tsx
+│   │   │   │       ├── expense-report-template.tsx
+│   │   │   │       └── cash-flow-report-template.tsx
+│   │   │   │                                    # all of pdf/ is server-only by convention
+│   │   │   │                                    #   (never imported by app/ or a Client Component)
+│   │   │   ├── render.ts             # renderReportPdf(type, data) — THE ONLY file that imports
+│   │   │   │                         #   @react-pdf/renderer directly
+│   │   │   └── service.ts            # generateReport(userId, request) — the ONLY function
+│   │   │                             #   app/api/reports/route.ts calls
+│   │   └── components/
+│   │       ├── report-type-select.tsx
+│   │       └── report-download-button.tsx
+│   │                                 # (no hooks/ folder — one-shot fetch-and-download, no client
+│   │                                 #   cache need, see phase-4b-technical-design.md §3)
+│   │
+│   ├── dashboard/                    # existing Phase 1 module — Phase 4b adds:
+│   │   └── server/
+│   │       ├── net-worth-history.ts  # UPDATED: adds getNetWorthAsOf(userId, date) — point-in-time
+│   │       │                         #   snapshot lookup, needed by Monthly/Yearly Reports
+│   │       └── monthly-summary.ts    # UPDATED: adds getSummaryForMonth(userId, month) — exact-month
+│   │                                 #   lookup, needed by the Monthly Report's narrative section
+│   │                                 #   and the Monthly Summary notification trigger
+│   │
+│   ├── investments/                  # existing Phase 3a module — Phase 4b adds:
+│   │   └── server/service.ts         # UPDATED: adds getDividendIncomeForPeriod(userId, { start,
+│   │                                 #   end }) — period-scoped, portfolio-wide dividend aggregate,
+│   │                                 #   needed by the Yearly and Tax Summary Reports
+│   │
+│   ├── analytics/                    # existing Phase 3b/4a module — Phase 4b adds:
+│   │   └── server/                   # UPDATED: every period-aware metric function's `period` param
+│   │                                 #   widened to ReportingPeriod | { start: Date; end: Date } —
+│   │                                 #   additive, backward-compatible, no behavior change for any
+│   │                                 #   existing Analytics caller. See phase-4b-technical-design.md
+│   │                                 #   §3 for the full list of touched functions.
+│   │
+│   └── notifications/                # existing Phase 2 module — Phase 4b extends significantly:
+│       └── server/
+│           ├── service.ts            # UPDATED: ensureNotifications(userId) becomes a thin
+│           │                         #   orchestrator over triggers/*.ts + the shared email-dispatch
+│           │                         #   step
+│           ├── triggers/
+│           │   ├── budget-bill-triggers.ts    # v1's existing logic, extracted as-is (no behavior
+│           │   │                              #   change) for file-size/SRP reasons
+│           │   ├── goal-achieved-trigger.ts    # NEW
+│           │   ├── large-purchase-trigger.ts   # NEW
+│           │   ├── low-balance-trigger.ts      # NEW
+│           │   └── monthly-summary-trigger.ts  # NEW
+│           ├── email-dispatch.ts     # NEW: the one shared "maybe email this newly-created
+│           │                         #   notification" step, called once per new row regardless
+│           │                         #   of trigger type
+│           ├── preferences.ts        # NEW: getNotificationPreferences(userId),
+│           │                         #   getNotificationThresholdSettings(userId) — both materialize
+│           │                         #   system defaults for any missing row
+│           ├── actions.ts            # UPDATED: adds updateNotificationPreference,
+│           │                         #   updateNotificationThresholdSettings
+│           └── validation.ts         # UPDATED: adds UpdateNotificationPreferenceSchema,
+│                                     #   UpdateNotificationThresholdSettingsSchema
+│
+└── lib/
+    └── email/                        # NEW MODULE — see phase-4b-technical-design.md §4–§5 for the
+        │                             #   full email-provider decision and layout reasoning
+        ├── client.ts                  # THE ONLY file importing `resend` / reading RESEND_API_KEY
+        ├── send-notification-email.ts # sendNotificationEmail(...) — THE one function every
+        │                             #   trigger-evaluation file calls; never throws
+        ├── templates/
+        │   ├── goal-achieved-email.tsx
+        │   ├── large-purchase-email.tsx
+        │   ├── low-balance-email.tsx
+        │   ├── monthly-summary-email.tsx
+        │   ├── budget-exceeded-email.tsx
+        │   └── bill-due-email.tsx
+        └── unsubscribe-token.ts       # generateUnsubscribeToken / verifyUnsubscribeToken
+```
+
+### Rationale notes
+
+- **`features/reports/` is a new feature module, not `lib/reports/`.** Per the Guiding Pattern's own placement test (see Architecture.md), reading from many other domains does not make a module cross-feature infrastructure — Reports is a pure "leaf" consumer, structurally identical to Financial Goals/Financial Health Score, and nothing outside it will ever import from it. See `phase-4b-technical-design.md` §3 for the full reasoning.
+- **`lib/email/` is placed in `lib/`, unlike `features/reports/`** — the deciding difference is that email sending genuinely is needed by multiple feature call sites (every one of the six notification trigger types), the same "genuinely cross-feature" test `lib/ai/`/`lib/recurrence.ts`/`lib/merchant-normalization.ts` were all held to. `features/reports/server/pdf/` is not promoted to `lib/` for the opposite reason — exactly one feature (Reports) needs it.
+- **`features/reports/server/pdf/` files are plain `.tsx` component trees but are server-only by convention** — same rule every other `server/` file in this codebase already follows; no new naming convention was needed to express this (see Architecture.md's Phase 4b note on the isomorphic-pure-calculation-file convention for why this doesn't need the `-math.ts` feature-root treatment either).
+- **`features/notifications/server/triggers/` is a new per-trigger-type file split**, mirroring Analytics' own "cohesive files by shared query shape" precedent (Architecture.md's Phase 3b Analytics module structure section) — six trigger types is enough to justify the same file-size/SRP discipline Analytics' 11 metrics already earned in Phase 3b.
+- **`email-dispatch.ts` is a single shared file, not duplicated logic inside each of the six trigger files** — every trigger file's job is only "evaluate + persist an in-app Notification row"; whether/how to email it is one shared, generic step applied uniformly afterward, avoiding six near-identical copies of the same preference-check-then-send logic.
+- **No new `hooks/` folder is added to `features/reports/` or `features/notifications/`.** Report generation is a one-shot fetch-and-download; preferences toggles are ordinary Server Action + `revalidatePath` mutations — neither has a Net-Worth-History-style client-cache-refetch requirement.
+- **Three new Route Handlers this phase**, all narrow, deliberate exceptions to this codebase's two existing endpoint categories (ordinary session-authenticated `ApiResult<T>` JSON, and shared-secret cron `POST`): `app/api/reports/route.ts` (session-authenticated, but returns raw binary bytes on success), `app/api/notifications/unsubscribe/route.ts` (token-authenticated, no session, no shared secret), and `app/api/cron/evaluate-notifications/route.ts` (the fifth ordinary instance of the existing cron exception — not itself a new pattern). See `phase-4b-technical-design.md` §3/§5/§6 for the full reasoning behind each.

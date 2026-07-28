@@ -1,6 +1,6 @@
-# FinanceOS — API Contracts (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b + Phase 4a foundation)
+# FinanceOS — API Contracts (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b + Phase 4a + Phase 4b foundation)
 
-All responses use `ApiResult<T>` from `lib/api-response.ts` (see naming-standards.md). All endpoints require an authenticated session (Better Auth) except `/api/auth/*`; unauthenticated requests return `{ success: false, error: "UNAUTHENTICATED" }` with HTTP 401. All queries are scoped server-side to `getCurrentUser().id` — no endpoint accepts a client-supplied user ID. **(Phase 3a exception, documented in full in its own section below, extended by Phase 4a)**: `app/api/cron/net-worth-snapshot/route.ts` is authenticated by a shared secret instead of a user session, since it has no calling user — it iterates all users server-side. It does not use `ApiResult<T>` either, for the same reason `app/api/uploadthing/route.ts` doesn't (system/integration surface, not a client-facing contract). **Phase 4a adds three more instances of this exact same exception** — `app/api/cron/categorize-transactions/route.ts`, `app/api/cron/monthly-summary/route.ts`, `app/api/cron/financial-health-score-snapshot/route.ts` — see the Phase 4a section at the end of this document. **Phase 4a also introduces one new, cross-cutting response-shape composition** (not a new exception to `ApiResult<T>`, an addition on top of it): every on-demand AI-generation Server Action returns `ApiResult<AiFeatureResult<T>>` — see that section's own note for why.
+All responses use `ApiResult<T>` from `lib/api-response.ts` (see naming-standards.md). All endpoints require an authenticated session (Better Auth) except `/api/auth/*`; unauthenticated requests return `{ success: false, error: "UNAUTHENTICATED" }` with HTTP 401. All queries are scoped server-side to `getCurrentUser().id` — no endpoint accepts a client-supplied user ID. **(Phase 3a exception, documented in full in its own section below, extended by Phase 4a and 4b)**: `app/api/cron/net-worth-snapshot/route.ts` is authenticated by a shared secret instead of a user session, since it has no calling user — it iterates all users server-side. It does not use `ApiResult<T>` either, for the same reason `app/api/uploadthing/route.ts` doesn't (system/integration surface, not a client-facing contract). **Phase 4a adds three more instances of this exact same exception** — `app/api/cron/categorize-transactions/route.ts`, `app/api/cron/monthly-summary/route.ts`, `app/api/cron/financial-health-score-snapshot/route.ts` — see the Phase 4a section at the end of this document. **Phase 4a also introduces one new, cross-cutting response-shape composition** (not a new exception to `ApiResult<T>`, an addition on top of it): every on-demand AI-generation Server Action returns `ApiResult<AiFeatureResult<T>>` — see that section's own note for why. **Phase 4b adds a fourth cron instance** (`app/api/cron/evaluate-notifications/route.ts`) plus two genuinely new kinds of exception — a session-authenticated route whose success response is raw binary bytes, not JSON (`app/api/reports/route.ts`), and a token-authenticated (neither session nor shared-secret) route (`app/api/notifications/unsubscribe/route.ts`) — see the Phase 4b section at the end of this document.
 
 ## Auth
 - `ALL /api/auth/[...all]` — handled entirely by Better Auth's Next.js handler. Backend Engineer wires it up; does not reimplement auth logic.
@@ -12,7 +12,7 @@ All responses use `ApiResult<T>` from `lib/api-response.ts` (see naming-standard
 |---|---|---|---|
 | List accounts | Server Component direct call to `service.getAccounts(userId, { includeArchived? })` | — | `Account[]` |
 | Create account | Server Action `createAccount` | `CreateAccountSchema` (name, type, institution?, balance, interestRate?, color) | `ApiResult<Account>` |
-| Update account | Server Action `updateAccount` | `UpdateAccountSchema` (id + partial fields) | `ApiResult<Account>` |
+| Update account | Server Action `updateAccount` | `UpdateAccountSchema` (id + partial fields) — **(Phase 4b)** gains one optional field, `lowBalanceThresholdOverride: number \| null` (Low Balance's per-account override, meaningful only for Checking/Savings/Cash — see the Phase 4b section) | `ApiResult<Account>` |
 | Archive account (soft delete) | Server Action `archiveAccount` | `AccountIdSchema` (`{ id: string }`) — idempotent, archiving an already-archived account just confirms the end state | `ApiResult<Account>` |
 | Unarchive account (restore) | Server Action `unarchiveAccount` | `AccountIdSchema` (`{ id: string }`) — idempotent | `ApiResult<Account>` |
 | List (client-side refetch) | `GET /api/accounts?includeArchived=` — thin wrapper around `service.getAccounts`, used only by `features/accounts/hooks/use-accounts.ts` for post-mutation cache refetch; Server Components should still call `service.getAccounts` directly, not this route | — | `ApiResult<Account[]>` |
@@ -22,6 +22,8 @@ Archiving (never hard-deleting) an account with existing transactions is require
 **(Phase 3a) `setDerivedBalance` — new, narrow, internal function, not a client-facing action.** Per Architecture.md's "Investments → Accounts: the derived-balance write-back," `features/accounts/server/service.ts` exports one new function, e.g. `setDerivedBalance(userId, accountId, balance): Promise<Account>`, called only from `features/investments/server/actions.ts`.
 
 **(Phase 3b) `getAccounts` gains one new read-only caller, no signature change.** `features/financial-goals/server/service.ts` calls the existing `service.getAccounts(userId)` (non-archived only, its existing default) to sum a user-selected Account subset for the Net Worth/Savings Target goal type's `ACCOUNT_SUBSET` measurement basis — see api-contracts.md's Financial Goals section below. No new Accounts function is introduced for this; the sign-adjustment (`CREDIT_CARD` balances subtracted) is applied by the caller, matching the existing convention already inlined in `dashboard.service.getNetWorth`.
+
+**(Phase 4b) `getAccounts` gains a second new read-only caller.** `features/notifications/server/triggers/low-balance-trigger.ts` calls `service.getAccounts(userId)` filtered to non-archived Checking/Savings/Cash types — see the Phase 4b section below.
 
 ## Transactions (`features/transactions`)
 **Doc correction (CTO, 2026-07-19):** the List row originally had no `sortBy`/`sortDir` params, even though `docs/product/transactions.md` AC2 requires sorting by date/amount/merchant/category. The implementing agent correctly declined to extend this contract unilaterally and flagged the gap instead of guessing — resolved below.
@@ -45,6 +47,8 @@ Pagination uses `page`/`pageSize` (not cursor) for Phase 1 — matches TanStack 
 
 **(Phase 4a) Transaction Auto-Categorization — see its own full section at the end of this document.** No change to any row above; the new suggestion lifecycle (`requestCategorySuggestion`/`acceptCategorySuggestion`/`rejectCategorySuggestion`) is entirely additive, and `acceptCategorySuggestion` reuses `updateTransaction`'s existing category-assignment code path rather than introducing a second write mechanism (per Feature 1 AC4).
 
+**(Phase 4b) `EXCLUDE_SPLIT_PARENTS` gains a fourth consumer.** `features/notifications/server/triggers/large-purchase-trigger.ts` imports it from its same canonical home (`features/transactions/server/service.ts`) — see the Phase 4b section below. No change to any row above.
+
 ## Dashboard (`features/dashboard`)
 Read-only aggregation, Server Component direct calls (no client mutation, so no Server Actions/routes needed):
 - `service.getNetWorth(userId)` → `{ total: number; byAccount: { accountId: string; balance: number }[] }`
@@ -61,6 +65,10 @@ Read-only aggregation, Server Component direct calls (no client mutation, so no 
 **(Phase 3b) Net Worth History chart — see its own full section below**, after Financial Goals, for the new `features/dashboard/server/net-worth-history.ts` module and its one new Route Handler.
 
 **(Phase 4a) `service.getFinancialHealthScoreCard(userId)`** — a third thin pass-through, added alongside the two above, mirroring `getBudgetHealthScoreCard` exactly: calls `features/financial-health-score/server/service.ts.getFinancialHealthScore(userId)` and maps it to the Dashboard summary card's small shape. **Automatic Monthly Summaries** also add read functions to this module — see the Phase 4a section at the end of this document.
+
+**(Phase 4b) Two new, narrow read functions — see the Phase 4b section at the end of this document for full reasoning:**
+- `net-worth-history.ts.getNetWorthAsOf(userId, date)` → `{ date: string; netWorth: number } | null` — a point-in-time variant of the existing range query, needed by Reports' Monthly/Yearly report types.
+- `monthly-summary.ts.getSummaryForMonth(userId, month)` → `MonthlySummary | null` — an exact-month lookup, needed by Reports' Monthly report narrative section and by the Monthly Summary notification trigger.
 
 ## Categories (`features/categories`)
 **Scope correction (CTO, 2026-07-19):** this section previously scoped Phase 1 Categories as seed-only/no-CRUD, which conflicted with the Roadmap's Phase 1 description. Resolved: **minimal custom-category CRUD ships in Phase 1.**
@@ -122,6 +130,8 @@ Per `docs/product/budgeting.md`. Read paths are Server Component direct calls; t
 
 **(Phase 4a) `getBudgetHealthScore` gains a new caller, reused verbatim, no signature change.** `features/financial-health-score/server/service.ts` calls `budgeting.service.getBudgetHealthScore(userId, month)` directly for the Financial Health Score's Budget Adherence component (`ai-features.md` Feature 5's own requirement: "never independently recomputed with new logic"). **AI Budget Advisor — see the Phase 4a section at the end of this document.**
 
+**(Phase 4b) `getBudgetMonth` gains a fourth caller, reused as-is, no signature change.** `features/reports/server/data/monthly-report-data.ts` calls it directly for the Monthly Report's Budget vs. Actual section (omitted entirely when `hasAnyBudgetData` is false, per reports.md's own spec) — see the Phase 4b section below.
+
 ## Savings Goals (`features/goals`) — Phase 2
 
 Per `docs/product/savings-goals.md`. Follows the exact archive/unarchive CRUD shape established by Accounts.
@@ -158,7 +168,7 @@ No functional dependency on Accounts or Transactions (confirmed resolved, CTO 20
 
 **(Phase 3b) No functional dependency on `FinancialGoal` in either direction (confirmed, per financial-goals.md's Boundary section and Risk #12's resolution).** `SavingsGoal` is untouched by Phase 3b — no shared code, no shared table, no cross-import. See the Financial Goals section below for the full, resolved boundary reasoning.
 
-**Not extended in Phase 4a.** No Phase 4a feature reads or writes `SavingsGoal`/`GoalContribution` — none of the five AI features' Dependencies sections name Savings Goals as a data source.
+**Not extended in Phase 4a or Phase 4b.** No Phase 4a feature reads or writes `SavingsGoal`/`GoalContribution`; neither Reports nor Notifications v2 names Savings Goals as a data source or trigger source (Goal Achieved reads `FinancialGoal` only, per notifications-v2.md's own explicit scoping).
 
 ## Bills (`features/bills`) — Phase 2
 
@@ -188,7 +198,7 @@ Per `docs/product/bills.md`. Includes the optional occurrence-to-Transaction lin
 
 **Bills reads via other domains, explicit service calls only:** `searchTransactionsForLinking(userId, { query? })` on `features/transactions/server/service.ts`, now also reused by Recurring Income.
 
-**Not extended in Phase 3b or Phase 4a.** No spec in either phase requests any Bills change — Bills is untouched by Net Worth History, Analytics, Financial Goals, or any of the five Phase 4a AI features.
+**Not extended in Phase 3b or Phase 4a. Confirmed not extended in Phase 4b either** — no spec in Reports or Notifications v2 requests any Bills change; Bill Due/Late's existing `BILL_DUE_SOON`/`BILL_LATE` notification triggers are unchanged (`triggers/budget-bill-triggers.ts` extracts, not modifies, the existing logic — see the Phase 4b section).
 
 ## Calendar v1 — Phase 2
 
@@ -198,7 +208,7 @@ Per `docs/product/calendar-and-notifications.md`. No new data, no mutations — 
 |---|---|---|---|
 | Get a month's calendar | Server Component direct call to `bills.service.getCalendarMonth(userId, month)` | `month: "YYYY-MM"` | `{ day: string; occurrences: { billId; billOccurrenceId; billName; amount; status }[] }[]` |
 
-Scoped to bills only, unchanged through Phase 4a — no phase requests extending Calendar v1.
+Scoped to bills only, unchanged through Phase 4b — no phase requests extending Calendar v1 (Calendar v2 is Phase 4c).
 
 ---
 
@@ -219,7 +229,9 @@ Per `docs/product/calendar-and-notifications.md`. Lazy, on-read materialization 
 
 **Not extended in Phase 4a either — confirmed, not just carried forward by omission.** None of the five AI features generates a new `Notification` row or a new `NotificationType` (e.g. "a new spending insight is ready," "your monthly recap is available") — `ai-features.md` names no such requirement, and `roadmap.md`'s own Phase 4b description reserves new trigger types for "Notifications v2." This is worth stating explicitly here (not just leaving it implied) because Phase 4a's monthly-cadence cron jobs (categorization batches, monthly summaries, health-score snapshots) are the most plausible-looking candidates yet for "maybe this should also notify the user" — flagged now so a future implementer doesn't wire one in as an unrequested scope addition.
 
-**Data model recommendation for the Database Architect:** `id, userId, type (enum), budgetCategoryId (nullable FK), billOccurrenceId (nullable FK), createdAt, readAt, dismissedAt`, with unique constraints per steps 1–2 of the ensure-algorithm.
+**(Phase 4b) Notifications v1's original two trigger types, and this entire module, are extended — see the Phase 4b section at the end of this document for the full new contract:** four new trigger types (Goal Achieved, Large Purchase, Low Balance, Monthly Summary), a new email delivery channel available across all six trigger types (including these original two), and a new notification-preferences surface. `service.ensureNotifications(userId)`'s existing Budget Exceeded/Bill Due/Late logic is extracted into `triggers/budget-bill-triggers.ts` with **no behavior change** — the rows above remain accurate as written; only the module's *internal* structure and its outer orchestrator change.
+
+**Data model recommendation for the Database Architect:** `id, userId, type (enum), budgetCategoryId (nullable FK), billOccurrenceId (nullable FK), createdAt, readAt, dismissedAt`, with unique constraints per steps 1–2 of the ensure-algorithm. **(Phase 4b) extended significantly — see `docs/architecture/phase-4b-technical-design.md` §7 for the full specification** (four new nullable FKs, two email-observability columns, three new unique constraints, plus two new small models and two new fields on `FinancialGoal`/`Account`).
 
 **Notification bell placement:** unchanged from Phase 2 — composed into `components/shared/top-nav.tsx` via the existing `notificationSlot` prop.
 
@@ -277,6 +289,8 @@ Per `docs/product/debt-tracker.md`. Follows the archive/unarchive CRUD shape est
 
 **(Phase 4a) `debt.service` gains a new read-only aggregate consumer, no signature change.** `features/financial-health-score/server/service.ts` reads active, non-archived Debts' minimum payments (summed) for the Financial Health Score's Debt-to-Income component (`ai-features.md` Feature 5's formula) — likely via the same `getTotalActiveDebtBalanceForNetWorth`-style existing aggregate pattern already used for Net Worth, or a small new sibling read function if a minimum-payment total isn't already exposed; either way, **no schema change**, since every Debt row already carries `minimumPayment`.
 
+**(Phase 4b) `getDebts` gains a new read-only caller, no signature change.** `features/reports/server/data/yearly-report-data.ts` calls `service.getDebts(userId)` directly for the Yearly Report's Debt summary section — an explicit **current-state snapshot** (balance, rate, minimum payment, payoff date as of report generation), not a "paid this year" historical figure, per reports.md's own explicit framing.
+
 `StrategyComparisonResult` shape (pure output of `payoff-math.ts`, never persisted):
 ```ts
 {
@@ -311,6 +325,8 @@ Per `docs/product/investments.md`. Containers are existing Investment/Retirement
 
 **Not extended in Phase 4a.** No Phase 4a feature's Dependencies section names Investments as a data source (Feature 5's Net Worth Trend component reads Dashboard's already-double-count-safe `getNetWorth`, which already folds in Investments' contribution — no direct Investments read is needed).
 
+**(Phase 4b) New required function, no schema change:** `service.getDividendIncomeForPeriod(userId, { start, end }): Promise<{ total: number; byHolding: { holdingId: string; holdingName: string; amount: number }[] }>` — a period-scoped, portfolio-wide sum of `DividendEntry` rows (every existing dividend read is either per-holding or a lifetime total; this is neither). Consumed by `features/reports/server/data/yearly-report-data.ts` and `tax-summary-report-data.ts`. See `phase-4b-technical-design.md` §3.
+
 ## Recurring Income (`features/recurring-income`) — Phase 3a
 
 Per `docs/product/recurring-income.md`. Mirrors Bills' proven lazy on-read occurrence generation exactly, with its own status vocabulary and an Irregular/One-off cadence Bills has no equivalent of.
@@ -335,6 +351,8 @@ Per `docs/product/recurring-income.md`. Mirrors Bills' proven lazy on-read occur
 `IncomeOccurrence.status` is never a stored column — always computed at read time.
 
 **(Phase 4a) `recurring-income.service` gains a new read-only aggregate consumer, no signature change.** `features/financial-health-score/server/service.ts` reads total actual-received monthly income (reusing `getActualReceivedIncomeBySource`'s underlying data, or a thin new total-only wrapper around it) for the Financial Health Score's Debt-to-Income denominator and the Net Worth Trend component's income-relative normalization (`ai-features.md` Feature 5's CTO-corrected formula). **No schema change.**
+
+**(Phase 4b) `getIncomeStreams`/`getStreamById` gain a new read-only caller.** `features/reports/server/data/yearly-report-data.ts` and `income-report-data.ts` compose the Recurring Income summary/individual-occurrence-listing sections from these existing functions (a bounded loop over the user's own stream count) — no new function required. See `phase-4b-technical-design.md` §3.
 
 ## Financial Goals (`features/financial-goals`) — Phase 3b
 
@@ -395,6 +413,8 @@ Per `docs/product/financial-goals.md`. Follows the archive/unarchive CRUD shape 
 
 **Not extended in Phase 4a.** No Phase 4a feature's Dependencies section names Financial Goals as a data source or consumer; `FinancialGoal` is untouched.
 
+**(Phase 4b) `getFinancialGoals` gains a new read-only caller, and `FinancialGoal` gains one new field.** `features/notifications/server/triggers/goal-achieved-trigger.ts` calls `service.getFinancialGoals(userId)` (non-archived) and checks each goal's existing `isCompleted` read-time value — no change to that function's signature or behavior. `FinancialGoal` itself gains one new persisted field, `completionNotifiedAt` (a "has this completion already been notified" latch, distinct from the completion state itself, which remains entirely read-time-computed) — see `phase-4b-technical-design.md` §7.3 for the full reasoning and the required one-time data migration.
+
 ## Analytics (`features/analytics`) — Phase 3b
 
 Per `docs/product/analytics.md`. Entirely read-only aggregation (Server Component direct calls) plus one small mutation (dismissing a false-positive subscription candidate). See Architecture.md's Phase 3b "Analytics module structure" section for the full file-layout reasoning and Risk #11's resolution (raw on-read aggregation, no materialized/cached aggregates).
@@ -439,6 +459,8 @@ Per `docs/product/analytics.md`. Entirely read-only aggregation (Server Componen
 
 **(Phase 4a) Spending Insights — see the Phase 4a section at the end of this document.** No change to any row above; Insights reads every one of the 11 metric functions listed here as a pure downstream consumer (never re-implementing any of them), exactly as `ai-features.md` Feature 4's Dependencies require.
 
+**(Phase 4b) Every period-aware function in this table (`getCategoryTrends`, `getExpenseDistribution`, `getBudgetVsActual`, `getTopMerchants`, `getLargestPurchases`, `getDailySpendingHeatmap`, `getIncomeGrowth`, `getIncomeSources`, `getSavingsGrowth`) has its `period` parameter type widened, additively, to `ReportingPeriod | { start: Date; end: Date }`.** Every existing caller (all of Analytics' own pages) continues to pass the enum unchanged, with unchanged behavior; `features/reports/server/data/*.ts` (Income, Expense, and Cash Flow Reports) are the only new callers ever passing a resolved `{ start, end }` object, for reports.md's own explicit custom-date-range requirement. No aggregation/query logic changes — this is a shape widening, not a new metric. See `phase-4b-technical-design.md` §3 for the full reasoning and Risk #22 for the new bounded-range validation this requires at the Reports request-validation layer.
+
 ---
 
 ## Net Worth Aggregation Update (`features/dashboard`) — Phase 3a
@@ -460,7 +482,7 @@ netWorth = totalAccountBalance - unlinkedDebtLiability
 **Updated contract:**
 - `service.getNetWorth(userId)` → `{ total: number; byAccount: { accountId: string; balance: number }[]; totalUnlinkedDebtLiability: number }`
 
-**Unchanged and confirmed stable through Phase 4a.** Every consumer of Net Worth (the Net Worth History chart, Financial Goals' `NET_WORTH_SAVINGS_TARGET` type, and — new in Phase 4a — the Financial Health Score's Net Worth Trend component) reads this same `total`/`totalUnlinkedDebtLiability` shape, never re-deriving net worth independently — the single-source-of-truth guarantee this formula exists to provide holds unchanged into Phase 4a.
+**Unchanged and confirmed stable through Phase 4b.** Every consumer of Net Worth (the Net Worth History chart, Financial Goals' `NET_WORTH_SAVINGS_TARGET` type, the Financial Health Score's Net Worth Trend component, and — new in Phase 4b — Reports' Monthly/Yearly report types via `net-worth-history.getNetWorthAsOf`) reads this same `total`/`totalUnlinkedDebtLiability` shape, never re-deriving net worth independently — the single-source-of-truth guarantee this formula exists to provide holds unchanged into Phase 4b.
 
 ## Net Worth Snapshot job (`features/dashboard/server/snapshot.ts`) — Phase 3a
 
@@ -474,7 +496,7 @@ Internally calls `dashboard.service.captureAllUsersNetWorthSnapshots()`, looping
 
 **Data model:** `NetWorthSnapshot { id, userId (FK), capturedAt, capturedDate, totalNetWorth, totalAccountBalance, totalUnlinkedDebtLiability }`, `@@unique([userId, capturedDate])`, indexed on `(userId, capturedAt)` — as-built, per er-diagram.md.
 
-**Unchanged through Phase 4a.** Phase 3b's Net Worth History chart, and Phase 4a's Financial Health Score Net Worth Trend component, are both pure read layers over this exact table — see their own sections for the read-side contract. No change to the cadence, the cron mechanism, or the row shape is requested or required by either. **Phase 4a's own `FinancialHealthScoreSnapshot`-shaped table (see the Phase 4a section below) is a deliberate new sibling table, not an extension of this one** — see Architecture.md's Phase 4a module-placement resolution for the full reasoning.
+**Unchanged through Phase 4b.** Phase 3b's Net Worth History chart, Phase 4a's Financial Health Score Net Worth Trend component, and Phase 4b's Reports point-in-time lookup are all pure read layers over this exact table — see their own sections for the read-side contract. No change to the cadence, the cron mechanism, or the row shape is requested or required by any of them. **Phase 4a's own `FinancialHealthScoreSnapshot`-shaped table (see the Phase 4a section below) is a deliberate new sibling table, not an extension of this one** — see Architecture.md's Phase 4a module-placement resolution for the full reasoning.
 
 ## Net Worth History chart (`features/dashboard`) — Phase 3b
 
@@ -510,6 +532,8 @@ Per `docs/product/net-worth-history.md`. A read layer over the existing `NetWort
 **Breakdown toggle (AC5)** is a pure client-side view switch in `features/dashboard/components/net-worth-history-chart.tsx` between the single `netWorth` series and the `assets`/`debt` two-series view — both are already present on every point in the one response above, so toggling never triggers a new fetch.
 
 **Scoping (AC10):** `getNetWorthHistory` and `resolveDefaultRange` both take `userId` from the caller's `getCurrentUser()` result, same as every other read function in this document — no endpoint accepts a client-supplied user id.
+
+**(Phase 4b) New sibling read function, no signature change to the above:** `getNetWorthAsOf(userId, date): Promise<{ date: string; netWorth: number } | null>` — a single point-in-time lookup (the closest `NetWorthSnapshot` row at or before `date`), distinct from `getNetWorthHistory`'s range-query shape. Consumed by `features/reports/server/data/monthly-report-data.ts` and `yearly-report-data.ts`. See `phase-4b-technical-design.md` §3.
 
 ---
 
@@ -603,6 +627,8 @@ Every one of the five features' *on-demand* generate/refresh Server Actions retu
 
 **Persisted, never regenerated automatically (Feature 3 AC2)** — this Server Component read is a plain row fetch; no AI call ever happens on this path. Only the cron route and the optional `regenerateMonthlySummary` action ever call `lib/ai/`.
 
+**(Phase 4b) New sibling read function, no signature change to the above:** `getSummaryForMonth(userId, month): Promise<MonthlySummary | null>` — an exact-month lookup (neither `getMostRecentSummary` nor `getSummaryHistory` expose this directly). Consumed by `features/reports/server/data/monthly-report-data.ts` (the Monthly Report's narrative section) and by `features/notifications/server/triggers/monthly-summary-trigger.ts`'s sibling function `getMostRecentSummary` (unchanged — the trigger deliberately checks only the single most-recent row, never the full history, per `phase-4b-technical-design.md` §6's flood-avoidance note). Neither of these Phase 4b callers ever calls `lib/ai/` — both are plain, read-only field lookups of an already-persisted row.
+
 ### Feature 4 — Spending Insights (`features/analytics`)
 
 | Action | Mechanism | Input | Output |
@@ -628,6 +654,8 @@ Every one of the five features' *on-demand* generate/refresh Server Actions retu
 ```
 
 2–4 items per refresh (Feature 4 AC1). Reads every one of Analytics' 11 metric functions listed in the Analytics section above as a pure downstream consumer — `features/analytics/server/insights.ts` never recomputes any of them.
+
+**(Phase 4b) Confirmed, not extended.** Spending Insights is read by nothing new in Phase 4b — Large Purchase and Low Balance (Notifications v2) are deterministic threshold checks with zero path through `insights.ts`, per Risk #20 and `phase-4b-technical-design.md` §8. This row is unchanged.
 
 ### Feature 5 — Financial Health Score (`features/financial-health-score` — new module; see Architecture.md's module-placement resolution)
 
@@ -664,3 +692,61 @@ Every one of the five features' *on-demand* generate/refresh Server Actions retu
 ### Cross-feature note: no new client-side hooks, no new session-authenticated Route Handlers
 
 Every on-demand path across all five features above is a Server Action followed by the ordinary `revalidatePath` → Server Component re-fetch flow already used by every mutation in this codebase — none of them is a TanStack Query hook or a client-refetchable `GET` route. This is a deliberate continuity with the rest of the app (Server Actions are the default mutation mechanism everywhere) and not an oversight of a "should this have a hook" question: none of the five features has a Net-Worth-History-style "change a client-side control without a full navigation" requirement that would justify one. The only three new Route Handlers this phase are the shared-secret cron routes, listed above.
+
+---
+
+## Reports & Notifications v2 (Phase 4b)
+
+Per `docs/product/reports.md`, `docs/product/notifications-v2.md` (Product Owner specs), and `docs/architecture/phase-4b-technical-design.md` (this Solution Architect's technical design — the PDF library decision, the email provider decision, the module layouts, and the full `Notification` schema handoff). **This section documents only the API surface**, following this document's established per-phase pattern; for *why* a given choice was made, `phase-4b-technical-design.md` is authoritative and not restated here.
+
+### Reports (`features/reports`)
+
+| Action | Mechanism | Input | Output |
+|---|---|---|---|
+| Generate + download a report | `GET /api/reports` — session-authenticated, **not** `ApiResult<T>` on its success path (a deliberate, narrow exception — the response body is the deliverable, same category of exception `app/api/uploadthing/route.ts` already is) | `?type=monthly&month=YYYY-MM` \| `?type=yearly&year=YYYY` \| `?type=tax-summary&year=YYYY` \| `?type=income\|expense\|cash-flow&period=this-year\|last-12-months\|year-to-date\|all-time` \| `?type=income\|expense\|cash-flow&start=YYYY-MM-DD&end=YYYY-MM-DD` — parsed via `GenerateReportRequestSchema` (a Zod discriminated union on `type`) | **Success (200):** raw `application/pdf` bytes, `Content-Disposition: attachment`. **Failure (400/401/500):** `ApiResult<never>` JSON — bad input, a not-yet-started future period (reports.md's Edge Case, never a generated empty file), or a genuine generation failure |
+
+No other action exists for Reports — generation is synchronous, on-demand, and produces no persisted row (see `phase-4b-technical-design.md` §2's "no stored artifact to leak" reasoning), so there is no "list my past reports," "get report by id," or "regenerate" action of any kind; regenerating is simply requesting the same query again, which always reflects current data (reports.md Cross-Cutting Requirement #4).
+
+`GenerateReportRequestSchema`'s six variants, one per `ReportType` (`"MONTHLY" | "YEARLY" | "TAX_SUMMARY" | "INCOME" | "EXPENSE" | "CASH_FLOW"`), each carrying that report type's own valid period shape per reports.md's own per-type period-selection rule (a single month; a single year; or Analytics' four shared presets plus a custom `{ start, end }` range, bounded to a maximum range length per Risk #22). Full per-type data-source mapping: `phase-4b-technical-design.md` §3.
+
+### Notifications v2 (`features/notifications`)
+
+Extends Notifications v1's existing table above — `GET /api/notifications`, `markNotificationRead`, `dismissNotification`, `markAllNotificationsRead` are all **unchanged in signature and behavior**; `ensureNotifications(userId)` (called internally by the inbox route) now evaluates six trigger types instead of two, per `phase-4b-technical-design.md` §6.
+
+| Action | Mechanism | Input | Output |
+|---|---|---|---|
+| Evaluate all users (offline reach for email) | `POST /api/cron/evaluate-notifications` — shared-secret authenticated, plain JSON (the fifth instance of the Phase 3a cron exception) | none | `{ processed: number; emailsSent: number }` |
+| Get notification preferences | Server Component direct call to `preferences.getNotificationPreferences(userId)` | — | `NotificationPreferenceView[]` — always exactly 6 entries (one per `NotificationType`), row absence materialized as the documented defaults (`inAppEnabled: true`, `emailEnabled: false`) |
+| Update a preference | Server Action `updateNotificationPreference` | `UpdateNotificationPreferenceSchema { type: NotificationType; inAppEnabled?: boolean; emailEnabled?: boolean }` | `ApiResult<NotificationPreferenceView>` |
+| Get threshold settings | Server Component direct call to `preferences.getNotificationThresholdSettings(userId)` | — | `{ largePurchaseThreshold: number; lowBalanceThreshold: number }` — row absence materialized as the system defaults ($500 / $100, both proposed, non-binding — `phase-4b-technical-design.md` §6) |
+| Update threshold settings | Server Action `updateNotificationThresholdSettings` | `UpdateNotificationThresholdSettingsSchema { largePurchaseThreshold?: number; lowBalanceThreshold?: number }` | `ApiResult<{ largePurchaseThreshold: number; lowBalanceThreshold: number }>` |
+| Set a per-account low-balance override | Server Action `updateAccount` (existing, Accounts module — **not** a new action) | `UpdateAccountSchema` gains one optional field: `lowBalanceThresholdOverride: number \| null` | `ApiResult<Account>` |
+| One-click email unsubscribe | `GET /api/notifications/unsubscribe?token=...` — **token-authenticated**, neither a session nor the cron shared secret: a signed, single-purpose `(userId, type)` token (`lib/email/unsubscribe-token.ts`) | `token` (query param) | A plain confirmation HTML page (no session required) — sets that one `(userId, type)` pair's `emailEnabled` to `false`; invalid/tampered tokens are rejected outright (§5's cross-user-leakage reasoning) |
+
+`NotificationPreferenceView` shape:
+```ts
+{
+  type: "BUDGET_OVER" | "BILL_DUE_SOON" | "BILL_LATE" | "GOAL_ACHIEVED" | "LARGE_PURCHASE"
+      | "LOW_BALANCE" | "MONTHLY_SUMMARY_READY"
+  inAppEnabled: boolean   // default true for all six types (v1's original two included, unchanged)
+  emailEnabled: boolean   // default false for all six types — off until explicitly opted in (AC1/AC4)
+}
+```
+
+**New `Notification` fields surfaced on the existing inbox read** (`getNotifications`), additive, no shape change to any existing field: `financialGoalId`/`transactionId`/`accountId`/`monthlySummaryId` (nullable FKs, exactly one set per new trigger type, per `phase-4b-technical-design.md` §7.2) drive each new notification's "go to the relevant page" link, the same way `budgetCategoryId`/`billOccurrenceId` already do for the original two.
+
+**Four new trigger types, evaluated internally (no new client-facing action for any of them — they only ever produce rows read via the existing inbox contract above):**
+- **Goal Achieved** — reads `financial-goals.service.getFinancialGoals(userId)`'s existing `isCompleted` value; fires once per goal via `FinancialGoal.completionNotifiedAt` (§7.3 of the design doc) plus a DB unique constraint.
+- **Large Purchase** — reads `transactions.service` (expense transactions + split line items, `EXCLUDE_SPLIT_PARENTS` reused, dated within a recent window); fires once per transaction via a DB unique constraint. Zero path through `lib/ai/` or Spending Insights, per Risk #19/#20.
+- **Low Balance** — reads `accounts.service.getAccounts(userId)` (Checking/Savings/Cash only); fires once per crossing via `Account.lowBalanceNotifiedAt` (§7.4). Zero path through `lib/ai/`.
+- **Monthly Summary** — reads `dashboard.server/monthly-summary.getMostRecentSummary(userId)` only; fires once per month via a DB unique constraint on `monthlySummaryId`. Zero path through `lib/ai/` — a straight, read-only field lookup, never a new narrative.
+
+Full evaluation architecture (where each check runs, the atomicity requirement, the recency window, the proposed default thresholds): `phase-4b-technical-design.md` §6. Full schema: §7.
+
+### Email delivery (`lib/email/`)
+
+Not a client-facing API surface — `lib/email/send-notification-email.ts` is called only from `features/notifications/server/email-dispatch.ts`, itself called only from `service.ts`'s `ensureNotifications`. No Route Handler or Server Action in this codebase calls `lib/email/` directly. Every email's content is limited to the same fields its equivalent in-app `Notification` already displays, plus the two required links (one-click unsubscribe, manage-preferences) — per notifications-v2.md AC6 and `phase-4b-technical-design.md` §5.
+
+### Cross-feature note: zero new `lib/ai/` call sites, confirmed
+
+Neither Reports nor Notifications v2 introduces a new `lib/ai/` call site — the Monthly Report's narrative section and the Monthly Summary trigger both perform a direct, read-only field lookup of the already-persisted `MonthlySummary.narrative`, never a new generation call. See `phase-4b-technical-design.md` §8 for the recommended ESLint enforcement and Risk #19/#20's full framing.
