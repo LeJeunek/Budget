@@ -1,4 +1,4 @@
-// FinanceOS — Prisma schema (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b + Phase 4a)
+// FinanceOS — Prisma schema (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b + Phase 4a + Phase 4b)
 // Scope: auth (Better Auth), Accounts, Transactions, Categories, Tags (Phase 1);
 // Budgeting, Savings Goals, Bills, Notifications, and a multi-file Receipt model
 // for Transactions (Phase 2); Debt Tracker, Investments (Holding), Recurring
@@ -16,11 +16,20 @@
 // the Budget Advisor and Automatic Monthly Summaries dispatches — see that
 // model's own comment below for the full reasoning). Phase 4a's actual AI
 // provider/prompt/schema code has no Prisma model of its own, it only
-// reads/writes the tables below). Modeled per
+// reads/writes the tables below); Notifications v2's four new trigger types
+// (Goal Achieved, Large Purchase, Low Balance, Monthly Summary Ready),
+// email-delivery observability fields on Notification, FinancialGoal's
+// completion-notified latch (with a required one-time backfill migration —
+// see that column's own comment), Account's two new Low Balance fields, and
+// the two new NotificationPreference/NotificationThresholdSettings models
+// (Phase 4b — Reports has no schema footprint of its own; every report type
+// is assembled entirely from already-existing tables/read functions, per
+// docs/architecture/phase-4b-technical-design.md §3). Modeled per
 // docs/product/{budgeting,savings-goals,bills,calendar-and-notifications,
 // debt-tracker,investments,recurring-income,financial-goals,analytics,
-// net-worth-history,ai-features}.md and docs/architecture/{api-contracts.md,
-// Architecture.md,ai-features-design.md}'s Phase 2/3a/3b/4a module-boundary
+// net-worth-history,ai-features,reports,notifications-v2}.md and
+// docs/architecture/{api-contracts.md,Architecture.md,ai-features-design.md,
+// phase-4b-technical-design.md}'s Phase 2/3a/3b/4a/4b module-boundary
 // sections. See docs/database/{er-diagram,migration-strategy,
 // performance-considerations}.md for the full rationale behind every
 // modeling decision below.
@@ -90,6 +99,14 @@ model User {
 
   // FinanceOS domain data (Phase 4a follow-up)
   reasoningModelCallLogs ReasoningModelCallLog[]
+
+  // FinanceOS domain data (Phase 4b) — Notifications v2's per-user preference
+  // rows (see NotificationPreference/NotificationThresholdSettings below,
+  // phase-4b-technical-design.md §7.5). Both are lazily materialized: row
+  // absence means "use the documented defaults," so these arrays/optionals
+  // are typically empty/null for a user who has never customized either.
+  notificationPreferences       NotificationPreference[]
+  notificationThresholdSettings NotificationThresholdSettings?
 
   @@map("user")
 }
@@ -162,12 +179,12 @@ enum AccountType {
 }
 
 model Account {
-  id           String      @id @default(cuid())
-  userId       String
-  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name         String
-  type         AccountType
-  institution  String?
+  id                          String      @id @default(cuid())
+  userId                      String
+  user                        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                        String
+  type                        AccountType
+  institution                 String?
   // Phase 1/2 meaning: manually-entered current balance for every type.
   // Phase 3a addition (Investments, see Holding below): once an Investment/
   // Retirement/Crypto Account has one or more active (non-closed) Holding
@@ -182,14 +199,28 @@ model Account {
   // pre-existing consumers — the Accounts list, the Transaction form's
   // account picker, Dashboard's Net Worth sum — that must keep working
   // unmodified). The column type/constraints are unchanged either way.
-  balance      Decimal     @default(0) @db.Decimal(14, 2)
-  interestRate Decimal?    @db.Decimal(5, 2)
-  color        String      @default("#6366f1") // hex, user-chosen — see naming-standards.md
+  balance                     Decimal     @default(0) @db.Decimal(14, 2)
+  interestRate                Decimal?    @db.Decimal(5, 2)
+  color                       String      @default("#6366f1") // hex, user-chosen — see naming-standards.md
   // Soft delete: transaction history must survive account removal for
   // analytics/reports in later phases. Never hard-delete an Account.
-  archivedAt   DateTime?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  archivedAt                  DateTime?
+  // Phase 4b (Notifications v2, phase-4b-technical-design.md §7.4): Low
+  // Balance trigger fields. Null = use the user's global
+  // NotificationThresholdSettings.lowBalanceThreshold (or the system default
+  // if that's unset too). Meaningful only for CHECKING/SAVINGS/CASH accounts
+  // — not enforced at the DB level, the same "nullable, meaningless for some
+  // types" precedent already established by interestRate above.
+  lowBalanceThresholdOverride Decimal?    @db.Decimal(14, 2)
+  // The crossing latch: non-null = balance is currently below threshold and
+  // already notified (armed to clear on recovery); null = armed to fire on
+  // the next crossing below threshold. Deliberately NO backfill migration —
+  // the default null state on every existing row already produces the
+  // correct "already below threshold at launch still fires" behavior (the
+  // opposite edge case from FinancialGoal.completionNotifiedAt below).
+  lowBalanceNotifiedAt        DateTime?
+  createdAt                   DateTime    @default(now())
+  updatedAt                   DateTime    @updatedAt
 
   transactions Transaction[]
 
@@ -207,6 +238,13 @@ model Account {
   // back-relation exists only because Prisma requires both sides of a
   // relation to be declared.
   financialGoalLinks FinancialGoalAccount[]
+
+  // Phase 4b: zero or more LOW_BALANCE Notification rows may reference this
+  // Account over its lifetime (one per crossing, per notifications-v2.md's
+  // own re-arm-on-recovery rule — see Notification.accountId below). Purely a
+  // back-relation, required because Prisma requires both sides of a relation
+  // to be declared.
+  notifications Notification[]
 
   @@index([userId])
   // Better Auth's own OAuth-link model (AuthAccount, above) owns the
@@ -326,6 +364,13 @@ model Transaction {
   // path needed a stronger mechanism than this schema's existing
   // Bills/Recurring-Income and Debt Payoff exclusivity precedents).
   categorySuggestions CategorySuggestion[]
+
+  // Phase 4b: zero or more LARGE_PURCHASE Notification rows may reference
+  // this transaction (a normal row or a split child row, both ordinary
+  // Transaction rows already — see Notification.transactionId below). Purely
+  // a back-relation, required because Prisma requires both sides of a
+  // relation to be declared.
+  notifications Notification[]
 
   @@index([userId, date])
   @@index([accountId])
@@ -602,6 +647,15 @@ enum NotificationType {
   BUDGET_OVER
   BILL_DUE_SOON
   BILL_LATE
+  // ---- Phase 4b (Notifications v2, phase-4b-technical-design.md §7.1) ----
+  GOAL_ACHIEVED
+  LARGE_PURCHASE
+  LOW_BALANCE
+  // Named _READY (not just MONTHLY_SUMMARY) to match this trigger's actual
+  // fire condition — a MonthlySummary row whose narrative has successfully
+  // generated (monthly-summary-trigger.ts, §6) — not merely "a new calendar
+  // month started."
+  MONTHLY_SUMMARY_READY
 }
 
 model Notification {
@@ -609,21 +663,58 @@ model Notification {
   userId           String
   user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   type             NotificationType
-  // Exactly one of these two is set, matching whichever domain triggered this
+  // Exactly one of these six is set, matching whichever domain triggered this
   // notification (BUDGET_OVER -> budgetCategoryId; BILL_DUE_SOON/BILL_LATE ->
-  // billOccurrenceId). Enforced in features/notifications/server/service.ts,
+  // billOccurrenceId; GOAL_ACHIEVED -> financialGoalId; LARGE_PURCHASE ->
+  // transactionId; LOW_BALANCE -> accountId; MONTHLY_SUMMARY_READY ->
+  // monthlySummaryId). Enforced in features/notifications/server/service.ts,
   // not a DB CHECK constraint, consistent with this schema's existing
   // precedent of leaving cross-column invariants to application code (e.g.
-  // Transaction's split-sum-equals-parent rule). onDelete: Cascade on both so
-  // a notification never outlives the row it refers to (e.g. Budgeting or
-  // Bills data cascading away with its owning User).
+  // Transaction's split-sum-equals-parent rule). onDelete: Cascade on all six
+  // so a notification never outlives the row it refers to (e.g. Budgeting,
+  // Bills, Financial Goals, Transactions, Accounts, or Monthly Summaries data
+  // cascading away with its owning User).
   budgetCategoryId String?
   budgetCategory   BudgetCategory?  @relation(fields: [budgetCategoryId], references: [id], onDelete: Cascade)
   billOccurrenceId String?
   billOccurrence   BillOccurrence?  @relation(fields: [billOccurrenceId], references: [id], onDelete: Cascade)
-  readAt           DateTime?
-  dismissedAt      DateTime?
-  createdAt        DateTime         @default(now())
+
+  // ---- Phase 4b (Notifications v2, phase-4b-technical-design.md §7.2) ----
+  // Four more nullable FKs joining the same "exactly one set, matching type"
+  // pattern above, rather than a generic polymorphic entityId/entityType pair
+  // — a real FK gets referential integrity and onDelete: Cascade for free at
+  // the database level, the same reasoning this schema already applied twice
+  // (FinancialGoalAccount as an explicit join table, DismissedSubscriptionMerchant
+  // as its own model rather than a JSON blob).
+  financialGoalId  String?
+  financialGoal    FinancialGoal?  @relation(fields: [financialGoalId], references: [id], onDelete: Cascade)
+  // Large Purchase — points at either a normal Transaction row or a split
+  // child row; both are ordinary Transaction rows already (see Transaction's
+  // own parentTransactionId self-relation).
+  transactionId    String?
+  transaction      Transaction?    @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  // Low Balance.
+  accountId        String?
+  account          Account?        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  monthlySummaryId String?
+  monthlySummary   MonthlySummary? @relation(fields: [monthlySummaryId], references: [id], onDelete: Cascade)
+
+  readAt      DateTime?
+  dismissedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  // Email-delivery observability (Phase 4b) — independent of the in-app
+  // fields above (readAt/dismissedAt), per notifications-v2.md AC7's "an
+  // email delivery failure never affects or blocks the in-app notification
+  // for that same event": these two columns record what happened on the
+  // email side ONLY. They never gate or affect anything else on this row,
+  // and are never surfaced to the user — observability/debugging only.
+  // Written by features/notifications/server/email-dispatch.ts, the one
+  // shared step that runs once per newly-created Notification row regardless
+  // of trigger type.
+  emailSentAt    DateTime? // null = email not enabled for this
+  //   type, or not yet attempted
+  emailSendError String?   @db.Text // last failure reason, if any
 
   // Dedup guarantees per api-contracts.md's ensureNotifications algorithm: at
   // most one BUDGET_OVER notification per BudgetCategory row (a category going
@@ -634,6 +725,30 @@ model Notification {
   // occurrence, per calendar-and-notifications.md AC2).
   @@unique([budgetCategoryId, type])
   @@unique([billOccurrenceId, type])
+  // ---- Phase 4b dedup guarantees (phase-4b-technical-design.md §7.2) ----
+  // "Fires exactly once, ever, per goal" (Goal Achieved AC1) — enforced at
+  // the DB level, mirroring the budgetCategoryId/billOccurrenceId precedent
+  // exactly. This is a second, redundant guarantee alongside
+  // FinancialGoal.completionNotifiedAt (§7.3) — either one alone would
+  // suffice, but the unique constraint is what makes the guarantee hold even
+  // if a future code path forgets to check the latch column first.
+  @@unique([financialGoalId, type])
+  // "Fires once per qualifying transaction" (Large Purchase AC2) — same
+  // pattern, and — unlike Goal Achieved — the ONLY persisted guarantee for
+  // this trigger (no separate latch column on Transaction; see this model's
+  // own header comment / §7.6 summary table).
+  @@unique([transactionId, type])
+  // "Fires once per calendar month" (Monthly Summary AC1), and doubles as the
+  // "regeneration doesn't re-fire" guarantee (Edge Cases) for free, since a
+  // regenerated summary reuses the same MonthlySummary row id.
+  @@unique([monthlySummaryId, type])
+  // Deliberately NOT a unique constraint: Low Balance legitimately fires more
+  // than once per account over time (once per crossing below threshold, per
+  // AC3/AC4) — its "don't re-fire while still below threshold" guarantee
+  // lives entirely on Account.lowBalanceNotifiedAt (§7.4), not here. A plain
+  // index still speeds up any accountId-scoped lookup (e.g. "does this
+  // account already have a pending Low Balance notification").
+  @@index([accountId])
   @@index([userId, readAt])
   @@index([userId, createdAt])
   @@map("notification")
@@ -1278,7 +1393,37 @@ model FinancialGoal {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
+  // Phase 4b (Notifications v2, phase-4b-technical-design.md §7.3): the
+  // GOAL_ACHIEVED "already fired" latch. Non-null = a GOAL_ACHIEVED
+  // notification has already been created for this goal (or the goal was
+  // already Completed at the moment the one-time backfill migration ran).
+  // Null = eligible to fire the next time goal-achieved-trigger.ts observes
+  // isCompleted transition to true. This is genuinely new persisted state —
+  // FinancialGoal's completion itself remains entirely read-time-computed
+  // (unchanged, per this model's own "never store what's derived" rule
+  // above) — this column stores only "has this already been notified," never
+  // the completion state itself. Written via an atomic conditional
+  // `updateMany({ where: { id, completionNotifiedAt: null }, data: {
+  // completionNotifiedAt: now() } })`, the same TOCTOU-race-prevention
+  // pattern already established by lib/ai/rate-limit.ts's per-key cooldown
+  // claims — never a separate read-then-write.
+  //
+  // REQUIRED ONE-TIME DATA MIGRATION: every FinancialGoal row already
+  // Completed as of this migration must have this column backfilled to a
+  // non-null timestamp (see this migration's hand-written UPDATE statement),
+  // so the new trigger does not retroactively fire for goals completed
+  // before this feature existed.
+  completionNotifiedAt DateTime?
+
   accountSubset FinancialGoalAccount[]
+
+  // Phase 4b: zero or more GOAL_ACHIEVED Notification rows may reference this
+  // goal over its lifetime — in practice at most one, per the unique
+  // constraint on Notification (financialGoalId, type) plus this column's own
+  // latch, both enforcing "fires exactly once, ever, per goal" (AC1). Purely
+  // a back-relation, required because Prisma requires both sides of a
+  // relation to be declared.
+  notifications Notification[]
 
   @@index([userId])
   // Supports the application-level Debt Payoff exclusivity guard's own
@@ -1658,6 +1803,13 @@ model MonthlySummary {
   // times generatedAt has since been touched by a retry.
   createdAt DateTime @default(now())
 
+  // Phase 4b: zero or one MONTHLY_SUMMARY_READY Notification row references
+  // this summary (in practice at most one, per the unique constraint on
+  // Notification (monthlySummaryId, type) — see monthly-summary-trigger.ts,
+  // phase-4b-technical-design.md §6). Purely a back-relation, required
+  // because Prisma requires both sides of a relation to be declared.
+  notifications Notification[]
+
   // One row per user per calendar month, forever — mirrors Budget's own
   // @@unique([userId, month]) + @@index([userId, month]) pair exactly; the
   // composite index serves both getMostRecentSummary (ORDER BY month DESC
@@ -1952,4 +2104,67 @@ model ReasoningModelCallLog {
   // contiguous range within it).
   @@index([createdAt])
   @@map("reasoning_model_call_log")
+}
+
+// ---------------------------------------------------------------------------
+// FinanceOS domain (Phase 4b) — Notifications v2's per-user preference/
+// threshold settings. Modeled per docs/architecture/phase-4b-technical-
+// design.md §7.5 (Solution Architect's schema handoff). Reports (the other
+// half of Phase 4b) has no schema footprint of its own — every report type is
+// assembled entirely from existing tables/read functions (phase-4b-technical-
+// design.md §3), so nothing is added to this file for it.
+// ---------------------------------------------------------------------------
+
+// ---- Notifications v2: per-trigger-type in-app/email preference ------------
+//
+// Modeling decision (phase-4b-technical-design.md §7.5): one row per user per
+// NotificationType, materialized lazily. Row ABSENCE for a given (userId,
+// type) = the documented defaults (inAppEnabled: true, emailEnabled: false)
+// — features/notifications/server/preferences.ts's getNotificationPreferences
+// materializes all trigger types at read time regardless of which rows
+// actually exist, the identical "row presence encodes unset vs. explicit"
+// convention Budgeting already established for BudgetCategory (see that
+// model's own comment above), reused here rather than a seed-at-signup step
+// for every user × every trigger type.
+model NotificationPreference {
+  id           String           @id @default(cuid())
+  userId       String
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type         NotificationType
+  inAppEnabled Boolean          @default(true)
+  emailEnabled Boolean          @default(false)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  // One preference row per user per trigger type — the natural upsert key
+  // for updateNotificationPreference, and also the point-lookup
+  // email-dispatch.ts uses to decide whether to email a freshly-created
+  // notification of a given type.
+  @@unique([userId, type])
+  @@index([userId])
+  @@map("notification_preference")
+}
+
+// ---- Notifications v2: per-user Large Purchase / Low Balance thresholds ----
+//
+// Modeling decision (phase-4b-technical-design.md §7.5): one row per user,
+// created lazily on first customization (same lazy-materialization
+// convention as NotificationPreference above) — both columns independently
+// nullable so a user can customize one threshold without being forced to
+// also supply an explicit value for the other. Row absence, or a null column
+// within an existing row, both mean "use the system default" (Large
+// Purchase: $500, Low Balance: $100 — proposed defaults per
+// phase-4b-technical-design.md §6, applied in
+// features/notifications/server/preferences.ts's
+// getNotificationThresholdSettings, not hardcoded here).
+model NotificationThresholdSettings {
+  id                     String   @id @default(cuid())
+  userId                 String   @unique
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  largePurchaseThreshold Decimal? @db.Decimal(14, 2)
+  lowBalanceThreshold    Decimal? @db.Decimal(14, 2)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@map("notification_threshold_settings")
 }
