@@ -873,3 +873,31 @@ export async function getSummaryHistory(userId: string): Promise<MonthlyRecap[]>
   })
   return rows.map(toMonthlyRecap)
 }
+
+/**
+ * (Phase 4b bug fix) The `limit` most-recently-closed months' summaries,
+ * most recent first -- a bounded middle ground between `getMostRecentSummary`
+ * (a single row, which the Monthly Summary notification trigger discovered
+ * is insufficient: an evaluation gap spanning 2+ newly-generated months
+ * permanently drops the older month's notification, since nothing ever looks
+ * at any row but the single latest one -- see docs/testing/bug-reports/
+ * monthly-summary-notification-skips-months-after-evaluation-gap.md) and
+ * `getSummaryHistory` (unbounded full history, which would reintroduce this
+ * module's original anti-launch-flood concern -- a long-tenured user's very
+ * first evaluation firing a burst of stale "ready" notifications for every
+ * month they've already seen on the Dashboard). Reused by
+ * `notifications/server/triggers/monthly-summary-trigger.ts` to check every
+ * recent month's row for a still-unnotified narrative, not only the single
+ * latest one, while keeping the sweep bounded -- mirroring Large Purchase's
+ * own `RECENCY_WINDOW_DAYS` precedent for the identical class of "narrow
+ * enough to be safe on a first-ever evaluation" tradeoff, just expressed in
+ * months (a discrete unit for this feature) rather than days.
+ */
+export async function getRecentSummaries(userId: string, limit: number): Promise<MonthlyRecap[]> {
+  const rows = await db.monthlySummary.findMany({
+    where: { userId },
+    orderBy: { month: "desc" },
+    take: limit,
+  })
+  return rows.map(toMonthlyRecap)
+}

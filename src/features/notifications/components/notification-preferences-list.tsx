@@ -13,7 +13,7 @@
  * why there is no independent client-side refetch path.
  *
  * **UI Component Engineer follow-up flagged here:** the In-App/Email toggle
- * below (`PreferenceToggle`) is a small `Button`-based `role="switch"`
+ * below (`PreferenceToggleButton`) is a small `Button`-based `role="switch"`
  * composition, not a shadcn `Switch` primitive — no `Switch` (or
  * `Checkbox`/`Toggle`) component exists yet under `components/ui/` as of
  * this feature. Per the Frontend Lead's "assemble, never build reusable
@@ -24,6 +24,24 @@
  * established as this codebase's one existing precedent for a boolean
  * toggle built from already-installed primitives alone, so this screen isn't
  * blocked on that follow-up landing first.
+ *
+ * **Bug fix (Phase 4b):** `PreferenceToggleButton` calls
+ * `useUpdateNotificationPreference()` itself, giving each of the 14 toggle
+ * buttons (7 trigger types × In-App/Email) its own independent `useMutation`
+ * instance, rather than this list hoisting a single shared instance and
+ * reusing it for every row. A single shared instance's `isPending`/
+ * `variables` reflect only the most-recently-invoked `mutate()` call — with
+ * 14 toggles sharing one instance, clicking a different row's toggle while
+ * an earlier one was still in flight silently cleared the earlier row's
+ * "pending" disabled state (`variables` had moved on to the new call),
+ * permitting overlapping requests for the same preference row and a
+ * stale-response-wins race in `onSuccess`'s unconditional cache write. See
+ * docs/testing/bug-reports/
+ * notification-preferences-shared-mutation-defeats-pending-guard.md. Giving
+ * every toggle its own mutation instance (React's normal
+ * one-hook-instance-per-component-instance behavior) makes each button's own
+ * `isPending` exactly and only reflect its own in-flight request, with no
+ * `variables`-matching guard needed at all.
  */
 
 import { toast } from "sonner"
@@ -77,17 +95,38 @@ const NOTIFICATION_TYPE_DESCRIPTIONS: Record<NotificationType, string> = {
   MONTHLY_SUMMARY_READY: "Your monthly recap narrative is ready to view.",
 }
 
-function PreferenceToggle({
+/**
+ * One toggle button, fully self-contained: owns its own
+ * `useUpdateNotificationPreference()` mutation instance (see this file's top
+ * JSDoc "Bug fix" note for why), so its `disabled` state during an in-flight
+ * update can never be affected by any other toggle being clicked elsewhere
+ * on the screen.
+ */
+function PreferenceToggleButton({
+  type,
+  field,
   label,
   checked,
-  disabled,
-  onToggle,
 }: {
+  type: NotificationType
+  field: "inAppEnabled" | "emailEnabled"
   label: string
   checked: boolean
-  disabled: boolean
-  onToggle: () => void
 }) {
+  const updatePreference = useUpdateNotificationPreference()
+
+  function handleToggle() {
+    updatePreference.mutate(
+      { type, [field]: !checked },
+      {
+        onError: (error) =>
+          toast.error(
+            error instanceof Error ? error.message : "Could not update notification preference.",
+          ),
+      },
+    )
+  }
+
   return (
     <Button
       type="button"
@@ -96,8 +135,8 @@ function PreferenceToggle({
       aria-label={label}
       variant={checked ? "default" : "outline"}
       size="sm"
-      disabled={disabled}
-      onClick={onToggle}
+      disabled={updatePreference.isPending}
+      onClick={handleToggle}
       className="w-14 justify-center"
     >
       {checked ? "On" : "Off"}
@@ -113,23 +152,6 @@ export function NotificationPreferencesList({
   initialPreferences,
 }: NotificationPreferencesListProps) {
   const { data: preferences } = useNotificationPreferences(initialPreferences)
-  const updatePreference = useUpdateNotificationPreference()
-
-  function handleToggle(
-    type: NotificationType,
-    field: "inAppEnabled" | "emailEnabled",
-    next: boolean,
-  ) {
-    updatePreference.mutate(
-      { type, [field]: next },
-      {
-        onError: (error) =>
-          toast.error(
-            error instanceof Error ? error.message : "Could not update notification preference.",
-          ),
-      },
-    )
-  }
 
   return (
     <Card>
@@ -152,8 +174,6 @@ export function NotificationPreferencesList({
             const preference = preferences.find((item) => item.type === type)
             const inAppEnabled = preference?.inAppEnabled ?? true
             const emailEnabled = preference?.emailEnabled ?? false
-            const isPending =
-              updatePreference.isPending && updatePreference.variables?.type === type
 
             return (
               <div key={type} className="grid grid-cols-[1fr_auto_auto] items-center gap-4 py-3">
@@ -166,19 +186,19 @@ export function NotificationPreferencesList({
                   </p>
                 </div>
                 <div className="flex justify-center">
-                  <PreferenceToggle
+                  <PreferenceToggleButton
+                    type={type}
+                    field="inAppEnabled"
                     label={`${NOTIFICATION_TYPE_LABELS[type]} in-app notifications`}
                     checked={inAppEnabled}
-                    disabled={isPending}
-                    onToggle={() => handleToggle(type, "inAppEnabled", !inAppEnabled)}
                   />
                 </div>
                 <div className="flex justify-center">
-                  <PreferenceToggle
+                  <PreferenceToggleButton
+                    type={type}
+                    field="emailEnabled"
                     label={`${NOTIFICATION_TYPE_LABELS[type]} email notifications`}
                     checked={emailEnabled}
-                    disabled={isPending}
-                    onToggle={() => handleToggle(type, "emailEnabled", !emailEnabled)}
                   />
                 </div>
               </div>

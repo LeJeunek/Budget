@@ -272,7 +272,15 @@ export function YearlyReportTemplate({ data }: { data: YearlyReportData }) {
                 <Text style={styles.statValue}>{formatCurrency(investments.totalCurrentValue)}</Text>
               </View>
               <View style={styles.stat}>
-                <Text style={styles.statLabel}>Gain/Loss This Year</Text>
+                {/* Interpolates the requested year (`data.period.label`,
+                 * e.g. "2023") rather than a hardcoded "This Year" — the
+                 * Yearly Report can be generated for any past calendar year
+                 * (reports.md §2), and this label is the only place in this
+                 * template that previously baked in a "current year"
+                 * assumption independent of the actual period requested
+                 * (see docs/testing/bug-reports/
+                 * yearly-report-hardcoded-gain-loss-this-year-label.md). */}
+                <Text style={styles.statLabel}>Gain/Loss ({data.period.label})</Text>
                 <Text style={styles.statValue}>{formatCurrency(investments.gainLossForYear)}</Text>
               </View>
               <View style={styles.stat}>

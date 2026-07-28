@@ -91,6 +91,15 @@ const GENERATED_AT_FORMATTER = new Intl.DateTimeFormat("en-US", {
   hour: "numeric",
   minute: "2-digit",
   timeZoneName: "short",
+  // Pins the formatter to UTC, matching every sibling formatter in this
+  // feature (`server/period.ts`'s `MONTH_NAME_FORMATTER`/
+  // `DATE_LABEL_FORMATTER`) and `lib/utils.ts`'s `formatDate` — without this,
+  // `Intl.DateTimeFormat` falls back to the server process's local
+  // timezone, which can render a different *calendar date* (not just a
+  // different clock hour) near a UTC day boundary depending purely on
+  // server deployment configuration (see docs/testing/bug-reports/
+  // report-generated-timestamp-not-utc.md).
+  timeZone: "UTC",
 })
 
 export function ReportDocument({
