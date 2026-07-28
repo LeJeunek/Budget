@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest"
 /**
  * This file deliberately never imports `goal-achieved-trigger.ts` itself —
  * every one of its exported functions always touches the database
- * (`getFinancialGoals`, `db.financialGoal.updateMany`,
+ * (`getFinancialGoalCompletionStatus`, `db.financialGoal.updateMany`,
  * `createNotificationIfNew`) and is out of scope for a live-database test,
  * per this codebase's standing "no integration-test database" convention.
  * Its atomic-claim contract (the exact TOCTOU-race-prevention pattern
@@ -40,8 +40,9 @@ describe("goal-achieved-trigger.ts source-level wiring", () => {
     )
   })
 
-  it("reads getFinancialGoals with its default (non-archived-only) options, never explicitly requesting includeArchived: true — an archived goal is never evaluated by this trigger", () => {
-    expect(SOURCE).toMatch(/getFinancialGoals\(userId\)/)
+  it("reads getFinancialGoalCompletionStatus (the completion-only read, not the full getFinancialGoals progress view) — an archived goal is never evaluated by this trigger since that function's own archivedAt: null filter is unconditional", () => {
+    expect(SOURCE).toMatch(/getFinancialGoalCompletionStatus\(userId\)/)
+    expect(SOURCE).not.toMatch(/getFinancialGoals\(userId\)/)
     expect(SOURCE).not.toMatch(/includeArchived:\s*true/)
   })
 })

@@ -4,7 +4,7 @@ import {
   getTopMerchants,
 } from "@/features/analytics/server/expense-breakdown"
 import { enumerateMonthKeys, resolveMonthKeyRange } from "@/features/analytics/server/period"
-import { getMonthlySummary } from "@/features/dashboard/server/service"
+import { getExpenseTotalForMonth } from "@/features/dashboard/server/service"
 import { getEarliestTransactionDate } from "@/features/transactions/server/service"
 
 import type { ExpenseReportData } from "../../types"
@@ -13,11 +13,16 @@ import type { ResolvedPeriod } from "../period"
 /**
  * Expense Report (reports.md §5). Per
  * phase-4b-technical-design.md §3's data-source map, the total-expense
- * trend line is the per-month `dashboard.service.getMonthlySummary` loop
- * (never re-derived from `getCategoryTrends`' own per-category buckets,
- * which this report type has no other use for — its by-category section is
- * `getExpenseDistribution`'s own whole-period totals, per reports.md's
- * literal Contents list).
+ * trend line is a per-month loop (never re-derived from `getCategoryTrends`'
+ * own per-category buckets, which this report type has no other use for —
+ * its by-category section is `getExpenseDistribution`'s own whole-period
+ * totals, per reports.md's literal Contents list).
+ *
+ * Uses `dashboard.service.getExpenseTotalForMonth` (expense-only) rather
+ * than `getMonthlySummary` (income + expenses): this report never reads the
+ * income half, so looping `getMonthlySummary` per month would run an
+ * unused income `aggregate` for every month in the period — see
+ * docs/performance/phase-4b-performance-review.md Finding 1.
  */
 export async function assembleExpenseReportData(
   userId: string,
@@ -41,8 +46,8 @@ export async function assembleExpenseReportData(
       ? Promise.all(
           enumerateMonthKeys(trendStart, period.end).map(async (monthKey) => {
             const { start } = resolveMonthKeyRange(monthKey)
-            const summary = await getMonthlySummary(userId, start)
-            return { month: monthKey, expenses: summary.expenses }
+            const expenses = await getExpenseTotalForMonth(userId, start)
+            return { month: monthKey, expenses }
           }),
         )
       : Promise.resolve([]),

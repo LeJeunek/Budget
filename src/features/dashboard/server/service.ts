@@ -265,6 +265,43 @@ export async function getMonthlySummary(
 }
 
 /**
+ * Expense-only total for `month` (same month-to-date range resolution and
+ * split-parent exclusion as `getMonthlySummary`/`getIncomeAndExpenses`, so
+ * this figure always agrees with `getMonthlySummary(...).expenses` for the
+ * same `userId`/`month`).
+ *
+ * Exists specifically for callers that only ever read the expenses figure
+ * out of `getMonthlySummary` — `getMonthlySummary` unconditionally runs
+ * *two* `db.transaction.aggregate` calls (income sum + expense sum) via
+ * `getIncomeAndExpenses`, since Dashboard's own callers (`getMonthlySummary`
+ * itself) need both. A caller that discards the income half on every call
+ * (e.g. a per-month trend loop) would otherwise pay for an aggregate it
+ * never reads — this narrower read runs only the expense-side `aggregate`,
+ * per Phase 4b's performance review Finding 1
+ * (docs/performance/phase-4b-performance-review.md).
+ */
+export async function getExpenseTotalForMonth(
+  userId: string,
+  month: Date,
+): Promise<number> {
+  const { start, end } = resolveMonthToDateRange(month)
+
+  const expenseResult = await db.transaction.aggregate({
+    where: {
+      userId,
+      date: { gte: start, lte: end },
+      amount: { lt: 0 },
+      ...EXCLUDE_SPLIT_PARENTS,
+    },
+    _sum: { amount: true },
+  })
+
+  // Same negative-zero normalization as `getIncomeAndExpenses` — see that
+  // function's comment for why `|| 0` (not just `?? 0`) is required here.
+  return -(expenseResult._sum.amount?.toNumber() ?? 0) || 0
+}
+
+/**
  * Spending by Category for `month`: expense transactions (`amount < 0`)
  * grouped by category, using the same month-to-date range and split-parent
  * exclusion as `getMonthlySummary` so the two stay consistent — a user

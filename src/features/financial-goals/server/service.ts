@@ -324,12 +324,29 @@ interface GoalTypeAndBasis {
  * `rows`, in parallel, exactly once per distinct requirement — see
  * `ProgressContext`'s own JSDoc for the "why once, not once per goal"
  * reasoning.
+ *
+ * `includeTrend` (default `true`, `getFinancialGoals`/`getFinancialGoalById`'s
+ * existing behavior, unchanged) gates only `buildTotalNetWorthTrend`'s own
+ * extra reads (`resolveDefaultRange` + `getNetWorthHistory`) — the mini
+ * trend line is a page-rendering-only field
+ * (`FinancialGoalWithProgress.trend`), never read by
+ * `computeProgressForGoal`'s `isCompleted` branch. `false` is used only by
+ * `getFinancialGoalCompletionStatus` below, whose caller
+ * (`notifications/server/triggers/goal-achieved-trigger.ts`) never reads
+ * `trend` — see that function's own JSDoc and
+ * docs/performance/phase-4b-performance-review.md Finding 5. Every other
+ * context field (`totalNetWorth`, `accountsById`, `rollingSavingsRatePercent`,
+ * `debtById`) still runs regardless of `includeTrend`: unlike the trend
+ * line, those are the actual inputs `isCompleted` is computed from, not
+ * optional enrichment.
  */
 async function buildProgressContext(
   userId: string,
   rows: GoalTypeAndBasis[],
   now: Date,
+  options: { includeTrend?: boolean } = {},
 ): Promise<ProgressContext> {
+  const { includeTrend = true } = options
   const debtIds = Array.from(
     new Set(
       rows
@@ -357,7 +374,9 @@ async function buildProgressContext(
         debtIds.map(async (debtId) => [debtId, await getDebtById(userId, debtId)] as const),
       ),
       needsTotalNetWorth ? getNetWorth(userId).then((nw) => nw.total) : Promise.resolve(null),
-      needsTotalNetWorth ? buildTotalNetWorthTrend(userId) : Promise.resolve(null),
+      needsTotalNetWorth && includeTrend
+        ? buildTotalNetWorthTrend(userId)
+        : Promise.resolve(null),
       needsAccountSubset ? getAccounts(userId) : Promise.resolve([]),
       needsRollingSavingsRate
         ? computeCurrentRollingSavingsRatePercent(userId, now)
@@ -537,4 +556,73 @@ export async function getFinancialGoalById(
     accountIds,
     ...computeProgressForGoal(goal, accountIds, context),
   }
+}
+
+/**
+ * The two fields `getFinancialGoalCompletionStatus` returns per active goal
+ * — deliberately just enough for `goal-achieved-trigger.ts` to decide "is
+ * this goal newly complete" (`isCompleted === true && completionNotifiedAt
+ * === null`), not `FinancialGoalWithProgress`'s full progress-view shape.
+ */
+export interface FinancialGoalCompletionStatus {
+  id: string
+  isCompleted: boolean
+  completionNotifiedAt: Date | null
+}
+
+/**
+ * Narrower counterpart to `getFinancialGoals`, for callers that only need
+ * "is this goal complete, and have we already notified about it" — currently
+ * only `notifications/server/triggers/goal-achieved-trigger.ts`, which runs
+ * on every 60-second bell poll and every cron sweep iteration and never
+ * reads any of `FinancialGoalWithProgress`'s other fields
+ * (`currentMeasuredValue`, `distanceToTarget`, `percentPaidOff`, `trend`,
+ * `currentRollingAverageRate`, `accountIds`).
+ *
+ * Reuses the exact same per-goal completion math as `getFinancialGoals`
+ * (`computeProgressForGoal`'s `isCompleted` branch), so the two can never
+ * disagree about whether a goal is complete — this is not a second,
+ * independently-maintained completion rule. The only thing it skips is
+ * `buildTotalNetWorthTrend` (via `buildProgressContext`'s `includeTrend:
+ * false`) for `TOTAL_NET_WORTH`-basis goals: that trend line is read-only
+ * display data for the goals list page, never an input to `isCompleted`.
+ * Every other underlying read `computeProgressForGoal` needs to actually
+ * *determine* completion (current Net Worth, the rolling Savings Rate
+ * average, the linked Debt's live balance, the Account subset's live
+ * balances) still runs — trimming those would change the computed
+ * `isCompleted` value, not just its cost.
+ *
+ * Does not accept an `includeArchived` option (unlike `getFinancialGoals`):
+ * this trigger must never evaluate an archived goal (notifications-v2.md's
+ * Goal Achieved AC4), so the `archivedAt: null` filter here is unconditional,
+ * not a caller-supplied choice.
+ *
+ * Added per docs/performance/phase-4b-performance-review.md Finding 5 —
+ * does not change `getFinancialGoals`'s own contract or behavior for its
+ * other (page-rendering) caller.
+ */
+export async function getFinancialGoalCompletionStatus(
+  userId: string,
+): Promise<FinancialGoalCompletionStatus[]> {
+  const now = new Date()
+
+  const rows = await db.financialGoal.findMany({
+    where: { userId, archivedAt: null },
+    include: ACCOUNT_SUBSET_INCLUDE,
+    orderBy: { createdAt: "asc" },
+  })
+
+  const context = await buildProgressContext(userId, rows, now, { includeTrend: false })
+
+  return rows.map((row) => {
+    const goal = toFinancialGoal(row)
+    const accountIds = row.accountSubset.map((link) => link.accountId)
+    const { isCompleted } = computeProgressForGoal(goal, accountIds, context)
+
+    return {
+      id: row.id,
+      isCompleted: isCompleted === true,
+      completionNotifiedAt: row.completionNotifiedAt,
+    }
+  })
 }

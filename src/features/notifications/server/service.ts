@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import type { Notification } from "../types"
 import { dispatchNotificationEmail } from "./email-dispatch"
 import { NOTIFICATION_INCLUDE, toNotification } from "./notification-mapper"
+import { getNotificationThresholdSettings } from "./preferences"
 import { evaluateBudgetAndBillTriggers } from "./triggers/budget-bill-triggers"
 import { evaluateGoalAchievedTriggers } from "./triggers/goal-achieved-trigger"
 import { evaluateLargePurchaseTriggers } from "./triggers/large-purchase-trigger"
@@ -43,11 +44,20 @@ import { evaluateMonthlySummaryTriggers } from "./triggers/monthly-summary-trigg
 export async function ensureNotifications(
   userId: string,
 ): Promise<{ notificationsCreated: number; emailsSent: number }> {
+  // Resolved once and threaded into both Large Purchase and Low Balance
+  // below, rather than each trigger independently calling
+  // `getNotificationThresholdSettings` itself — both need the identical
+  // single-row `NotificationThresholdSettings` lookup for the same `userId`
+  // in the same evaluation pass, so fetching it once avoids querying that
+  // row twice per poll/cron iteration, per
+  // docs/performance/phase-4b-performance-review.md Finding 4.
+  const thresholdSettings = await getNotificationThresholdSettings(userId)
+
   const createdByTrigger = await Promise.all([
     evaluateBudgetAndBillTriggers(userId),
     evaluateGoalAchievedTriggers(userId),
-    evaluateLargePurchaseTriggers(userId),
-    evaluateLowBalanceTriggers(userId),
+    evaluateLargePurchaseTriggers(userId, thresholdSettings),
+    evaluateLowBalanceTriggers(userId, thresholdSettings),
     evaluateMonthlySummaryTriggers(userId),
   ])
 

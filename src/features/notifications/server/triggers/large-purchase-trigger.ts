@@ -1,9 +1,8 @@
 import { db } from "@/lib/db"
 import { EXCLUDE_SPLIT_PARENTS } from "@/features/transactions/server/service"
 
-import type { Notification } from "../../types"
+import type { Notification, NotificationThresholdSettingsView } from "../../types"
 import { createNotificationIfNew } from "../notification-mapper"
-import { getNotificationThresholdSettings } from "../preferences"
 
 /**
  * Recency window (docs/product/notifications-v2.md's Large Purchase Edge
@@ -52,12 +51,21 @@ const RECENCY_WINDOW_DAYS = 7
  * `LARGE_PURCHASE` notification, or one later edited back below the
  * threshold, is left exactly as-is (AC6/AC5's "the earlier notification is
  * not retroactively deleted, no further notification fires").
+ *
+ * `thresholdSettings` is resolved once by the caller (`service.ts`'s
+ * `ensureNotifications`) and passed in, rather than this function calling
+ * `getNotificationThresholdSettings` itself — `evaluateLowBalanceTriggers`
+ * needs the identical single-row read for the same `userId` in the same
+ * evaluation pass, so fetching it once and threading it into both avoids
+ * querying the same row twice per poll/cron iteration, per
+ * docs/performance/phase-4b-performance-review.md Finding 4.
  */
-export async function evaluateLargePurchaseTriggers(userId: string): Promise<Notification[]> {
-  const [{ largePurchaseThreshold }, windowStart] = await Promise.all([
-    getNotificationThresholdSettings(userId),
-    Promise.resolve(new Date(Date.now() - RECENCY_WINDOW_DAYS * 24 * 60 * 60 * 1000)),
-  ])
+export async function evaluateLargePurchaseTriggers(
+  userId: string,
+  thresholdSettings: NotificationThresholdSettingsView,
+): Promise<Notification[]> {
+  const { largePurchaseThreshold } = thresholdSettings
+  const windowStart = new Date(Date.now() - RECENCY_WINDOW_DAYS * 24 * 60 * 60 * 1000)
 
   const candidates = await db.transaction.findMany({
     where: {

@@ -4,9 +4,8 @@ import { db } from "@/lib/db"
 import { getAccounts } from "@/features/accounts/server/service"
 import type { Account } from "@/features/accounts/types"
 
-import type { Notification } from "../../types"
+import type { Notification, NotificationThresholdSettingsView } from "../../types"
 import { createNotificationIfNew } from "../notification-mapper"
-import { getNotificationThresholdSettings } from "../preferences"
 
 /** Eligible account types (notifications-v2.md's Low Balance trigger AC1):
  * Credit Card is excluded (its balance represents money owed, not available
@@ -68,12 +67,19 @@ export function resolveEffectiveLowBalanceThreshold(
  * §7.4's own comment): the very first evaluation for such an account finds
  * `lowBalanceNotifiedAt: null` and a below-threshold balance, which is
  * exactly the "armed to fire" case above.
+ *
+ * `thresholdSettings` is resolved once by the caller (`service.ts`'s
+ * `ensureNotifications`) and passed in — see `evaluateLargePurchaseTriggers`'s
+ * matching JSDoc note; both triggers need the same single-row
+ * `NotificationThresholdSettings` lookup for the same `userId`, so it is
+ * fetched exactly once per evaluation pass rather than once per trigger.
  */
-export async function evaluateLowBalanceTriggers(userId: string): Promise<Notification[]> {
-  const [accounts, { lowBalanceThreshold: userDefaultThreshold }] = await Promise.all([
-    getAccounts(userId),
-    getNotificationThresholdSettings(userId),
-  ])
+export async function evaluateLowBalanceTriggers(
+  userId: string,
+  thresholdSettings: NotificationThresholdSettingsView,
+): Promise<Notification[]> {
+  const { lowBalanceThreshold: userDefaultThreshold } = thresholdSettings
+  const accounts = await getAccounts(userId)
 
   const eligibleAccounts = accounts.filter((account) =>
     ELIGIBLE_ACCOUNT_TYPES.includes(account.type),
