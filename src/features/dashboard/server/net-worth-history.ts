@@ -272,6 +272,43 @@ export async function getNetWorthValueOnOrBefore(
 }
 
 /**
+ * (Phase 4b) A single point-in-time Net Worth lookup — the closest
+ * `NetWorthSnapshot` row at or before `date`, per
+ * docs/architecture/api-contracts.md's Net Worth History section: "a
+ * point-in-time variant of the existing range query, needed by Reports'
+ * Monthly/Yearly report types." Returns `null` when the user has no snapshot
+ * at or before `date` yet (e.g. a report requested for a period before the
+ * user's account existed) — `features/reports/`'s data assemblers treat this
+ * as "not available," never a fabricated `0`.
+ *
+ * Deliberately distinct from `getNetWorthValueOnOrBefore` (Phase 4a, added
+ * for the Financial Health Score's Net Worth Trend component): that function
+ * returns a bare `number | null`, which is sufficient for a component that
+ * only ever needs the *value*. Reports' "Net Worth at the start/end of the
+ * month/year" header lines need the snapshot's own `date` too (so a report
+ * can honestly state which day's snapshot a possibly-stale figure reflects,
+ * per Cross-Cutting Requirement #5's "generation date/time" framing) — hence
+ * a second, small sibling function rather than widening the Phase 4a one's
+ * return shape and touching its one existing caller.
+ */
+export async function getNetWorthAsOf(
+  userId: string,
+  date: Date,
+): Promise<{ date: string; netWorth: number } | null> {
+  const row = await db.netWorthSnapshot.findFirst({
+    where: { userId, capturedDate: { lte: date } },
+    orderBy: { capturedDate: "desc" },
+    select: { capturedDate: true, totalNetWorth: true },
+  })
+
+  if (!row) {
+    return null
+  }
+
+  return { date: formatDateKey(row.capturedDate), netWorth: row.totalNetWorth.toNumber() }
+}
+
+/**
  * Resolves AC3's default range — `"all"` when the user's earliest snapshot
  * is less than 90 days old, `"90d"` once it is 90 or more days old — via a
  * cheap `aggregate`(`min`)/`count` pair, not a full row fetch, so the initial

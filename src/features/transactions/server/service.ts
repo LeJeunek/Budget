@@ -82,6 +82,64 @@ export const EXCLUDE_SPLIT_PARENTS: Prisma.TransactionWhereInput = {
 }
 
 /**
+ * (Phase 4b) Options for `getEarliestTransactionDate` — `direction` narrows
+ * to expense (`amount < 0`) or income (`amount > 0`) transactions only;
+ * omitted resolves the earliest transaction of either sign.
+ */
+export interface GetEarliestTransactionDateOptions {
+  direction?: "income" | "expense"
+}
+
+/**
+ * (Phase 4b) A user's earliest transaction date, optionally scoped to
+ * income-only or expense-only activity — the "All Time" floor Reports' Cash
+ * Flow and Expense report data assemblers need to bound their own per-month
+ * `dashboard.service.getMonthlySummary` loop whenever the requested period's
+ * `start` is unresolved (`null`, per `ReportingPeriodRange`'s "All Time"
+ * convention), per phase-4b-technical-design.md §3's "looping the resolved
+ * period's months and calling already-existing per-month functions" design.
+ *
+ * Every period-aware Analytics metric already private-duplicates this exact
+ * query shape per file (`spending-trends.ts`'s `resolveEarliestExpenseDate`,
+ * `income-analytics.ts`'s `resolveEarliestIncomeDate`, `budget-comparison.ts`/
+ * `savings-growth.ts`'s identical `resolveEarliestActivityDate`) rather than
+ * sharing one exported function — per this codebase's own established
+ * convention for this exact situation (see this file's `EXCLUDE_SPLIT_PARENTS`
+ * doc comment: "features/<domain>/server modules do not cross-import each
+ * other's ... internals ... this small duplication is the established,
+ * deliberate alternative"). This function is exported specifically because
+ * Reports is a different *feature* than Analytics, reading the `Transaction`
+ * table itself would violate reports.md's binding constraint 2 ("never a new
+ * Prisma query against a table another domain already owns") — so, unlike
+ * Analytics' own internal duplicates, this one small query is surfaced here,
+ * on `Transaction`'s owning module, as this feature's one new read function
+ * beyond the three phase-4b-technical-design.md §3 names explicitly (see the
+ * Backend Engineer's final report for this exact call-out).
+ */
+export async function getEarliestTransactionDate(
+  userId: string,
+  options: GetEarliestTransactionDateOptions = {},
+): Promise<Date | null> {
+  const amountWhere: Prisma.TransactionWhereInput["amount"] =
+    options.direction === "income"
+      ? { gt: 0 }
+      : options.direction === "expense"
+        ? { lt: 0 }
+        : undefined
+
+  const result = await db.transaction.aggregate({
+    where: {
+      userId,
+      ...(amountWhere ? { amount: amountWhere } : {}),
+      ...EXCLUDE_SPLIT_PARENTS,
+    },
+    _min: { date: true },
+  })
+
+  return result._min.date ?? null
+}
+
+/**
  * Builds the shared `where` clause for `listTransactions`'s data query and
  * count query, so the two can never drift out of sync (a mismatch would
  * silently break pagination — e.g. `total` counting rows `items` excludes).

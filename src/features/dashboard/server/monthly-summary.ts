@@ -814,6 +814,45 @@ export async function getMostRecentSummary(userId: string): Promise<MonthlyRecap
 }
 
 /**
+ * (Phase 4b) Exact-month lookup — `null` when no `MonthlySummary` row exists
+ * for `month` at all (never yet generated, or the current in-progress month,
+ * which never gets one per AC3), per docs/architecture/api-contracts.md's
+ * Net Worth History section: "an exact-month lookup, needed by Reports'
+ * Monthly report narrative section and by the Monthly Summary notification
+ * trigger."
+ *
+ * Deliberately does not distinguish "no row yet" from "a row exists but its
+ * `narrative` is null" at this layer — both already collapse to
+ * `MonthlyRecap.narrative: null` via `toMonthlyRecap`, which is exactly the
+ * behavior Reports' Monthly report (reports.md's own Edge Cases: "the report
+ * never distinguishes 'failed' from 'not yet run' to the user") and the
+ * Monthly Summary notification trigger (which only ever fires when
+ * `narrative` is non-null) both need — a second, redundant "did a row exist
+ * at all" boolean would only invite a caller to build a distinction reports.md
+ * explicitly says must never surface.
+ *
+ * `month` is a `"YYYY-MM"` string (this function's callers already have one
+ * in hand — Reports' resolved report period, or the notification trigger's
+ * own most-recent-summary read — rather than a `Date`), parsed via this
+ * file's own `MonthSchema`/`parseMonthToDate` (imported from
+ * `./validation`), matching every other month-keyed function in this module.
+ * Throws on a malformed `month`, mirroring `parseMonthToDate`'s own "callers
+ * validate first" contract — `features/reports/server/period.ts` always
+ * derives `month` from an already-resolved report period, never a raw,
+ * unvalidated client string.
+ */
+export async function getSummaryForMonth(
+  userId: string,
+  month: string,
+): Promise<MonthlyRecap | null> {
+  const monthDate = parseMonthToDate(month)
+  const row = await db.monthlySummary.findUnique({
+    where: { userId_month: { userId, month: monthDate } },
+  })
+  return row ? toMonthlyRecap(row) : null
+}
+
+/**
  * Every past month's summary (api-contracts.md's "Browse summary history"
  * row), most recent first -- including months whose generation failed
  * (`narrative: null`), per Feature 3's "never a month silently missing from

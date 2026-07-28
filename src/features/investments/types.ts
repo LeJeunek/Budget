@@ -169,3 +169,36 @@ export interface GetGainLossForPeriodOptions {
   start: Date
   end: Date
 }
+
+/**
+ * Options for `service.getDividendIncomeForPeriod` — **(Phase 4b)**, per
+ * docs/architecture/phase-4b-technical-design.md §3.3: "every existing
+ * Investments read function exposes dividends only per-holding
+ * (`getHoldingById`) or as a lifetime portfolio total, never a
+ * period-scoped, portfolio-wide sum." Needed by Reports' Yearly and Tax
+ * Summary report types. Mirrors `GetGainLossForPeriodOptions` exactly — both
+ * bounds required, since every caller (Reports' data assemblers) always
+ * resolves a concrete `[start, end]` before calling this.
+ */
+export interface GetDividendIncomeForPeriodOptions {
+  start: Date
+  end: Date
+}
+
+/** One holding's contribution to `DividendIncomeForPeriod.byHolding`. */
+export interface DividendIncomeByHolding {
+  holdingId: string
+  holdingName: string
+  amount: number
+}
+
+/** `service.getDividendIncomeForPeriod`'s return shape — a portfolio-wide
+ * total plus a per-holding breakdown, both scoped to dividends *received*
+ * (`DividendEntry.date`) within `[start, end]`, across both active and
+ * Closed holdings (matching `getPortfolioOverview`'s own "a dividend logged
+ * on a Closed holding still counts" convention — dividend income is never
+ * active-holding-scoped the way current-value/gain-loss totals are). */
+export interface DividendIncomeForPeriod {
+  total: number
+  byHolding: DividendIncomeByHolding[]
+}

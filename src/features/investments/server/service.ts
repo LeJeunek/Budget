@@ -13,6 +13,8 @@ import type {
   AllocationEntry,
   ContainerSummary,
   DividendEntry,
+  DividendIncomeForPeriod,
+  GetDividendIncomeForPeriodOptions,
   GetGainLossForPeriodOptions,
   GetGrowthHistoryOptions,
   GetHoldingsOptions,
@@ -594,4 +596,67 @@ export async function getGainLossForPeriod(
   const newTotal = result._sum.newValue?.toNumber() ?? 0
 
   return newTotal - previousTotal
+}
+
+// ---------------------------------------------------------------------------
+// Period-scoped dividend income (Phase 4b — Reports' Yearly/Tax Summary
+// report types)
+// ---------------------------------------------------------------------------
+
+/**
+ * **(Phase 4b)** Period-scoped, portfolio-wide dividend income, per
+ * docs/architecture/phase-4b-technical-design.md §3.3: sums `DividendEntry.
+ * amount` for every entry *received* (`date`) within `[start, end]`, both
+ * portfolio-wide and per-holding — needed by Reports' Yearly report ("dividend
+ * income received during the year") and Tax Summary report ("Investment
+ * dividend income received during the year, portfolio-wide and per holding,"
+ * reports.md AC per investments.md AC8).
+ *
+ * Scoped across **both active and Closed holdings** — matching
+ * `getPortfolioOverview`'s own `totalDividendIncome` convention exactly (a
+ * dividend already received doesn't stop counting just because the holding
+ * was later closed) — and, unlike `getGainLossForPeriod`'s `HoldingValueHistoryEntry`
+ * read, `DividendEntry.date` is a plain calendar-date column (no
+ * timestamp-grained boundary concern), so no end-of-day inclusivity
+ * adjustment is needed here.
+ *
+ * Returns `{ total: 0, byHolding: [] }` for a user with no dividends
+ * recorded in range (no holdings at all, or holdings with no dividend
+ * activity that period) — never an error, matching every other Investments
+ * read's "empty is a valid response" convention.
+ */
+export async function getDividendIncomeForPeriod(
+  userId: string,
+  options: GetDividendIncomeForPeriodOptions,
+): Promise<DividendIncomeForPeriod> {
+  const { start, end } = options
+
+  const dividends = await db.dividendEntry.findMany({
+    where: { userId, date: { gte: start, lte: end } },
+    select: {
+      amount: true,
+      holding: { select: { id: true, name: true } },
+    },
+  })
+
+  const byHoldingMap = new Map<string, DividendIncomeForPeriod["byHolding"][number]>()
+  let total = 0
+
+  for (const dividend of dividends) {
+    const amount = dividend.amount.toNumber()
+    total += amount
+
+    const existing = byHoldingMap.get(dividend.holding.id)
+    if (existing) {
+      existing.amount += amount
+    } else {
+      byHoldingMap.set(dividend.holding.id, {
+        holdingId: dividend.holding.id,
+        holdingName: dividend.holding.name,
+        amount,
+      })
+    }
+  }
+
+  return { total, byHolding: Array.from(byHoldingMap.values()).sort((a, b) => b.amount - a.amount) }
 }
