@@ -298,3 +298,20 @@ export const LogIrregularIncomeEventSchema = z.object({
 export type LogIrregularIncomeEventInput = z.infer<
   typeof LogIrregularIncomeEventSchema
 >
+
+// ---------------------------------------------------------------------------
+// Calendar v2 (Phase 4c) — `service.getIncomeCalendarMonth`'s `month` input.
+// Duplicated from `features/bills/server/validation.ts`'s own `MonthSchema`
+// (identical pattern/message), per folder-tree.md's module boundary rule
+// (features/<domain>/server is not a shared import target across domains —
+// see `hasAtMostTwoDecimalPlaces`'s JSDoc above for the same precedent) —
+// if this validation ever needs to change, update every domain's own copy.
+// ---------------------------------------------------------------------------
+
+const MONTH_PATTERN = /^\d{4}-\d{2}$/
+
+export const MonthSchema = z
+  .string()
+  .regex(MONTH_PATTERN, "Month must be in YYYY-MM format")
+
+export type MonthInput = z.infer<typeof MonthSchema>

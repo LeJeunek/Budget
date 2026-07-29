@@ -76,6 +76,40 @@ const eslintConfig = [
       ],
     },
   },
+  {
+    // Phase 4c, `features/calendar/server/` — turns
+    // phase-4c-technical-design.md §2.2's "verified by construction, not
+    // convention" guarantee into a build-time check, the same recommendation
+    // and pattern as the two rules above: this is a pure composition layer
+    // over Bills' and Recurring Income's own already-exported service
+    // functions, and must never gain a direct database dependency or reach
+    // into either domain's pure status-math modules (which would let
+    // business logic quietly get duplicated/re-derived here instead of
+    // staying owned by the domain that already computes it once).
+    files: ["src/features/calendar/server/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/lib/db", "@/lib/db/*", "@prisma/client"],
+              message:
+                "features/calendar/server/** must never import from lib/db or @prisma/client, directly — phase-4c-technical-design.md §2.2. This module is pure composition over bills.server/service.ts's and recurring-income.server/service.ts's own already-exported functions; it has no data of its own to query.",
+            },
+            {
+              group: [
+                "@/features/bills/server/occurrence",
+                "@/features/recurring-income/server/occurrence",
+              ],
+              message:
+                "features/calendar/server/** must never import either domain's pure status-math module directly — every occurrence's status is already computed once by bills.server/service.ts / recurring-income.server/service.ts's own exported functions; re-deriving it here would duplicate business logic this composition layer must not own.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ];
 
 export default eslintConfig;

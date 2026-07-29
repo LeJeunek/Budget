@@ -216,3 +216,48 @@ export interface ActualReceivedIncomeRecord {
   amount: number
   date: Date
 }
+
+/**
+ * One payday entry within a `PaydayCalendarDay` — Calendar v2's (Phase 4c)
+ * "Recurring Income's own vocabulary" shape, per
+ * `docs/architecture/phase-4c-technical-design.md` §2.3. Mirrors
+ * `features/bills/types.ts`'s `CalendarOccurrence` exactly in spirit: `amount`
+ * is always the stream's current `expectedAmount` (the planning estimate),
+ * never the occurrence's actual received amount — the identical "a calendar
+ * is a due/expected-date view, not a payment-detail view" rule
+ * `CalendarOccurrence.amount`'s own JSDoc already establishes for Bills,
+ * extended here so Calendar v2 doesn't silently invent a second convention
+ * for the same kind of figure.
+ *
+ * `status` is present for every scheduled-stream occurrence (`UPCOMING` |
+ * `EXPECTED_TODAY` | `NOT_YET_RECEIVED` | `RECEIVED`, computed by the
+ * existing, unchanged `server/occurrence.ts`'s `computeOccurrenceStatus` —
+ * never reimplemented here) and deliberately `undefined` for an Irregular/
+ * One-off logged event (calendar-v2.md AC7): a logged event is already a
+ * completed fact by the time it exists at all, so there is no Upcoming/
+ * Received distinction left to compute for it. Callers distinguish "a logged
+ * Irregular event" from "a scheduled occurrence" by checking whether `status`
+ * is present, rather than a separate boolean flag this type doesn't need.
+ */
+export interface PaydayCalendarEntry {
+  streamId: string
+  streamName: string
+  amount: number
+  status?: IncomeOccurrenceStatus
+}
+
+/**
+ * One calendar day, per
+ * `docs/architecture/phase-4c-technical-design.md` §2.3 — the structural
+ * sibling of `features/bills/types.ts`'s `CalendarDay`.
+ * `service.getIncomeCalendarMonth` returns one entry for every day of the
+ * requested month (even days with zero paydays, `paydays: []`), mirroring
+ * Bills' own "every day of the month, even zero-occurrence days" contract
+ * exactly, so `features/calendar/server/service.ts` can zip both domains'
+ * per-day arrays together by `day` key without either one having gaps.
+ */
+export interface PaydayCalendarDay {
+  /** `"YYYY-MM-DD"`, UTC calendar date. */
+  day: string
+  paydays: PaydayCalendarEntry[]
+}

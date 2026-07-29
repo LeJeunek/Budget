@@ -21,6 +21,8 @@ import type {
   IncomeStreamDetail,
   IncomeStreamSummary,
   IrregularIncomeEvent,
+  PaydayCalendarDay,
+  PaydayCalendarEntry,
 } from "../types"
 import {
   computeNextExpectedDate,
@@ -28,6 +30,7 @@ import {
   toUtcMidnight,
   type ScheduledIncomeSchedule,
 } from "./occurrence"
+import { MonthSchema } from "./validation"
 
 // This module is imported directly by Server Components (per
 // docs/architecture/api-contracts.md's Recurring Income section) and by
@@ -531,6 +534,164 @@ export async function getActualReceivedIncomeBySource(
   }
 
   return records
+}
+
+// ---------------------------------------------------------------------------
+// Calendar v2 (Phase 4c) — `getIncomeCalendarMonth`, the one new, narrow read
+// function required on this module by
+// docs/architecture/phase-4c-technical-design.md §2.3. The structural
+// sibling of `features/bills/server/service.ts`'s own `getCalendarMonth`:
+// same lazy-generation-then-range-query shape, same "one entry per calendar
+// day, even zero-payday days" contract, so `features/calendar/server/
+// service.ts` can zip this module's per-day output against Bills' by `day`
+// key with no gaps on either side. This is Calendar v2's *only* new read —
+// it introduces no new business logic of its own (every occurrence's status
+// is still computed exclusively by this file's own `computeOccurrenceStatus`
+// import, never reimplemented for the calendar's benefit).
+// ---------------------------------------------------------------------------
+
+/** Builds the `[start, end]` UTC-midnight bounds for a `"YYYY-MM"` month
+ * string — duplicated from `features/bills/server/service.ts`'s
+ * `resolveMonthBounds`, per folder-tree.md's module boundary rule
+ * (features/<domain>/server is not a shared import target across domains). */
+function resolveMonthBounds(month: string): { start: Date; end: Date; daysInMonth: number } {
+  const [yearStr, monthStr] = month.split("-")
+  const year = Number(yearStr)
+  const monthIndex = Number(monthStr) - 1
+
+  const start = new Date(Date.UTC(year, monthIndex, 1))
+  const daysInMonth = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate()
+  const end = new Date(Date.UTC(year, monthIndex, daysInMonth))
+
+  return { start, end, daysInMonth }
+}
+
+/** `"YYYY-MM-DD"` key for a UTC date — duplicated from
+ * `features/bills/server/service.ts`'s `formatDateOnlyKey`, same module
+ * boundary reason as `resolveMonthBounds` above. */
+function formatDateOnlyKey(date: Date): string {
+  const year = date.getUTCFullYear()
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0")
+  const day = String(date.getUTCDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function pushEntry(
+  byDay: Map<string, PaydayCalendarEntry[]>,
+  dayKey: string,
+  entry: PaydayCalendarEntry,
+): void {
+  const existing = byDay.get(dayKey)
+  if (existing) {
+    existing.push(entry)
+  } else {
+    byDay.set(dayKey, [entry])
+  }
+}
+
+/**
+ * All paydays due/logged within `month` (`"YYYY-MM"`), grouped by day —
+ * backs Calendar v2's payday source (calendar-v2.md AC4/AC7). Returns one
+ * entry for every calendar day in the month, in order, even days with zero
+ * paydays (`paydays: []`), mirroring
+ * `features/bills/server/service.ts`'s `getCalendarMonth` exactly, so
+ * `features/calendar/server/service.ts` can zip both domains' arrays by
+ * `day` key without a caller having to backfill missing days itself.
+ *
+ * Two disjoint sources are combined, per §2.3's exact algorithm:
+ *
+ * 1. **Scheduled (non-`IRREGULAR`) streams**: lazily generates any missing
+ *    `IncomeOccurrence` rows through the month's end (reusing this file's
+ *    own `ensureOccurrencesGenerated`, the identical mechanism
+ *    `getExpectedUpcomingIncome` already calls), then queries occurrences
+ *    due within the month and computes each one's status via the existing,
+ *    unchanged `computeOccurrenceStatus` — never reimplemented. Not
+ *    restricted to active streams for the *query* (only generation is
+ *    restricted to active streams) — an archived stream's already-generated
+ *    past occurrences still show on the calendar if they fall in the
+ *    requested month, the same archived-bill precedent
+ *    `bills.service.getCalendarMonth`'s own JSDoc documents.
+ * 2. **Irregular/One-off events**: queried directly against
+ *    `IrregularIncomeEvent`, with no generation step at all (AC7 — "an
+ *    irregular event only ever appears on the calendar once actually
+ *    logged, never projected"). Also not restricted to active streams,
+ *    mirroring `getActualReceivedIncomeBySource`'s identical "a since-
+ *    archived stream's already-happened income must not vanish from a past
+ *    month" reasoning. These entries carry no `status` (see
+ *    `PaydayCalendarEntry`'s JSDoc).
+ */
+export async function getIncomeCalendarMonth(
+  userId: string,
+  month: string,
+): Promise<PaydayCalendarDay[]> {
+  const parsedMonth = MonthSchema.parse(month)
+  const { start, end, daysInMonth } = resolveMonthBounds(parsedMonth)
+
+  const activeScheduledStreams = await db.incomeStream.findMany({
+    where: { userId, archivedAt: null, schedule: { not: IncomeSchedule.IRREGULAR } },
+  })
+  await Promise.all(
+    activeScheduledStreams.map((stream) => ensureOccurrencesGenerated(stream, end)),
+  )
+
+  const [occurrences, irregularEvents] = await Promise.all([
+    db.incomeOccurrence.findMany({
+      where: { userId, expectedDate: { gte: start, lte: end } },
+      orderBy: { expectedDate: "asc" },
+      include: { stream: { select: { name: true, expectedAmount: true } } },
+    }),
+    db.irregularIncomeEvent.findMany({
+      where: { userId, date: { gte: start, lte: end } },
+      orderBy: { date: "asc" },
+      include: { stream: { select: { name: true } } },
+    }),
+  ])
+
+  const today = toUtcMidnight(new Date())
+  const paydaysByDay = new Map<string, PaydayCalendarEntry[]>()
+
+  for (const occurrence of occurrences) {
+    const status = computeOccurrenceStatus(
+      {
+        expectedDate: occurrence.expectedDate,
+        receivedAmount: occurrence.receivedAmount?.toNumber() ?? null,
+        receivedDate: occurrence.receivedDate,
+        transactionId: occurrence.transactionId,
+      },
+      today,
+    )
+
+    pushEntry(paydaysByDay, formatDateOnlyKey(occurrence.expectedDate), {
+      streamId: occurrence.streamId,
+      streamName: occurrence.stream.name,
+      // The stream's current planning estimate, never the occurrence's
+      // actual received amount — see `PaydayCalendarEntry.amount`'s JSDoc.
+      amount: occurrence.stream.expectedAmount?.toNumber() ?? 0,
+      status,
+    })
+  }
+
+  for (const event of irregularEvents) {
+    pushEntry(paydaysByDay, formatDateOnlyKey(event.date), {
+      streamId: event.streamId,
+      streamName: event.stream.name,
+      amount: event.amount.toNumber(),
+      // No `status` — a logged Irregular event has no Upcoming/Received
+      // distinction left to compute (AC7, `PaydayCalendarEntry`'s JSDoc).
+    })
+  }
+
+  const days: PaydayCalendarDay[] = []
+  const [yearStr, monthStr] = parsedMonth.split("-")
+  const year = Number(yearStr)
+  const monthIndex = Number(monthStr) - 1
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dayKey = formatDateOnlyKey(new Date(Date.UTC(year, monthIndex, day)))
+    days.push({ day: dayKey, paydays: paydaysByDay.get(dayKey) ?? [] })
+  }
+
+  return days
 }
 
 // Exported so `server/actions.ts` can build the same client-safe
