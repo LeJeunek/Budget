@@ -1,4 +1,6 @@
-# FinanceOS — ER Diagram (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b + Phase 4a + Phase 4a follow-up)
+# FinanceOS — ER Diagram (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b + Phase 4a + Phase 4a follow-up + Phase 4c)
+
+> **Pre-existing gap, flagged rather than silently carried forward:** the Phase 4b Database Architect pass (`NotificationType` gaining `GOAL_ACHIEVED`/`LARGE_PURCHASE`/`LOW_BALANCE`/`MONTHLY_SUMMARY_READY`, `Notification`'s four new nullable FKs + email-observability columns, `FinancialGoal.completionNotifiedAt`, `Account`'s two new Low Balance fields, `NotificationPreference`/`NotificationThresholdSettings`) was never reflected in this diagram — `prisma/schema.prisma` and `migration-strategy.md`'s "Applied migrations" list are both current and authoritative for that phase; this mermaid diagram and its "Design notes" sections below are not. Not backfilled here (out of this Phase 4c pass's own scope) — flagged so a future reader doesn't mistake "not shown below" for "doesn't exist."
 
 ```mermaid
 erDiagram
@@ -73,11 +75,19 @@ erDiagram
 
     User ||--o{ ReasoningModelCallLog : owns
 
+    %% ---- Phase 4c (Calendar v2 has no schema footprint of its own) ----
+    User ||--o| UserPreference : "owns (eagerly seeded at signup)"
+    User ||--o{ DashboardCardPreference : "owns (lazily materialized)"
+    User ||--o{ ReportGenerationEvent : owns
+    User ||--o{ FeatureFlag : "optionally last-updated by"
+    User ||--o{ AdminActionLog : "optionally acted as admin in"
+
     User {
         string id PK
         string email UK
         string name
         boolean emailVerified
+        enum role "Phase 4c; USER default, ADMIN grant is DB-update-only"
     }
 
     Account {
@@ -365,6 +375,54 @@ erDiagram
         string feature "observability only, not filtered by either cap query"
         datetime createdAt "immutable log row; both rolling-window caps key off this"
     }
+
+    UserPreference {
+        string id PK
+        string userId FK "unique — one row per user, eagerly seeded at signup"
+        string accentColor "nullable — null = product default"
+        string currencyDisplay "default USD; display-formatting only"
+        string timezone "default UTC; app-validated IANA name"
+        boolean timezoneConfirmed "race-safety latch, see schema comment"
+    }
+
+    DashboardCardPreference {
+        string id PK
+        string userId FK
+        string cardKey "unique per user, per card key"
+        int order
+        boolean visible
+    }
+
+    SystemCategoryTemplate {
+        string id PK
+        string name UK "case-insensitive uniqueness app-enforced"
+        string color
+        int order "admin-reorderable; NEW relative to Category's own shape"
+    }
+
+    ReportGenerationEvent {
+        string id PK
+        string userId FK
+        enum type
+        string periodLabel "already-formatted label, never raw figures"
+        datetime generatedAt
+    }
+
+    FeatureFlag {
+        string id PK
+        string key UK
+        boolean enabled
+        datetime updatedAt
+        string updatedByUserId FK "nullable, SetNull"
+    }
+
+    AdminActionLog {
+        string id PK
+        string adminUserId FK "nullable, SetNull"
+        enum action
+        json details "nullable"
+        datetime createdAt
+    }
 ```
 
 ## Design notes (Phase 0/1)
@@ -557,3 +615,23 @@ Flagged jointly by two AI Engineer dispatches after this phase's initial five ta
 ### No new caching-layer precedent, restated from the schema's own angle
 
 `BudgetAdvisorCache`/`SpendingInsightsCache` might look, at a glance, like Risk #11's declined "materialized/cached-aggregate" pattern reappearing — it is not. Risk #11 declined caching *deterministic Prisma aggregation* (cheap to recompute on every request, so caching would add complexity for no correctness/cost benefit). These two tables cache *non-deterministic, non-free-to-regenerate AI output* — the entire reason `ai-features-design.md` §6 requires bounding how often generation happens at all. No other Phase 4a read path (the Health Score's own deterministic four-component formula, `service.ts`) introduces any caching of its own — it remains a live, on-read computation exactly like `getBudgetHealthScore`/`getNetWorth`/every other deterministic formula in this codebase, consistent with this schema's evidence-first stance on caching everywhere else.
+
+## Design notes (Phase 4c)
+
+Modeled per `docs/architecture/phase-4c-technical-design.md` (Solution Architect + Database Architect combined pass, resolving risk-register.md #25/#30/#33–#38). Calendar v2 introduces zero schema — it is a pure composition layer over Bills'/Recurring Income's already-existing read functions (§2), so it has no entity above.
+
+**`User.role`/`UserRole` — the admin-authorization mechanism (§1).** A plain column, not a separate `AdminUser` table and not Better Auth's own `admin` plugin (rejected — see the schema's own `UserRole` comment for the full "fourteen endpoints, including client-reachable role assignment and impersonation" reasoning). Wired into Better Auth via `additionalFields` with `input: false`, which makes "no self-service admin-role-assignment endpoint" true at the framework level, not by convention. A one-to-one relationship with `User` today (Risk #27's own tracked note: if a genuine need for admin-specific metadata — grant reason, granted-by — ever emerges, the lowest-friction extension is more nullable columns directly on `User`, not a second table, since the relationship stays 1:1).
+
+**`UserPreference` — eagerly seeded, the one deliberate exception to this phase's own lazy-materialization default (§3.2).** `DashboardCardPreference` (lazy, matching `NotificationPreference`'s precedent) and `UserPreference` (eager) are seeded differently for a stated, structural reason: `UserPreference.timezoneConfirmed`'s race-safety latch (§3.3) needs a concrete, unambiguous starting state (`timezone: "UTC"`, `timezoneConfirmed: false`) to exist from the very first request onward, so a request arriving before any row exists can never happen. `accentColor`/`currencyDisplay`/`timezone` are all plain, application-validated `String` columns, never Prisma enums — the accent palette and currency list are explicitly framed by `customization.md` as small, curated, and expected to grow (a future addition should be a one-line constant-array change, never a migration), and the IANA timezone list is an externally-maintained ~400-entry database this codebase has no reason to freeze into a fixed enum. Per risk-register.md #29 (binding CTO scope-down), `timezone` is written and read back only by this feature's own settings-page display in this phase — no Bills/Budgeting/Recurring-Income/Calendar-v2/cron date-boundary logic consumes it yet.
+
+**`DashboardCardPreference` — a dedicated table, not a JSON array column (§3.5).** Rejected for the same three reasons `Architecture.md`'s Phase 3b section already gave against a JSON blob for `DismissedSubscriptionMerchant`: breaks this schema's "one row per fact, one table per user-owned list" convention; no database-level duplicate/race protection; an ordered, per-key structure invites ad hoc merge-at-read logic a real `order` column avoids. Row-absence-as-default (`@@unique([userId, cardKey])`, no seed) is what makes "a new Dashboard card ships later → defaults to visible, appended to the end" hold with zero migration/backfill the moment that future card ships.
+
+**`SystemCategoryTemplate` — this schema's first genuinely global, non-per-user table (§4.1).** Every other model carries a `userId` FK or is Better Auth's own `User`/`Session`/`AuthAccount`/`Verification`. Deliberately no relation to `Category` at all — no `templateId` FK exists on `Category`, so there is no code path that could ever propagate a later template edit onto an already-seeded user row; AC7's non-retroactivity guarantee holds because there is no join to reach through, not because of a business-rule check that could be gotten wrong. Required a one-time, ordered deploy-time seed (risk-register.md #35) — see `migration-strategy.md`'s entry for this migration for the exact seeded rows, and this table's own schema comment for why getting the order wrong would be a real, if narrow, regression.
+
+**`ReportGenerationEvent` — Reports' first-ever persisted row of any kind (§5.1).** `phase-4b-technical-design.md` §2 designed Reports to leave zero database trace at all ("no stored artifact to leak"); this table stores metadata about the *fact* that a generation happened, never the report's bytes/figures/any replayable ID, so it does not reopen that property. `periodLabel` is the report's own already-computed, human-readable label (reused verbatim from `period.ts`'s `toReportPeriodView`), chosen over raw `start`/`end` dates specifically because `admin.md` Capability 3 AC4 caps what the audit log may ever display to "what's needed to identify the event."
+
+**`FeatureFlag` — `lib/`-level infrastructure, not an Admin-owned table (§6.1).** The forcing argument, restated from the schema's own angle: `lib/ai/generate-structured-output.ts` and `lib/email/send-notification-email.ts` must each check this table from their own single existing choke point, and this codebase's binding module-boundary rule forbids either from ever importing a feature module — the flag primitive has to live in `lib/` (a new `lib/`-level fan-in leaf, read by `lib/ai/`, `lib/email/`, and `features/admin/`, importing back into none of them) for the architecture to stay internally consistent. `key` is a plain `String`, not an enum, for the identical grow-without-a-migration reasoning as `DashboardCardPreference.cardKey`. Required a one-time deploy-time seed (two rows, `AI_FEATURES`/`EMAIL_DELIVERY`, both `enabled: true`) in the same migration that creates the table — see `migration-strategy.md`.
+
+**`AdminActionLog` — a genuine gap this pass identified and closed, not one of the five schema questions the CTO originally routed here (§6.2, risk-register.md #37).** `admin.md` Capability 3 AC1 enumerates four already-happening event types; Capabilities 4–6 each separately require their own native action to be "worth recording" with no existing table able to represent a flag toggle or a template edit. Deliberately narrow (`FEATURE_FLAG_TOGGLED` / `CATEGORY_TEMPLATE_CHANGED` / `DEMO_DATA_SEEDED` only) — not a blanket "audit everything" table, per Capability 3 AC5. `adminUserId`/`FeatureFlag.updatedByUserId` are both nullable + `onDelete: SetNull`, mirroring every other "a historical record must outlive the row it refers to" precedent in this schema (`Debt.accountId`, `FinancialGoal.linkedDebtId`).
+
+**The `getReportGenerationEvents`/(future) `getUsers`/`getAuditLog` cross-user-query exception (§5.3, risk-register.md #33).** These are this codebase's first-ever read functions not scoped to a single authenticated user's own data — a deliberate, narrow exception to Risk #4's standing rule, safe only because every one of them is called exclusively from behind `getCurrentAdminUser()`. Flagged, alongside admin-authorization privilege escalation itself, as the headline concern for the Security Architect's Phase 4c review gate.

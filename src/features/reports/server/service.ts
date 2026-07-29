@@ -1,3 +1,5 @@
+import { db } from "@/lib/db"
+
 import { assembleCashFlowReportData } from "./data/cash-flow"
 import { assembleExpenseReportData } from "./data/expense"
 import { assembleIncomeReportData } from "./data/income"
@@ -112,6 +114,18 @@ export async function generateReport(
   const data = await assembleReportData(userId, request, resolution.period, meta)
   const buffer = await renderReportPdf(data)
   const filename = buildFilename(request, meta.period)
+
+  // Phase 4c (phase-4c-technical-design.md §5.2, resolving risk-register.md
+  // #30): records the fact that a report was successfully generated, for
+  // Admin's Audit Log (features/reports/server/audit.ts). Success path
+  // only, after renderReportPdf succeeds and immediately before returning —
+  // never on a validation/business-rule failure (those return earlier and
+  // never reach this line), and never a report ID or byte content, per
+  // phase-4b-technical-design.md §2's "no stored artifact to leak" property,
+  // which this write does not reopen.
+  await db.reportGenerationEvent.create({
+    data: { userId, type: request.type, periodLabel: meta.period.label },
+  })
 
   return { status: "ok", buffer, filename }
 }

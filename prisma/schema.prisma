@@ -1,4 +1,4 @@
-// FinanceOS — Prisma schema (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b + Phase 4a + Phase 4b)
+// FinanceOS — Prisma schema (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b + Phase 4a + Phase 4b + Phase 4c)
 // Scope: auth (Better Auth), Accounts, Transactions, Categories, Tags (Phase 1);
 // Budgeting, Savings Goals, Bills, Notifications, and a multi-file Receipt model
 // for Transactions (Phase 2); Debt Tracker, Investments (Holding), Recurring
@@ -30,7 +30,20 @@
 // net-worth-history,ai-features,reports,notifications-v2}.md and
 // docs/architecture/{api-contracts.md,Architecture.md,ai-features-design.md,
 // phase-4b-technical-design.md}'s Phase 2/3a/3b/4a/4b module-boundary
-// sections. See docs/database/{er-diagram,migration-strategy,
+// sections. Phase 4c (Calendar v2, Customization, Admin, per
+// docs/architecture/phase-4c-technical-design.md) adds: `User.role`
+// (`UserRole`, the admin-authorization mechanism, §1); `UserPreference`
+// (Customization's per-user accent/currency/timezone preferences, eagerly
+// seeded at signup, §3.2); `DashboardCardPreference` (Customization's
+// per-card show/hide/reorder rows, lazily materialized, §3.5);
+// `SystemCategoryTemplate` (this schema's first genuinely global, non-per-user
+// table — the DB-backed starter-category template Admin's Manage Categories
+// capability edits, §4); `ReportGenerationEvent` (Reports' new
+// generation-event log backing Admin's Audit Log, §5); `FeatureFlag` (the
+// standalone AI/email kill-switch primitive, §6.1); `AdminActionLog` (Admin's
+// own native-action audit trail, §6.2). Calendar v2 requires zero schema
+// changes of its own (§2 — a pure composition layer over Bills/Recurring
+// Income). See docs/database/{er-diagram,migration-strategy,
 // performance-considerations}.md for the full rationale behind every
 // modeling decision below.
 
@@ -48,12 +61,34 @@ datasource db {
 // expects these exact models/columns)
 // ---------------------------------------------------------------------------
 
+// Phase 4c (phase-4c-technical-design.md §1): the single flat privilege tier
+// Admin's authorization mechanism is built on — deliberately not Better
+// Auth's own `admin` plugin (rejected in §1.2: that plugin mounts fourteen
+// endpoints, including client-reachable role assignment and impersonation,
+// far beyond this phase's explicitly flat, binary scope — see risk-register.md
+// #27/#38). `USER` is every account's default; `ADMIN` is granted exclusively
+// by a direct database update / operational script (§1.3's `grant-admin.ts`
+// recommendation), never through any product-facing UI or endpoint.
+enum UserRole {
+  USER
+  ADMIN
+}
+
 model User {
   id            String   @id @default(cuid())
   name          String
   email         String   @unique
   emailVerified Boolean  @default(false)
   image         String?
+  // Phase 4c (phase-4c-technical-design.md §1.3): wired into Better Auth via
+  // its `additionalFields` mechanism (`input: false`, so Better Auth's own
+  // sign-up/update-user endpoints can never accept a client-supplied value —
+  // see lib/auth.ts's `user.additionalFields` config), never via the rejected
+  // `admin` plugin (see UserRole's own comment above). Session data is looked
+  // up fresh on every request (this app's database session strategy, not
+  // JWT/stateless), so a role change here takes effect on the very next
+  // request with no additional cache-invalidation mechanism required.
+  role          UserRole @default(USER)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -107,6 +142,22 @@ model User {
   // are typically empty/null for a user who has never customized either.
   notificationPreferences       NotificationPreference[]
   notificationThresholdSettings NotificationThresholdSettings?
+
+  // FinanceOS domain data (Phase 4c) — Customization's per-user preference
+  // rows (UserPreference is eagerly seeded at signup, unlike every other
+  // one-to-one preference row in this schema — see that model's own comment
+  // for why; DashboardCardPreference is lazily materialized, matching
+  // NotificationPreference's precedent), Reports' new generation-event log
+  // (ReportGenerationEvent, §5), and Admin's two own tables this user may
+  // have acted through (FeatureFlag.updatedByUserId, AdminActionLog
+  // .adminUserId — both nullable + onDelete: SetNull, since a historical
+  // admin-action/flag-update record must outlive the admin account that made
+  // it, per phase-4c-technical-design.md §6.2).
+  userPreference           UserPreference?
+  dashboardCardPreferences DashboardCardPreference[]
+  reportGenerationEvents   ReportGenerationEvent[]
+  updatedFeatureFlags      FeatureFlag[]
+  adminActionLogs          AdminActionLog[]
 
   @@map("user")
 }
@@ -2167,4 +2218,297 @@ model NotificationThresholdSettings {
   updatedAt              DateTime @updatedAt
 
   @@map("notification_threshold_settings")
+}
+
+// ---------------------------------------------------------------------------
+// FinanceOS domain (Phase 4c) — Calendar v2, Customization, Admin. Modeled per
+// docs/architecture/phase-4c-technical-design.md (Solution Architect +
+// Database Architect combined pass). Calendar v2 has no schema footprint of
+// its own — it is a pure composition layer over Bills'/Recurring Income's
+// already-existing read functions (§2) — so nothing is added to this file for
+// it. `User.role`/`UserRole` (the admin-authorization mechanism, §1) is
+// declared up in the Auth section above, alongside the `User` model it
+// extends, rather than down here with the rest of this phase's genuinely new
+// tables.
+// ---------------------------------------------------------------------------
+
+// ---- Customization: per-user preferences -----------------------------------
+//
+// Modeling decision (phase-4c-technical-design.md §3.2): one row per user,
+// EAGERLY seeded at signup (in the same databaseHooks.user.create.after hook
+// that already seeds Category rows — see lib/auth.ts) — a deliberate
+// departure from NotificationPreference's/NotificationThresholdSettings' own
+// lazy-on-first-customization precedent. This row must exist from the very
+// first request onward specifically to support race-safe cross-device
+// browser-timezone inference (§3.3): timezoneConfirmed needs a concrete,
+// unambiguous starting state (timezone: "UTC", timezoneConfirmed: false) to
+// safely upgrade exactly once, the first time a real browser inference or an
+// explicit user edit occurs, whichever happens first — a row that might not
+// exist yet cannot serve as that starting state. DashboardCardPreference
+// below has no equivalent need and stays lazily materialized, matching
+// NotificationPreference exactly — the two models in this same phase are
+// seeded differently for a stated, structural reason, not inconsistently.
+model UserPreference {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Null = product default (unchanged from today, per Customization's own
+  // edge case). A validated key into a small, fixed, code-owned palette
+  // (five to eight preset options) — deliberately a plain String, not a
+  // Prisma enum: customization.md explicitly frames the accent palette as
+  // "small, deliberately curated, and expected to grow later if real demand
+  // surfaces" — adding a ninth preset is meant to be a one-line constant-array
+  // change, never a schema migration (§3.4). Validated at the application
+  // layer (features/settings/server/validation.ts's AccentColorSchema).
+  accentColor       String?
+  // One of USD|EUR|GBP|CAD|AUD|JPY, app-validated — same String-not-enum
+  // reasoning as accentColor (§3.4). A display-formatting preference only —
+  // this app has no multi-currency data support (risk-register.md #28).
+  currencyDisplay   String  @default("USD")
+  // An IANA timezone name (e.g. "America/New_York"), app-validated against
+  // Node's own Intl.supportedValuesOf("timeZone") at the application layer
+  // (features/settings/server/validation.ts's TimezoneSchema) rather than a
+  // Prisma enum — the IANA tz database has ~400 entries and is revised
+  // periodically by its own maintainers, independent of any decision this
+  // codebase makes, so a fixed-membership DB enum would need a migration
+  // every time that external database changes (§3.3). Per risk-register.md
+  // #29 (binding CTO scope-down): nothing outside this feature's own
+  // settings-page display reads this column in Phase 4c — no Bills/
+  // Budgeting/Recurring-Income/Calendar-v2/cron date-boundary computation
+  // consumes it yet; that rewiring is deferred to a dedicated future pass.
+  timezone          String  @default("UTC")
+  // The race-safety latch closing the cross-device browser-inference gap
+  // (§3.3): false = still eligible for exactly one safety-net upgrade, either
+  // by captureInferredTimezone's browser-inferred value (a no-op once this is
+  // true) or by an explicit user edit via updateTimezone (which always flips
+  // this true, whether or not auto-capture ever ran first). Never surfaced
+  // to the end user — purely the mechanism that makes "persists correctly
+  // across devices" hold without a later device's different browser TZ
+  // silently overwriting a deliberate earlier choice.
+  timezoneConfirmed Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("user_preference")
+}
+
+// ---- Customization: dashboard card show/hide/reorder -----------------------
+//
+// Modeling decision (phase-4c-technical-design.md §3.5): one row per
+// (user, cardKey) pair, LAZILY materialized — row absence = default (visible,
+// positioned after every row the user does have, in the canonical
+// code-defined order). A dedicated table, not a JSON array column on
+// UserPreference, for the same three reasons Architecture.md's Phase 3b
+// section already gave rejecting a JSON blob for DismissedSubscriptionMerchant:
+// (a) breaks this schema's "one row per fact, one table per user-owned list"
+// convention, (b) no database-level protection against a duplicate/race
+// double-write, (c) an ordered, per-key structure invites ad hoc merge-at-read
+// logic a real `order` column avoids entirely. Row-absence-as-default is also
+// exactly what makes "a new Dashboard card ships in a later phase -> defaults
+// to visible, appended to the end" hold with zero migration/backfill: a new
+// card key with no row for a given user simply materializes at read time.
+model DashboardCardPreference {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Validated against the canonical, code-owned card-key list
+  // (features/dashboard/dashboard-cards.ts's DASHBOARD_CARD_KEYS) at the
+  // application layer — deliberately a plain String, not a Prisma enum, for
+  // the identical forward-compatibility reasoning as UserPreference.
+  // accentColor/currencyDisplay above (§3.4/§3.5): the card set "is expected
+  // to grow slightly over time as new phases ship." Risk-register.md #36: a
+  // stale/renamed key (a card removed in a later phase while old preference
+  // rows still reference it) must be ignored gracefully at read time, never
+  // thrown — an application-layer requirement, not enforceable here.
+  cardKey   String
+  order     Int
+  visible   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // One row per user per card key — the natural upsert key for every write
+  // (hide/unhide, reorder, the "at least one visible" guard), each of which
+  // materializes every card key into an explicit row for that user in one
+  // batch upsert, per §3.5's "lazy materialization on first customization"
+  // pattern (mirroring NotificationThresholdSettings). "Reset to Default
+  // Layout" is a single deleteMany({ where: { userId } }) — deleting every
+  // row returns the user to the pure row-absence default state in one
+  // statement.
+  @@unique([userId, cardKey])
+  @@index([userId, order])
+  @@map("dashboard_card_preference")
+}
+
+// ---- Admin: DB-backed system-category-template ------------------------------
+//
+// Modeling decision (phase-4c-technical-design.md §4): this schema's FIRST
+// genuinely global, non-per-user table — every other model above either
+// carries a userId FK or is Better Auth's own User/Session/AuthAccount/
+// Verification. Required because the current starter-category set
+// (DEFAULT_CATEGORIES, src/features/categories/default-categories.ts) is a
+// hardcoded TypeScript constant with no corresponding database row for
+// Admin's Manage Categories capability to edit at runtime (risk-register.md
+// #25/#35). Deliberately NO relation to Category at all — this is what makes
+// AC7's non-retroactivity guarantee ("an admin edit never reaches an
+// already-seeded Category row") hold by construction: there is no templateId
+// FK on Category, so there is no code path that could even attempt to
+// propagate a later template edit onto an existing user's row, mirroring
+// Category's own existing "never referenced again after signup" relationship
+// to DEFAULT_CATEGORIES today.
+model SystemCategoryTemplate {
+  id    String @id @default(cuid())
+  // Case-insensitive uniqueness enforced at the APPLICATION layer (Zod + a
+  // pre-write lookup, features/categories/server/template.ts), matching
+  // categories.md's own existing custom-category uniqueness rule exactly
+  // (AC2) — not a DB-level citext/lower-index requirement this phase
+  // introduces. The plain @unique below still guards the exact-match case at
+  // the database level as a defense-in-depth backstop.
+  name  String @unique
+  color String
+  // NEW relative to Category's own shape — Category itself has no `order`
+  // column (its display order today is implicitly creation order); the
+  // template needs an explicit, admin-reorderable order (AC4) Category was
+  // never asked to support. A deliberate, justified divergence from mirroring
+  // Category 1:1, not an oversight.
+  order Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // REQUIRED ONE-TIME DATA MIGRATION (risk-register.md #35): this table must
+  // be seeded with exactly today's eleven DEFAULT_CATEGORIES entries, in
+  // their current array order (order: 0..10), in the SAME migration that
+  // creates this table — see this migration's hand-written INSERT statement.
+  // This is what guarantees zero behavior change for the very next signup
+  // after deploy, before lib/auth.ts's signup hook is switched over to read
+  // from this table instead of the static array (§4.3).
+  @@map("system_category_template")
+}
+
+// ---- Reports: generation-event log ------------------------------------------
+//
+// Modeling decision (phase-4c-technical-design.md §5): Reports' first-ever
+// persisted row of any kind (phase-4b-technical-design.md §2's "no stored
+// artifact to leak" design meant report generation itself left no database
+// trace at all — risk-register.md #30). This table stores metadata about the
+// FACT that a generation happened (who, what type, what period, when), never
+// the report's own bytes or numeric contents, and critically no report ID or
+// any value a client could use to re-fetch/replay a past generation — it does
+// not reopen Reports' own "no stored artifact to leak" property.
+enum ReportType {
+  MONTHLY
+  YEARLY
+  TAX_SUMMARY
+  INCOME
+  EXPENSE
+  CASH_FLOW
+}
+
+model ReportGenerationEvent {
+  id          String     @id @default(cuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        ReportType
+  // The report's own already-computed, human-readable period label (e.g.
+  // "June 2026", "2026", "Jan 1 – Mar 20, 2026") — server/period.ts's
+  // toReportPeriodView's `label` field, reused verbatim, never recomputed a
+  // second time. Chosen over raw start/end dates per admin.md Capability 3
+  // AC4's explicit bar: the audit log never displays underlying financial
+  // figures, only what's needed to identify the event.
+  periodLabel String
+  generatedAt DateTime   @default(now())
+
+  // Written once, on the success path only, inside generateReport
+  // (features/reports/server/service.ts) — after renderReportPdf succeeds,
+  // immediately before returning. Never written on a validation/business-rule
+  // failure (a bad query param, a not-yet-started future period) — those are
+  // not report generations, per reports.md's own "no cache, no reuse"
+  // standard every generation is held to.
+  @@index([userId])
+  @@index([type])
+  @@index([generatedAt])
+  @@map("report_generation_event")
+}
+
+// ---- Admin: feature-flag primitive -------------------------------------------
+//
+// Modeling decision (phase-4c-technical-design.md §6.1): built as shared
+// lib/-level infrastructure (lib/feature-flags.ts owns this table), NOT an
+// Admin-owned screen with its own private storage — the forcing reason:
+// lib/ai/generate-structured-output.ts and lib/email/send-notification-email.ts
+// must each check this table from their own single existing choke point, and
+// Architecture.md's binding module-boundary rule forbids either lib/ai/ or
+// lib/email/ from ever importing a feature module (including features/admin/)
+// — the flag primitive must live in lib/ for the existing architecture to
+// remain internally consistent at all.
+model FeatureFlag {
+  id              String   @id @default(cuid())
+  // A plain TS string union at the lib/feature-flags.ts call-site layer
+  // (FeatureFlagKey = "AI_FEATURES" | "EMAIL_DELIVERY"), deliberately NOT a
+  // Prisma enum — the identical expected-to-grow-without-a-migration
+  // reasoning as UserPreference.accentColor/currencyDisplay and
+  // DashboardCardPreference.cardKey above (§3.4/§3.5/§6.1): a future phase
+  // registering a new flag key must be a one-line constant-array change, per
+  // risk-register.md #32's standing rule, never a schema migration.
+  key             String   @unique
+  enabled         Boolean  @default(true)
+  updatedAt       DateTime @updatedAt
+  // Nullable + onDelete: SetNull — an audit trail of who last toggled a flag
+  // must survive even if that admin account is later removed, mirroring
+  // AdminActionLog.adminUserId's identical "a historical record doesn't get
+  // deleted along with what it refers to" precedent below.
+  updatedByUserId String?
+  updatedByUser   User?    @relation(fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  // REQUIRED ONE-TIME DATA MIGRATION: seeded with exactly the two rows
+  // Feature Flags AC2 requires — AI_FEATURES and EMAIL_DELIVERY, both
+  // enabled: true — in the SAME migration that creates this table (see that
+  // migration's hand-written INSERT statement), the same "seed the initial
+  // rows, deploy-time, one-off" shape as SystemCategoryTemplate's seed above.
+  @@map("feature_flag")
+}
+
+// ---- Admin: native-action audit trail ----------------------------------------
+//
+// Modeling decision (phase-4c-technical-design.md §6.2): a genuine, small gap
+// this pass identified and closed rather than left for a later dispatch to
+// discover — admin.md Capability 3 AC1 enumerates four already-happening
+// event types (AI usage, report generation, notification/email sends,
+// category-suggestion decisions), but Admin's own Feature Flags/Manage
+// Categories/Seed Demo Data capabilities each separately state their own
+// action "is itself an admin action worth recording" (risk-register.md #37).
+// NOT a generic, blanket "audit everything" table (admin.md Capability 3 AC5
+// is explicit this stays scoped to named event types) — this covers exactly
+// the three native Admin actions below, written only from
+// features/admin/server/actions.ts's own three mutating wrappers, each in the
+// same transaction/request as the action itself.
+enum AdminActionType {
+  FEATURE_FLAG_TOGGLED
+  CATEGORY_TEMPLATE_CHANGED
+  DEMO_DATA_SEEDED
+}
+
+model AdminActionLog {
+  id          String          @id @default(cuid())
+  // Nullable + onDelete: SetNull — an admin action log entry must survive
+  // even if that admin account is later removed, the same "a historical
+  // record doesn't get deleted along with what it refers to" precedent as
+  // admin.md Capability 3's own "since-deleted user/record" edge case.
+  adminUserId String?
+  adminUser   User?           @relation(fields: [adminUserId], references: [id], onDelete: SetNull)
+  action      AdminActionType
+  // Small, heterogeneous per-action payload (e.g. { flagKey, from, to } or
+  // { templateEntryId, field, from, to } or { success: boolean }) — Json is
+  // already this schema's established representation for exactly this kind
+  // of "read-and-display-whole, never individually queried/joined" content
+  // (BudgetAdvisorCache.recommendations, MonthlySummary.citedFigures,
+  // SpendingInsightsCache.insights), not a new pattern introduced here.
+  details     Json?
+  createdAt   DateTime        @default(now())
+
+  @@index([action])
+  @@index([createdAt])
+  @@map("admin_action_log")
 }

@@ -4,7 +4,7 @@ import { nextCookies } from "better-auth/next-js"
 import { headers } from "next/headers"
 
 import { db } from "@/lib/db"
-import { DEFAULT_CATEGORIES } from "@/features/categories/default-categories"
+import { getSystemCategoryTemplate } from "@/features/categories/server/template"
 
 /**
  * Better Auth server instance.
@@ -94,27 +94,70 @@ export const auth = betterAuth({
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
     },
   },
+  // Phase 4c (phase-4c-technical-design.md §1.3): exposes the Prisma-backed
+  // `User.role` column through Better Auth's session/`$Infer` typing without
+  // Better Auth's own `admin` plugin (rejected — see `UserRole`'s schema
+  // comment and risk-register.md #27/#38). `input: false` is the load-bearing
+  // part: Better Auth's `sign-up`/`update-user` routes both honor
+  // `RemoveFieldsWithInputFalse` at the framework level, so a client-supplied
+  // `role` value is mechanically impossible for either endpoint to accept —
+  // this is what satisfies "no self-service admin-role-assignment UI... never
+  // an endpoint reachable through the product itself" by construction, not by
+  // remembering not to expose it. `type: "string"` (not a Prisma-enum-aware
+  // type) is a minor, harmless type-boundary detail — Better Auth's
+  // `additionalFields` API only knows primitive TS types; the value flowing
+  // through session/`$Infer` typing is a plain string that happens to always
+  // be `"USER"` or `"ADMIN"`, the same category of boundary every other
+  // Prisma-enum-as-plain-string consumer in this codebase already crosses.
+  user: {
+    additionalFields: {
+      role: { type: "string", input: false, defaultValue: "USER" },
+    },
+  },
   // Seeds the Charter's fixed 11-category starter set for every new user,
   // per docs/product/categories.md AC1 ("Every new user automatically
   // receives the ... starter set at signup, with no action required on
-  // their part"). This was flagged as an open gap by the agent that built
-  // the Categories backend and went unaddressed until caught by live
-  // testing sign-up through the actual UI — typecheck/lint/build never
-  // exercise this path since it only matters at request time.
+  // their part"), plus (Phase 4c, phase-4c-technical-design.md §3.2) a
+  // `UserPreference` row, EAGERLY seeded here (unlike `NotificationPreference`
+  // /`NotificationThresholdSettings`'s own lazy-on-first-customization
+  // materialization) so the row exists from the very first request onward —
+  // needed to support race-safe cross-device browser-timezone inference (see
+  // that model's own schema comment: `timezone: "UTC"`,
+  // `timezoneConfirmed: false` is the concrete starting state
+  // `captureInferredTimezone`/`updateTimezone` safely upgrade exactly once).
   //
-  // `createMany` (not sequential `create` calls) so this is one round-trip;
-  // failures here intentionally do not block sign-up itself (a user should
-  // never be unable to create an account because category seeding hiccuped)
-  // — logged, not rethrown, per the `after` hook's `Promise<void>` contract
-  // giving Better Auth's core no way to surface a partial failure anyway.
+  // Category seeding was flagged as an open gap by the agent that built the
+  // Categories backend and went unaddressed until caught by live testing
+  // sign-up through the actual UI — typecheck/lint/build never exercise this
+  // path since it only matters at request time.
+  //
+  // `createMany`/`create` (not sequential per-row calls) so each of these is
+  // one round-trip; failures here intentionally do not block sign-up itself
+  // (a user should never be unable to create an account because seeding
+  // hiccuped) — logged, not rethrown, per the `after` hook's `Promise<void>`
+  // contract giving Better Auth's core no way to surface a partial failure
+  // anyway. The two seeding steps are independent and both wrapped in their
+  // own `try/catch` so a category-seeding failure never prevents the
+  // `UserPreference` row (or vice versa) from being created.
   databaseHooks: {
     user: {
       create: {
         after: async (user) => {
           try {
+            // Phase 4c (phase-4c-technical-design.md §4.3): reads the
+            // DB-backed `SystemCategoryTemplate` table instead of the
+            // `DEFAULT_CATEGORIES` constant it replaces — seeded, at deploy
+            // time, with exactly that constant's eleven entries in their
+            // original order (see this feature's migration's own
+            // "DataMigration" comment), so this swap is zero-behavior-change
+            // for the very next signup after deploy. `order` is a
+            // template-only column, never copied onto `Category` (which has
+            // no such column and nothing about categories.md asks for one).
+            const template = await getSystemCategoryTemplate()
             await db.category.createMany({
-              data: DEFAULT_CATEGORIES.map((category) => ({
-                ...category,
+              data: template.map((category) => ({
+                name: category.name,
+                color: category.color,
                 userId: user.id,
                 isSystem: true,
               })),
@@ -122,6 +165,17 @@ export const auth = betterAuth({
           } catch (error) {
             console.error(
               `Failed to seed default categories for user ${user.id}:`,
+              error,
+            )
+          }
+
+          try {
+            await db.userPreference.create({
+              data: { userId: user.id },
+            })
+          } catch (error) {
+            console.error(
+              `Failed to seed user preferences for user ${user.id}:`,
               error,
             )
           }
@@ -154,4 +208,27 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   })
 
   return session?.user ?? null
+}
+
+/**
+ * Phase 4c (phase-4c-technical-design.md §1.3): the single entry point every
+ * Admin Server Action and every Admin page's layout-level guard must call —
+ * never `getCurrentUser()` plus an inline `role` check duplicated ad hoc, so
+ * "what counts as admin" is defined in exactly one place, mirroring
+ * `getCurrentUser()`'s own status as this codebase's one entry point for
+ * identifying the current user at all.
+ *
+ * Same "return `null`, never throw" contract as `getCurrentUser()`. Because
+ * this app's sessions are the database strategy (a `Session.token` row
+ * looked up fresh on every call, joined live to its `User` row — no JWT/
+ * stateless session plugin is configured), `role` being a plain column on
+ * that same live-joined row means a mid-session revocation (an admin's
+ * `role` flipped back to `USER` via a direct database update) takes effect
+ * on the very next request, with no additional cache-invalidation mechanism
+ * required — satisfying Admin's "checked live, on every request, never on
+ * stale session data" requirement by construction.
+ */
+export async function getCurrentAdminUser(): Promise<AuthUser | null> {
+  const user = await getCurrentUser()
+  return user?.role === "ADMIN" ? user : null
 }

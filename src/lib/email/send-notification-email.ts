@@ -1,5 +1,7 @@
 import type { ReactElement } from "react"
 
+import { isFeatureEnabled } from "@/lib/feature-flags"
+
 import { getResendClient } from "./client"
 
 /**
@@ -110,6 +112,16 @@ function withTimeout<T>(sendPromise: Promise<T>, timeoutMs: number): Promise<T> 
 export async function sendNotificationEmail(
   params: SendNotificationEmailParams,
 ): Promise<SendNotificationEmailResult> {
+  // Phase 4c (phase-4c-technical-design.md §6.1, Feature Flags AC2/AC3): the
+  // one-line kill switch, checked at this module's single existing choke
+  // point every notification-email send already calls through. Returns the
+  // exact same `{ sent: false }` shape this function already returns on a
+  // genuine provider failure below — a flag being off is never a new,
+  // separately-designed degraded state.
+  if (!(await isFeatureEnabled("EMAIL_DELIVERY"))) {
+    return { sent: false, error: "Email delivery is currently disabled" }
+  }
+
   try {
     const fromAddress = process.env.EMAIL_FROM_ADDRESS
     if (!fromAddress) {

@@ -2,6 +2,8 @@ import { generateObject } from "ai"
 import type { LanguageModel } from "ai"
 import type { z } from "zod"
 
+import { isFeatureEnabled } from "@/lib/feature-flags"
+
 import type { AiFeatureResult, CitedFigure } from "./types"
 import { verifyGrounding } from "./verify-grounding"
 import { verifyNarrativeSafety } from "./verify-narrative-safety"
@@ -153,6 +155,16 @@ async function attemptOnce<Schema extends z.ZodTypeAny>(
 export async function generateStructuredOutput<Schema extends z.ZodTypeAny>(
   params: GenerateStructuredOutputParams<Schema>,
 ): Promise<AiFeatureResult<z.infer<Schema>>> {
+  // Phase 4c (phase-4c-technical-design.md §6.1, Feature Flags AC2/AC3): the
+  // one-line kill switch, checked at this module's single existing choke
+  // point every AI feature already calls through. Returns the exact same
+  // `{ status: "unavailable" }` shape this function already returns on a
+  // genuine provider failure below — a flag being off is never a new,
+  // separately-designed degraded state.
+  if (!(await isFeatureEnabled("AI_FEATURES"))) {
+    return { status: "unavailable" }
+  }
+
   const startedAt = Date.now()
 
   const first = await attemptOnce(params, params.system)
