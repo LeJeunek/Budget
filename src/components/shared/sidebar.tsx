@@ -42,8 +42,10 @@ import {
   Flag,
   HeartPulse,
   LayoutDashboard,
+  Palette,
   PiggyBank,
   Settings,
+  SlidersHorizontal,
   Target,
   TrendingUp,
   Wallet,
@@ -172,6 +174,15 @@ export const NAV_SECTIONS: NavSection[] = [
     title: "Account",
     items: [
       { label: "Notification Preferences", href: "/settings/notifications", icon: Settings },
+      // (Phase 4c) Customization's two settings pages
+      // (phase-4c-technical-design.md §3.6), placed in this same "Account"
+      // section rather than a new one — same reasoning as Notification
+      // Preferences immediately above: accent color/Dashboard layout and
+      // currency/timezone are account-level, cross-cutting configuration
+      // with no balance-sheet or cash-flow figure of their own, not a
+      // domain feature that would belong in "Planning"/"Wealth."
+      { label: "Appearance", href: "/settings/appearance", icon: Palette },
+      { label: "Preferences", href: "/settings/preferences", icon: SlidersHorizontal },
     ],
   },
 ]

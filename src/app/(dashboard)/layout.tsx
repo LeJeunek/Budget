@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth"
 import { Sidebar } from "@/components/shared/sidebar"
 import { TopNav } from "@/components/shared/top-nav"
 import { NotificationBell } from "@/features/notifications/components/notification-bell"
+import { TimezoneAutoCapture } from "@/features/settings/components/timezone-auto-capture"
 
 /**
  * Authenticated app shell (see docs/architecture/folder-tree.md:
@@ -38,6 +39,12 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex h-svh overflow-hidden">
+      {/* Phase 4c (phase-4c-technical-design.md §3.3): renders no visible UI
+          of its own — see its own JSDoc. Mounted here, alongside where
+          `ThemeProvider` is mounted (root layout), per that section's
+          "component built by the feature owner, mounted by the Frontend Lead
+          in the authenticated layout" split. */}
+      <TimezoneAutoCapture />
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopNav
