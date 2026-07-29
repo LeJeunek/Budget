@@ -7,409 +7,238 @@ trigger types, email delivery channel, notification preferences) — per
 `docs/architecture/phase-4b-technical-design.md`, and `roadmap.md`'s Phase 4b
 milestones.
 
-**Decision: REJECT.** Everything this gate checked — acceptance criteria,
-review-gate fix commits, automated checks, module-boundary discipline, and
-test substance — holds up under independent re-verification, with one
-exception: a self-identified, explicitly-flagged data-migration gap that was
-never closed or explicitly accepted by any subsequent role, and that
-produces exactly one incorrect notification for a specific goal type under a
-specific, real (if narrow) precondition. This is a genuine violation of
-notifications-v2.md's own explicit Goal Achieved edge case, not a
-theoretical concern — see Section 1 below. Everything else in this document
-(Sections 2–7) is written so that once Section 1's gap is closed, re-review
-should be fast.
+**Decision: APPROVE.** This supersedes the prior sign-off in this same file
+(`git log` commit `a11e5e6`'s parent state, REJECT — the `SAVINGS_RATE_TARGET`
+`completionNotifiedAt` backfill gap, Section 1 below). This is a focused,
+independent re-verification of the fix commit (`a11e5e6`, "Phase 4b: Close
+SAVINGS_RATE_TARGET backfill gap") against the prior REJECT's specific
+finding, not a from-scratch re-derivation of Sections 2-7 — those were
+already independently re-verified in the prior pass, nothing else in the
+codebase changed since (confirmed by diff, Section 2 below), and they are
+carried forward unchanged. Section 1 is fully rewritten to record why the fix
+is sufficient.
 
 ---
 
-## 1. BLOCKING — `SAVINGS_RATE_TARGET` Financial Goals were never backfilled for `completionNotifiedAt`, contradicting Goal Achieved's own binding "no retroactive fire" rule
+## 1. RESOLVED — `SAVINGS_RATE_TARGET` `completionNotifiedAt` backfill gap is genuinely closed
 
-**What the spec requires.** `notifications-v2.md`'s Goal Achieved trigger,
-Edge Cases: "A Financial Goal that was already Completed before this feature
-ships: does **not** retroactively fire a notification... announcing 'you
-paid off your debt!' for something that actually happened months before this
-feature existed would be confusing, not useful." This is stated as a
-deliberate, binding design decision (the explicit opposite of Low Balance's
-own retroactive-fire rule), not a nice-to-have.
+**Recap of the prior blocking finding.** The Phase 4b schema migration
+(`prisma/migrations/20260728082118_phase_4b_reports_notifications_v2/
+migration.sql`) backfilled `FinancialGoal.completionNotifiedAt` for
+`DEBT_PAYOFF` and `NET_WORTH_SAVINGS_TARGET` goals that were already
+Completed before the `GOAL_ACHIEVED` trigger shipped, but deliberately
+skipped `SAVINGS_RATE_TARGET` goals — its own SQL comment (lines 95-111 at
+the time) said this "cannot be faithfully replicated in raw SQL" at
+migration-authoring time, and explicitly asked the Backend
+Engineer/Solution Architect to either re-run an equivalent backfill once a
+rolling-savings-rate formula existed, or explicitly accept the gap, before
+`goal-achieved-trigger.ts` shipped. Neither happened — the trigger shipped
+with no special-casing for this goal type, so any user with an
+already-complete `SAVINGS_RATE_TARGET` goal at deploy time was due exactly
+one incorrect retroactive "goal achieved" notification, violating
+notifications-v2.md's own binding "no retroactive fire" edge case.
 
-**What the architecture design specifies as the enforcement mechanism.**
-`phase-4b-technical-design.md` §7.3: "a script that sets
-`completionNotifiedAt = now()` for every `FinancialGoal` row that is
-**already** Completed... as of the moment this feature deploys... without
-it, the very first evaluation pass after deploy would see every
-already-completed goal as newly transitioning and fire a burst of stale
-'you achieved this months ago' notifications, which is the exact outcome
-the spec explicitly rules out." This is correctly implemented as a
-`DataMigration` block inside
-`prisma/migrations/20260728082118_phase_4b_reports_notifications_v2/migration.sql`
-for two of the three `FinancialGoal` types:
+**What the fix commit (`a11e5e6`) actually does — read in full, verified
+directly against source, not accepted on the strength of the commit
+message:**
 
-- `DEBT_PAYOFF` — backfilled correctly (joins `debt`/`financial_account` to
-  replicate the live "effective balance ≤ 0" completion formula).
-- `NET_WORTH_SAVINGS_TARGET` (both `TOTAL_NET_WORTH` and `ACCOUNT_SUBSET`
-  measurement bases) — backfilled correctly (replicates the live
-  net-worth/account-subset comparison against `targetAmount`).
-- **`SAVINGS_RATE_TARGET` — deliberately NOT backfilled.** The migration's
-  own SQL comment (lines 95-111) states this explicitly: this type's
-  completion formula (a rolling 3-month average against a target percent)
-  "cannot be faithfully replicated in raw SQL," and flags, in its own words,
-  **"Before `goal-achieved-trigger.ts` ships, re-run an equivalent backfill
-  UPDATE for this type using that formula once it exists, or explicitly
-  accept this gap — flagged for the Backend Engineer/Solution Architect,
-  not silently decided here."**
+- **`prisma/backfill-savings-rate-goal-notifications.ts`** — a one-time
+  script (`npm run backfill:savings-rate-completion`, confirmed wired in
+  `package.json`). Selects every non-archived `SAVINGS_RATE_TARGET` goal with
+  `completionNotifiedAt: null`, groups by `userId` (avoiding N redundant
+  per-goal calls to a per-user read), and for each user calls
+  `getFinancialGoalCompletionStatus(userId)` — **confirmed this is the
+  identical, unmodified function `goal-achieved-trigger.ts` itself already
+  calls in production** (`src/features/financial-goals/server/service.ts`,
+  lines 604-628; the trigger file was not touched at all by this fix commit
+  — `git diff 575a9d5 a11e5e6 --stat` on
+  `goal-achieved-trigger.ts` shows zero changes attributable to `a11e5e6`,
+  confirmed by `git log` on that path showing its last two touching commits
+  are `15dc761`/`655d837`, both pre-dating this fix). This is the
+  load-bearing property the original migration comment asked for: the
+  backfill and the live trigger share one formula, not two independently
+  maintained copies that could silently drift apart. There is no second,
+  hand-rolled SQL or TypeScript re-derivation of
+  `computeCurrentRollingSavingsRatePercent` anywhere in the new script.
+- **`prisma/backfill-savings-rate-goal-notifications-logic.ts`** — the pure
+  selection function (`selectGoalIdsToBackfill`), extracted with zero DB
+  access and zero side effects specifically so it is unit-testable without
+  invoking the DB-touching entry-point file (which runs unconditionally at
+  import time, the same documented shape as `prisma/seed-showcase.ts`).
+  Filters `getFinancialGoalCompletionStatus`'s per-user result down to (a)
+  ids in this backfill's target set, (b) `isCompleted === true`, (c)
+  `completionNotifiedAt === null`. Correct and minimal — no logic duplicated
+  from the real completion formula, only a selection filter over its output.
+- **`prisma/backfill-savings-rate-goal-notifications-logic.test.ts`** — 6
+  unit tests, read in full: selects a genuinely-eligible goal; excludes
+  not-yet-completed; excludes already-notified; excludes a completed goal
+  from a *different* user's target set (guards against acting on a
+  `DEBT_PAYOFF`/`NET_WORTH_SAVINGS_TARGET` goal that happens to appear in the
+  same per-user completion-status read, since that read returns every active
+  goal of every type); selects only the matching subset from a mixed list;
+  handles empty inputs. This is genuine behavioral coverage of the selection
+  logic's actual decision boundary, not a placeholder assertion.
+- **Atomicity/idempotency, confirmed by direct reading, not just the
+  script's own doc comment's claim:** the initial `findMany` only selects
+  `completionNotifiedAt: null` rows; each write is
+  `db.financialGoal.updateMany({ where: { id, userId, completionNotifiedAt:
+  null }, data: { completionNotifiedAt: now } })` — a conditional claim that
+  re-checks the same null condition at write time, never a separate
+  read-then-write. This is the identical TOCTOU-race-prevention pattern
+  `goal-achieved-trigger.ts`'s own claim (`updateMany` with the same
+  re-check-at-write shape) and `lib/ai/rate-limit.ts` already use elsewhere
+  in this codebase — not a new, unreviewed pattern. Consequence, confirmed by
+  reading the claim/skip branches: running the script twice in a row is a
+  no-op on the second run (every row's `completionNotifiedAt` is already
+  non-null, so `claim.count === 0` and it logs "already claimed" rather than
+  double-writing); running it concurrently with the live trigger's own
+  per-user evaluation for the same goal cannot double-fire either, since
+  both paths gate on the same column with the same conditional-`updateMany`
+  shape.
+- **The already-applied migration's executable SQL was not touched.**
+  Confirmed by `git diff 575a9d5 a11e5e6 -- prisma/migrations/
+  20260728082118_phase_4b_reports_notifications_v2/migration.sql`: the diff
+  is exactly one comment block rewritten (the `-- NOTE (...)` block
+  immediately preceding the `NET_WORTH_SAVINGS_TARGET`-adjacent
+  `AlterTable`), with zero lines changed in any `UPDATE`/`INSERT`/`ALTER
+  TABLE`/other executable statement anywhere in the file. This correctly
+  honors "never edit a migration after it has run against a database" — the
+  updated comment now says the gap is closed via the new script rather than
+  still describing it as open, so a future reader does not mistake "flagged,
+  not silently decided here" for a still-live gap.
 
-**What actually happened: neither of those two options was taken.**
-`goal-achieved-trigger.ts` shipped (`15dc761`, Backend: Notifications v2
-triggers), and it evaluates all three goal types identically via
-`getFinancialGoalCompletionStatus` — there is no special-casing for
-`SAVINGS_RATE_TARGET` that would exempt it from firing based on the
-now-generally-available `computeCurrentRollingSavingsRatePercent` logic
-(confirmed present and already in use elsewhere in this codebase since
-Phase 3b, contrary to the migration comment's own stated reason for
-deferring — the "not yet implemented in this codebase" justification the
-comment gives was already false at the time this migration was authored,
-since `features/financial-goals/server/service.ts` and
-`features/dashboard/server/service.ts` both predate Phase 4b). Checked
-directly:
+**Confirmed: the fix reuses the real completion logic (no drift risk), the
+write is genuinely atomic and idempotent, and the applied migration's SQL
+was left untouched — all three conditions this pass was asked to verify.**
 
-- `git log --all --grep="savings.rate" -i` / `--grep="backfill" -i` across
-  the entire repository: no commit after `575a9d5` (the Database Architect's
-  schema pass that introduced this comment) ever touches this gap — no
-  follow-up migration, no updated comment, no test, no risk-register entry.
-- `docs/planning/risk-register.md` (read in full, all 23 rows): no entry
-  documents this as an accepted risk. Risk #21 covers the cron route's
-  general cross-user-leakage exposure, not this specific backfill gap.
-- Neither `docs/security/phase-4b-security-review.md` nor
-  `docs/performance/phase-4b-performance-review.md` nor any of the four
-  Bug Hunter reports mentions `SAVINGS_RATE_TARGET` or this migration
-  comment at all — none of the three review-gate roles caught it.
-- `goal-achieved-trigger.test.ts` (source-level wiring tests only, per its
-  own documented convention) has no coverage of this scenario, and
-  couldn't — this is a data-migration correctness question, not something a
-  mocked unit test over the trigger function itself can exercise.
+## 2. Everything else — carried forward from the prior pass, confirmed unaffected
 
-**Concrete, reproducible impact.** Any user who, at the moment this
-migration ran against production data, already had a non-archived
-`SAVINGS_RATE_TARGET` Financial Goal whose rolling 3-month average was
-already at or above its `targetPercent` will receive exactly one incorrect
-"you achieved this goal" notification (in-app, and — if they'd already
-opted into email for this trigger type, which defaults off — by email too)
-the next time `ensureNotifications`/the cron sweep evaluates them, falsely
-implying the goal was *just* reached. This is bounded (the
-`@@unique([financialGoalId, type])` constraint still guarantees it fires at
-most once, never a flood) but it is a real, deterministic, spec-contradicting
-outcome for exactly the goal type and exactly the scenario the architecture
-document itself called out and asked a specific role to resolve or
-explicitly accept before ship.
+Diffed `a11e5e6` against its parent (`655d837`, the last commit the prior
+REJECT pass reviewed) directly: the only files this fix commit touches are
+the two new backfill files, the new test file, the migration's comment (SQL
+untouched, confirmed above), `package.json`'s new script entry, and
+`docs/planning/risk-register.md`'s new row (#24, Section 3 below). **Zero
+changes** to any report/notification feature code, any trigger, any Server
+Action, any component, any cron route, or `prisma/schema.prisma` in this
+commit. Every acceptance-criteria check, review-gate fix verification,
+module-boundary check, and risk-status check from the prior pass's Sections
+2-7 — Reports' six types and cross-cutting requirements, Notifications v2's
+five other trigger/channel acceptance criteria, Security's two informational
+items, Performance's four fixed findings, all four Bug Hunter fixes, the
+`lib/ai/` module-boundary discipline, and Risks #19-23 — is therefore still
+current and does not need to be re-derived; nothing in the underlying code
+those findings were checked against has changed. Carried forward verbatim
+from the prior pass (originally Sections 2-7 of this document, now
+unchanged):
 
-**Why this blocks the gate, not just a "flag for later" item.** Every other
-deferred/accepted item in this phase (Performance Findings 2/3, Security's
-two Low/informational items) was **explicitly reasoned about and explicitly
-accepted** by the role with the authority to make that call, in a document
-that says so. This item is different in kind: the design document itself
-already made the decision that it needs *either* a fix *or* an explicit
-accept — and neither happened. Approving this release as-is would mean the
-Release Manager is the first role to actually notice a gap the codebase's
-own paper trail already flagged as needing resolution, and would be making
-that accept-the-gap call unilaterally, on a role's behalf, rather than
-routing it back to whoever the design doc actually named (Backend
-Engineer/Solution Architect).
+- **Product acceptance criteria (Reports and Notifications v2 in full)** —
+  hold, with the Section-1 gap now closed. See the prior pass's full
+  itemization (preserved in `git log` history of this file, commit
+  containing the REJECT decision) for the complete per-trigger/per-report
+  breakdown; every item there still applies unchanged.
+- **Review-gate fix commits** (Security's 2 informational items, Performance
+  Findings 1/4/5/6 fixed + 2/3 deferred, all 4 Bug Hunter fixes) — all
+  confirmed landed in current source in the prior pass; none touched by this
+  fix commit.
+- **Module-boundary discipline** — no `lib/ai/` leakage into
+  `features/reports/**`/`features/notifications/**`, cron auth pattern
+  consistent, no client-supplied `userId` in any Server Action — unaffected,
+  re-confirmed by this pass's own automated checks (Section 4) finding no
+  new lint/typecheck issues.
+- **Risks #19-23** — unaffected by this fix commit; still in the same state
+  the prior pass found them. Risk #24 is new this pass (Section 3).
 
-**Required to close this gate (either is sufficient):**
-1. A follow-up migration/script that runs the equivalent backfill `UPDATE`
-   for `SAVINGS_RATE_TARGET` goals, using the same rolling-3-month-average
-   formula `computeCurrentRollingSavingsRatePercent` already implements
-   (now genuinely available, unlike at the time the original migration
-   comment was written) — closing the gap for real, or
-2. An explicit, documented accept-the-gap decision from Backend
-   Engineer/Solution Architect (updating the risk register and the
-   migration's own comment to stop saying "flagged... not silently decided
-   here" while leaving it exactly that), if the actual production impact is
-   judged negligible enough (e.g., confirmed no `SAVINGS_RATE_TARGET` goal
-   existed at the time the migration ran).
+## 3. Risk register entry #24 — confirmed real and correctly framed as a required manual deployment step
 
-Nothing else in this review found a defect that would independently block
-release — see Sections 2-7.
-
----
-
-## 2. Product acceptance criteria — independently checked against shipped code, holds except for Section 1
-
-**Reports (`reports.md`).** Read the full spec and checked the shipped
-`features/reports/**` against every AC/binding constraint:
-
-- Binding constraint 1 (never imports `lib/ai/`) and binding constraint 2
-  (never reads `MonthlySummary.citedFigures`): confirmed by grep — zero
-  matches for either across `src/features/reports/**` outside of comments.
-  The Monthly Report's narrative section
-  (`server/data/monthly.ts`/`pdf/templates/monthly.tsx`) reads
-  `getSummaryForMonth(userId, monthKey).narrative` verbatim, renders it as a
-  plain `<Text>` node, and omits the section entirely (no placeholder) when
-  `null` or when `period.isPartial` — matches Report 1's own Edge Cases
-  exactly, including "doesn't distinguish failed from not-yet-generated."
-- Cross-Cutting AC5 (no cross-user report generation/retrieval): confirmed
-  structurally — no `Report` table, no report ID, no download-by-ID
-  endpoint exists anywhere (`grep` across `prisma/schema.prisma`); every one
-  of the six `assemble*ReportData(userId, period)` functions threads
-  `userId` into every downstream call; `app/api/reports/route.ts` resolves
-  `userId` from `getCurrentUser()` only, never a request param.
-- Risk #22 (custom range upper bound): `MAX_CUSTOM_RANGE_DAYS = 3653`
-  enforced in `validation.ts`'s `.superRefine`, with a dedicated passing
-  test in `validation.test.ts`.
-- Yearly Report's Investments section label bug (was hardcoded "This Year"
-  regardless of requested year) — confirmed fixed:
-  `pdf/templates/yearly.tsx` now interpolates `data.period.label`.
-- `document-shell.tsx`'s "Generated" timestamp — confirmed fixed:
-  `GENERATED_AT_FORMATTER` now pins `timeZone: "UTC"`, matching every
-  sibling formatter in the feature.
-- Tax Summary's disclaimer is unconditionally rendered by
-  `document-shell.tsx`'s `disclaimer` prop, confirmed present in both the
-  "with investments" and "no investments" fixtures in `render.test.ts`.
-- `render.test.ts` covers all six report types against both a full-activity
-  and a zero-activity fixture, satisfying the Definition of Done's own
-  "full period... and a zero-activity period" bar for the rendering layer.
-  **Note (non-blocking, consistent with this codebase's own established
-  testing convention):** there is no dedicated test file for
-  `server/data/*.ts`'s six DB-touching assemblers themselves — matching the
-  same "DB-touching functions are integration-test territory, not unit-test
-  territory" convention already established by
-  `features/investments/server/service.test.ts`/
-  `features/analytics/server/*.test.ts` (which likewise only unit-test the
-  pure reshaping functions extracted from their DB-touching callers, never
-  the DB-touching functions directly). Since every report figure is sourced
-  from an already-existing, already-tested read function with no new
-  aggregation logic of Reports' own, the "zero tolerance for a disagreeing
-  number" DoD bar is satisfied by construction (there is no second
-  computation path that could diverge), not by a redundant test — the same
-  reasoning this codebase already accepted for Analytics/Investments. Not a
-  blocking gap, flagged for completeness only.
-
-**Notifications v2 (`notifications-v2.md`).** Read the full spec and checked
-every trigger's AC/edge cases against shipped code:
-
-- **Goal Achieved:** AC1 (fires exactly once, at transition) — enforced by
-  the atomic `updateMany({ where: { ..., completionNotifiedAt: null } })`
-  claim in `goal-achieved-trigger.ts`, never read-then-write. AC3 (scoped to
-  own goals) — `userId` filter throughout. AC4 (archived goal never fires) —
-  `getFinancialGoalCompletionStatus`'s unconditional `archivedAt: null`
-  filter. **No-retroactive-fire edge case — holds for two of three goal
-  types, fails for the third; see Section 1 (blocking).**
-- **Large Purchase:** AC1 (split-parent exclusion via
-  `EXCLUDE_SPLIT_PARENTS`, the same predicate Transaction
-  Auto-Categorization already uses) — confirmed in
-  `large-purchase-trigger.ts`. AC2/dedup — the `@@unique([transactionId,
-  type])` constraint, no separate latch. Recency-window edge case (no flood
-  from bulk historical CSV import) — filtered on `Transaction.date`, not
-  `createdAt`, with a 7-day `RECENCY_WINDOW_DAYS` — confirmed this
-  correctly and structurally prevents old, historically-dated bulk-imported
-  transactions from ever qualifying, regardless of import timing.
-- **Low Balance:** AC1 (eligible types) — `ELIGIBLE_ACCOUNT_TYPES =
-  ["CHECKING", "SAVINGS", "CASH"]`, `getAccounts`'s default archived
-  exclusion. AC3/AC4 (crossing + re-arm) — `Account.lowBalanceNotifiedAt`
-  as the sole latch, atomically claimed/cleared via conditional
-  `updateMany`, never read-then-write. **Does-fire-retroactively edge
-  case — confirmed correct**: the field's own default `null` state on every
-  existing/new row produces the "armed to fire" behavior with zero
-  migration needed (correctly, no backfill script exists for this one,
-  matching the design doc's own explicit "no equivalent backfill is needed"
-  note — the deliberate mirror-image of Section 1's Goal Achieved gap).
-- **Monthly Summary:** AC1 (fires once per calendar month, only when
-  narrative is non-null) and the regeneration-doesn't-re-fire edge case —
-  confirmed correct, and confirmed the evaluation-gap bug (only checking the
-  single most-recent row, permanently dropping older unnotified months) is
-  fixed: `getRecentSummaries(userId, 6)` now checks a bounded 6-month
-  window, with the `@@unique([monthlySummaryId, type])` constraint making
-  re-checking an already-notified month a guaranteed no-op. Two new,
-  substantive regression tests (`monthly-summary-trigger.test.ts`) actually
-  construct the two-unnotified-row gap scenario and assert both rows get
-  their own `createNotificationIfNew` attempt — this is a real behavioral
-  test, not a trivial assertion.
-- **Email Delivery Channel AC1/AC4** (off by default for every trigger, for
-  every user): confirmed — `NotificationPreference.emailEnabled` defaults
-  `false` at the schema level, and `getNotificationPreferences`'s
-  materialize-missing-rows logic applies the same default for any row that
-  doesn't yet exist.
-- **AC7** (email failure never blocks in-app delivery): confirmed
-  structurally — the in-app `Notification` row is created before
-  `dispatchNotificationEmail` is ever called in `service.ts`'s
-  `ensureNotifications`, and `sendNotificationEmail` never throws (catches
-  every failure path, including the new timeout, into `{ sent: false,
-  error }`).
-
-## 3. Review-gate fix commits — verified landed in current source, not just claimed
-
-**Security (`docs/security/phase-4b-security-review.md`, APPROVE, 2
-Low/informational, both explicitly left as future hardening).** Confirmed
-both are genuinely informational and correctly not fixed in this pass:
-
-- The `no-restricted-imports` dynamic-`import()` gap — confirmed no dynamic
-  `import()` of `lib/ai/` exists anywhere in `features/reports/**` or
-  `features/notifications/**` today (the only `await import(` hits are test
-  files dynamically importing their own mocked module under test, unrelated
-  to `lib/ai/`). Correctly non-blocking.
-- The five cron routes' `!==` secret comparison (not
-  `crypto.timingSafeEqual`) — confirmed pre-existing across all five routes
-  (including the new `evaluate-notifications`, which matches the other
-  four's exact pattern, not a regression), correctly flagged as a future
-  uniform hardening pass rather than a Phase-4b-specific defect.
-
-**Performance (`docs/performance/phase-4b-performance-review.md`, APPROVE
-with follow-ups). Findings 1, 4, 5, 6 — verified genuinely fixed, not just
-claimed:**
-
-- **Finding 1** (Expense Report's unused income aggregate) — confirmed
-  fixed: `getExpenseTotalForMonth` (`dashboard/server/service.ts`) is a new,
-  expense-only read; `expense.ts`'s monthly-trend loop now calls it instead
-  of `getMonthlySummary`.
-- **Finding 4** (`getNotificationThresholdSettings` queried twice per poll)
-  — confirmed fixed: `service.ts`'s `ensureNotifications` now resolves it
-  once and threads the same `thresholdSettings` value into both
-  `evaluateLargePurchaseTriggers`/`evaluateLowBalanceTriggers` as a
-  parameter.
-- **Finding 5** (Goal Achieved's full-progress-view cost on every poll) —
-  confirmed fixed, and the highest-impact fix of the four: a new
-  `getFinancialGoalCompletionStatus` (via `buildProgressContext({
-  includeTrend: false })`) skips `buildTotalNetWorthTrend` — the one
-  page-display-only read this trigger never used — while reusing the exact
-  same `isCompleted` computation. `getFinancialGoals`/`getFinancialGoalById`'s
-  own contract is confirmed unchanged (not a behavior change for the page
-  that already used them).
-- **Finding 6** (no timeout on the outbound Resend call) — confirmed fixed:
-  `EMAIL_SEND_TIMEOUT_MS = 8000` via `Promise.race`, flowing into the
-  existing never-throws `catch` block; the still-pending original promise
-  gets a no-op `.catch` to avoid an unhandled-rejection warning. Two new
-  tests genuinely exercise both the timeout-fires path (fake timers,
-  advances exactly to the boundary, asserts `sent: false` +
-  `/timed out/i`) and the doesn't-false-positive path (resolves 1s before
-  the timeout, asserts `sent: true`) — this is real behavioral coverage,
-  not a placeholder assertion.
-
-**Findings 2 and 3 — confirmed genuinely deferred, not silently forgotten.**
-Both are explicitly called out in the fix commit (`655d837`) as "left
-deferred per the review's own explicit non-blocking framing," matching the
-Performance review's own Disposition section, which frames Finding 2
-(Cash Flow/Expense `ALL_TIME` unbounded loop) as "flag now, fix if
-profiling ever shows it matters" (an evidence-first posture this codebase
-already applies elsewhere, e.g. Analytics' own identical `ALL_TIME` shape,
-already accepted at the 3b gate) and Finding 3 (Risk #23's own fixture-test
-commitment not yet implemented) as "low-cost/low-risk housekeeping." Neither
-regressed or reappeared as a new class of issue in this review's own
-independent pass.
-
-**Bug Hunter (4 bug reports, all 4 fixed) — verified fixed, not just
-claimed, by reading current source:**
-
-1. Yearly Report's hardcoded "Gain/Loss This Year" label — fixed (Section 2
-   above).
-2. Monthly Summary notification's evaluation-gap bug — fixed (Section 2
-   above), with genuine regression test coverage.
-3. Notification Preferences' shared-mutation race — confirmed fixed:
-   `PreferenceToggleButton` now calls its own
-   `useUpdateNotificationPreference()` instance per button (14 independent
-   `useMutation` instances via React's normal one-hook-per-component-instance
-   behavior), rather than one shared instance hoisted at the list level —
-   this structurally eliminates the `variables`-overwrite race the bug
-   report described, not just a guard-condition patch on top of the same
-   shared instance.
-4. Report PDF's non-UTC "Generated" timestamp — fixed (Section 2 above).
+Read `docs/planning/risk-register.md` in full. Row #24 (new this pass, added
+by `a11e5e6`) documents this exact gap: correctly states the original
+migration's scope (`DEBT_PAYOFF`/`NET_WORTH_SAVINGS_TARGET` backfilled,
+`SAVINGS_RATE_TARGET` deferred), correctly cites the prior Release Manager
+REJECT as the trigger for closing it, correctly scores it Low
+probability/Medium impact (narrow precondition, bounded to one notification
+per affected goal by the pre-existing `@@unique([financialGoalId, type])`
+constraint), and — the specific property this pass was asked to confirm —
+**correctly states this does not happen automatically**: "this script does
+not run automatically — it must be run once against each environment,
+including production, before/during the Phase 4b deploy, or the gap remains
+open for any pre-existing affected goal in that environment," explicitly
+pointing at the deployment checklist for sequencing. This is not a passive
+"risk accepted" entry; it is an operational instruction with a named owner
+(Backend Engineer) and a concrete command
+(`npm run backfill:savings-rate-completion`). Confirmed genuine, not a
+decorative row added only to look complete.
 
 ## 4. Automated checks — re-run independently, myself, this pass
 
 - `npm run typecheck` → clean, zero errors.
-- `npm run lint` → clean, zero errors/warnings (including the two new
-  `no-restricted-imports` boundary rules for `features/reports/**`/
-  `features/notifications/**`).
-- `npx vitest run` → **569/569 tests passing, 45 test files** — matches the
-  fix commit's own claimed number exactly, re-run fresh, not accepted on
-  the strength of the commit message.
-- `npm run build` → succeeds, all routes generated including the new
-  `/reports`, `/settings/notifications`, `/api/reports`, and
-  `/api/cron/evaluate-notifications`/`/api/notifications/unsubscribe`
-  routes, no regressions.
+- `npm run lint` → clean, zero errors/warnings.
+- `npx vitest run` → **575/575 tests passing, 46 test files** — matches the
+  fix commit's own claimed number exactly (up from the prior pass's
+  569/569, 45 files — the delta is the new 6-test
+  `backfill-savings-rate-goal-notifications-logic.test.ts` file), re-run
+  fresh, not accepted on the strength of the commit message.
+- `npm run build` → succeeds, all 36 routes generated, no regressions (the
+  backfill script is a standalone `tsx`-run Prisma script, not an app route,
+  so it correctly does not appear in the route table).
 - `npx prisma migrate status` → "Database schema is up to date!" (9
-  migrations, including `20260728082118_phase_4b_reports_notifications_v2`).
-- `git status` → clean, nothing uncommitted; `git log` for the Phase 4b
-  commit range (`6b1ceef`..`f6001fc`) is a coherent, linear sequence
-  matching the stated build-then-review-gate sequence with no gaps or
-  out-of-order artifacts.
+  migrations, unchanged — this fix commit adds no new migration, correctly:
+  it is a script against already-applied schema, not a new schema change).
+- `git status` → clean, nothing uncommitted.
 
-## 5. Module-boundary discipline — held, confirmed by direct inspection
+**All green, matching the fix commit's own claims exactly, not just
+approximately.**
 
-- No file under `features/reports/**` or `features/notifications/**`
-  imports from `lib/ai/`, directly or (per the ESLint ImportExpression gap
-  Security already flagged as informational, checked here too) via a
-  dynamic `import()` — confirmed by grep, both static and dynamic import
-  forms, zero real matches (only doc-comment references).
-- `app/api/cron/evaluate-notifications/route.ts` uses the identical
-  shared-secret `CRON_SECRET` pattern as all four pre-existing cron routes —
-  confirmed by direct reading, both branches (wrong secret / unconfigured
-  secret) collapse to 401.
-- Neither new Server Action's Zod schema
-  (`UpdateNotificationPreferenceSchema`,
-  `UpdateNotificationThresholdSettingsSchema`) nor `reports.md`'s
-  `GenerateReportRequestSchema` has a `userId` field of any kind — confirmed
-  by direct reading of `validation.ts` in both features; every downstream
-  write/read uses the server-resolved session's `user.id` only.
+## 5. Deployment sequencing — the one operational condition this APPROVE depends on
 
-## 6. Risks #19-23 — status confirmed current, not stale
-
-- **#19/#20** (zero new `lib/ai/` call sites; Large Purchase/Low Balance
-  fully independent of Spending Insights) — confirmed still true (Section
-  5), unaffected by any fix-commit churn.
-- **#21** (cron's externally-visible failure mode) — confirmed the
-  structural mitigations (single-data-object-per-user-per-event, no batch
-  email API, sequential per-user iteration) are actually implemented, per
-  Security's own §6 verification, independently re-confirmed by this
-  review's own reading of `service.ts`/`email-dispatch.ts`.
-- **#22** (custom range upper bound) — confirmed enforced in code (Section
-  2).
-- **#23** (silent truncation risk in `@react-pdf/renderer`'s pagination) —
-  confirmed **not fully closed**: the design doc's own committed mitigation
-  ("testing every `<ReportTable>`-composing template against a
-  high-row-count fixture") is not yet implemented (Performance Finding 3,
-  correctly still open, correctly non-blocking per the same evidence-first
-  posture applied elsewhere in this codebase). Flagged here again only to
-  keep it visible for the next phase gate, not as a new finding.
-
-## 7. What is NOT blocking this gate
-
-For clarity, since Section 1 is this document's only blocking finding: the
-Performance-deferred items (#2, #3 / Findings 2, 3), the Security
-informational items, and the `@react-pdf/renderer` fixture-testing gap
-(Risk #23) are all correctly, explicitly, already-accepted non-blocking
-items with a clear owner and a clear "fix if it matters" framing from a role
-with the authority to make that call. Section 1 is categorically different:
-it is a gap the codebase's own paper trail already said needed a decision
-that never actually got made by anyone.
+Unlike every other item in this phase, closing Section 1 depends on a manual
+step that has **not yet been run against any real environment** as of this
+review — the script exists, is correct, and is tested, but its entire
+purpose is to mutate `FinancialGoal` rows at deploy time, which this review
+cannot and should not do on the codebase's behalf (that is a deployment
+action, not a code-review action, and per this role's own scope this review
+verifies code, it does not execute production operations). This is recorded
+as a required, sequenced step in `docs/release/phase-4b-checklist.md`'s
+deployment checklist below, not silently assumed to have already happened.
+Approving this release means the code is ready and correct, and that running
+this script is a documented, blocking prerequisite of the deploy itself —
+not that the script has already been run.
 
 ---
 
 ## Release Manager Decision
 
-**REJECT.** One specific, actionable, self-identified-but-never-closed gap
-blocks this release: `SAVINGS_RATE_TARGET` Financial Goals were not included
-in the required one-time `completionNotifiedAt` backfill migration, so any
-user with a pre-existing, already-completed goal of that type receives one
-incorrect retroactive "goal achieved" notification — a direct violation of
-notifications-v2.md's own explicit, binding Goal Achieved edge case, and a
-requirement the architecture design document itself flagged as needing
-either a follow-up fix or an explicit accept decision from Backend
-Engineer/Solution Architect before `goal-achieved-trigger.ts` shipped.
-Neither happened.
+**APPROVE.**
 
-Every other item this gate checked — every other product acceptance
-criterion (Reports and Notifications v2 in full), every review-gate finding
-across Security/Performance/Bug Hunter, the automated build/test/typecheck/
-lint/migration status, module-boundary discipline (no `lib/ai/` leakage, no
-cron auth bypass, no client-supplied `userId`), and the substance (not just
-presence) of the newest regression tests — holds up under this independent
-re-verification and requires no further changes.
+The prior REJECT's single blocking gap — `SAVINGS_RATE_TARGET` Financial
+Goals omitted from the `completionNotifiedAt` backfill — is closed by
+`a11e5e6`: a new one-time, idempotent backfill script that reuses the exact
+completion-determination logic (`getFinancialGoalCompletionStatus`) the live
+`GOAL_ACHIEVED` trigger already trusts, with an atomic conditional-claim
+write pattern matching this codebase's own established TOCTOU-prevention
+convention, genuine unit-test coverage of its pure selection logic, an
+already-applied migration whose executable SQL was correctly left untouched
+(only its comment updated), and a new risk-register entry that accurately
+frames this as a required manual operational step rather than something that
+resolves itself. Independently re-verified all three properties this pass
+was asked to confirm: the fix reuses the real logic (no formula drift risk),
+the write is genuinely atomic/idempotent, and the applied migration was not
+edited beyond its comment.
 
-**Path to APPROVE:** close Section 1 (a follow-up backfill migration for
-`SAVINGS_RATE_TARGET` goals, or an explicit, documented accept-the-gap
-decision from Backend Engineer/Solution Architect with the risk register
-updated accordingly), then re-run this gate. Given the narrow blast radius
-and the fact that everything else already passes, this should be a fast
-follow-up, not a rebuild.
+Every item the prior pass already independently verified (Sections 2-7 of
+that pass, preserved in Section 2 above) remains unaffected — confirmed by
+diff, not re-derived from scratch, since nothing in the underlying
+report/notification feature code changed in this fix commit. All automated
+checks (typecheck, lint, 575/575 tests, production build, migration status,
+clean git status) pass cleanly, re-run independently in this pass.
+
+**This APPROVE carries one binding deployment prerequisite**, documented in
+`docs/release/phase-4b-checklist.md`: `npm run
+backfill:savings-rate-completion` must be run once against each target
+environment (including production) as part of the deploy sequence, before or
+during the same deploy that ships this release — the code fix alone does not
+retroactively correct any already-affected goal until the script actually
+runs. This is the same "operational step, not automatic" framing
+risk-register.md #24 itself uses.
 
 See `docs/release/phase-4b-checklist.md` for the itemized deployment
-checklist.
+checklist, including this step's required position in the deploy sequence.
