@@ -750,3 +750,63 @@ Not a client-facing API surface — `lib/email/send-notification-email.ts` is ca
 ### Cross-feature note: zero new `lib/ai/` call sites, confirmed
 
 Neither Reports nor Notifications v2 introduces a new `lib/ai/` call site — the Monthly Report's narrative section and the Monthly Summary trigger both perform a direct, read-only field lookup of the already-persisted `MonthlySummary.narrative`, never a new generation call. See `phase-4b-technical-design.md` §8 for the recommended ESLint enforcement and Risk #19/#20's full framing.
+
+---
+
+## Calendar v2, Customization, Admin (Phase 4c)
+
+Per `docs/product/calendar-v2.md`, `docs/product/customization.md`, `docs/product/admin.md`, and `docs/architecture/phase-4c-technical-design.md`. All three sub-areas introduce zero new Route Handlers (see the note at the top of this document) and zero new `lib/ai/` call sites.
+
+### Calendar v2 (`features/calendar`)
+
+Composes Bills and Recurring Income; introduces no new data of its own.
+
+| Action | Mechanism | Input | Output |
+|---|---|---|---|
+| Get a month's combined calendar | Server Component direct call to `calendar.service.getCalendarMonth(userId, month)` | `month: "YYYY-MM"` | `CalendarMonthView` — `{ days: { day; bills: CalendarOccurrence[]; paydays: PaydayCalendarEntry[]; isBudgetResetDay: boolean }[]; budgetResetMonth: string }` |
+
+No mutation of any kind — this is a pure read view, per calendar-v2.md's own scope note. Selecting a bill/payday/reset-marker entry is client-side navigation (`Link` to `/bills/[id]`, the income stream's own detail route, or `/budgeting?month=`), not a Server Action.
+
+**One new read function required on Recurring Income, no schema change:** `recurring-income.service.getIncomeCalendarMonth(userId, month): Promise<PaydayCalendarDay[]>` — the calendar-grouped sibling of `getExpectedUpcomingIncome`, reusing `occurrence.ts`'s existing `computeOccurrenceStatus` unchanged. See `phase-4c-technical-design.md` §2.3.
+
+### Customization (`features/settings`)
+
+| Action | Mechanism | Input | Output |
+|---|---|---|---|
+| Get preferences | Server Component direct call to `settings.service.getUserPreference(userId)` | — | `UserPreferenceView` — `{ accentColor: string \| null; currencyDisplay: string; timezone: string }` |
+| Get dashboard card layout | Server Component direct call to `settings.service.getDashboardCardPreferences(userId)` | — | `DashboardCardView[]` — one entry per `DASHBOARD_CARD_KEYS` member, merged with any saved row, row absence materialized as `{ visible: true }` appended in canonical order |
+| Update accent color | Server Action `updateAccentColor` | `UpdateAccentColorSchema { accentColor: string \| null }` | `ApiResult<UserPreferenceView>` |
+| Update currency display | Server Action `updateCurrencyDisplay` | `UpdateCurrencyDisplaySchema { currencyDisplay: "USD" \| "EUR" \| "GBP" \| "CAD" \| "AUD" \| "JPY" }` | `ApiResult<UserPreferenceView>` |
+| Update timezone (explicit, user-driven) | Server Action `updateTimezone` | `UpdateTimezoneSchema { timezone: string }` — validated against `Intl.supportedValuesOf("timeZone")` | `ApiResult<UserPreferenceView>` |
+| Capture browser-inferred timezone (one-time, automatic) | Server Action `captureInferredTimezone` | `{ timezone: string }` — no-op unless `UserPreference.timezoneConfirmed === false` | `ApiResult<UserPreferenceView>` |
+| Update one card's visibility | Server Action `updateDashboardCardVisibility` | `{ cardKey: string; visible: boolean }` — rejected with an error if this would hide the last visible card (AC3) | `ApiResult<DashboardCardView[]>` |
+| Reorder cards | Server Action `reorderDashboardCards` | `{ orderedCardKeys: string[] }` | `ApiResult<DashboardCardView[]>` |
+| Reset to default layout | Server Action `resetDashboardLayout` | — (deletes every `DashboardCardPreference` row for the user) | `ApiResult<DashboardCardView[]>` |
+
+`formatCurrency`/`formatDate` (`src/lib/utils.ts`) are extended, not replaced — every existing call site is updated to pass the caller's resolved `currencyDisplay`, per customization.md AC4's "no exceptions" requirement. See `phase-4c-technical-design.md` §3.6.
+
+**Binding, restated:** nothing in this phase reads `UserPreference.timezone` to compute any date boundary anywhere else in the app (Bills, Budgeting, Recurring Income, Dashboard, Analytics, Monthly Summaries, Notifications v2, Financial Goals, Reports, Net Worth History, or any cron job) — that consuming-logic migration is deferred, per Risk #29. The only consumer of this field in Phase 4c is its own settings-page read-back.
+
+### Admin (`features/admin`)
+
+Every action below requires the acting account to hold the `ADMIN` tier, checked via `getCurrentAdminUser()` at the top of every Server Action and at `app/admin/layout.tsx` for every page — never only at nav-render time. None of these actions is reachable by, or has any visible trace for, a non-admin user.
+
+| Action | Mechanism | Input | Output |
+|---|---|---|---|
+| List/search users | Server Component direct call to `admin.server/users.getUsers({ search?, cursor? })` | `?search=`/`?cursor=` searchParam | `AdminUserSummary[]` — email, display name, signup date, email-verification status, last-active (`MAX(Session.updatedAt)`, falling back to `createdAt`) — never a password/session token/OAuth token |
+| List/filter audit log | Server Component direct call to `admin.server/audit-log.getAuditLog({ type?, start?, end?, cursor? })` | searchParam-driven | `AuditLogEntry[]` — merges CategorySuggestion, Notification email status, the AI generation-cache tables, `ReportGenerationEvent`, and `AdminActionLog` |
+| Get feature flags | Server Component direct call to `admin.server/feature-flags.getFeatureFlags()` | — | `FeatureFlagView[]` — `{ key; enabled; updatedAt; updatedByUserId }` |
+| Toggle a feature flag | Server Action `toggleFeatureFlag` | `{ key: "AI_FEATURES" \| "EMAIL_DELIVERY" }` | `ApiResult<FeatureFlagView>` — also writes one `AdminActionLog` row |
+| Add a category-template entry | Server Action `createCategoryTemplateEntry` | `{ name: string; color: string }` | `ApiResult<SystemCategoryTemplateEntry>` — also writes one `AdminActionLog` row |
+| Edit a category-template entry | Server Action `updateCategoryTemplateEntry` | `{ id: string; name?: string; color?: string }` | `ApiResult<SystemCategoryTemplateEntry>` |
+| Reorder the category template | Server Action `reorderCategoryTemplateEntries` | `{ orderedIds: string[] }` | `ApiResult<SystemCategoryTemplateEntry[]>` |
+| Remove a category-template entry | Server Action `deleteCategoryTemplateEntry` | `{ id: string }` — rejected if this would reduce the template to zero entries (AC6) | `ApiResult<{ id: string }>` |
+| Trigger a demo-data refresh | Server Action `seedDemoData` | — (no target parameter of any kind — always the fixed `showcase@lkbudget.demo` account; unreachable, server-side, outside non-production environments) | `ApiResult<{ success: boolean }>` — also writes one `AdminActionLog` row |
+
+**`getUsers`/`getAuditLog` are this codebase's first-ever query functions not scoped to a single authenticated user's own ID** — a deliberate, narrow exception to this document's own opening rule ("all queries are scoped server-side to `getCurrentUser().id`"), safe only because both are reachable exclusively from behind `getCurrentAdminUser()`. See `phase-4c-technical-design.md` §7/§9 and risk-register #33.
+
+**Granting the `ADMIN` tier itself has no product-facing action of any kind** — per Capability 1 AC5, it is an operational script (`scripts/grant-admin.ts` or equivalent), run outside the shipped product, never a Server Action or Route Handler.
+
+### `ReportGenerationEvent` — the one addition to Reports' existing contract
+
+`GET /api/reports` (existing, unchanged signature/behavior) now writes one `ReportGenerationEvent` row (`{ userId, type, periodLabel, generatedAt }`) on the success path only, immediately before returning the PDF bytes — never on a validation failure or a genuine rendering error. This does not reopen `phase-4b-technical-design.md` §2's "no stored artifact to leak" property: the new row stores metadata about the fact that a generation happened, never the report's own bytes, numeric contents, or any ID a client could use to re-fetch it. See `phase-4c-technical-design.md` §5.

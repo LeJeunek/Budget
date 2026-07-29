@@ -601,3 +601,165 @@ src/
 - **`email-dispatch.ts` is a single shared file, not duplicated logic inside each of the six trigger files** — every trigger file's job is only "evaluate + persist an in-app Notification row"; whether/how to email it is one shared, generic step applied uniformly afterward, avoiding six near-identical copies of the same preference-check-then-send logic.
 - **No new `hooks/` folder is added to `features/reports/` or `features/notifications/`.** Report generation is a one-shot fetch-and-download; preferences toggles are ordinary Server Action + `revalidatePath` mutations — neither has a Net-Worth-History-style client-cache-refetch requirement.
 - **Three new Route Handlers this phase**, all narrow, deliberate exceptions to this codebase's two existing endpoint categories (ordinary session-authenticated `ApiResult<T>` JSON, and shared-secret cron `POST`): `app/api/reports/route.ts` (session-authenticated, but returns raw binary bytes on success), `app/api/notifications/unsubscribe/route.ts` (token-authenticated, no session, no shared secret), and `app/api/cron/evaluate-notifications/route.ts` (the fifth ordinary instance of the existing cron exception — not itself a new pattern). See `phase-4b-technical-design.md` §3/§5/§6 for the full reasoning behind each.
+
+## Phase 4c additions
+
+```
+src/
+├── app/
+│   ├── (dashboard)/
+│   │   ├── calendar/
+│   │   │   └── page.tsx              # NEW — Calendar v2, ?month=YYYY-MM searchParam, a new
+│   │   │                             #   first-class nav destination (AC13), NOT nested under
+│   │   │                             #   /bills/ — Bills' own ?view=calendar toggle (Calendar v1)
+│   │   │                             #   is untouched
+│   │   └── settings/
+│   │       ├── notifications/page.tsx  # existing Phase 4b page, unchanged
+│   │       ├── appearance/page.tsx     # NEW — accent color + dashboard card show/hide/reorder
+│   │       └── preferences/page.tsx    # NEW — currency display + timezone
+│   ├── admin/                         # NEW top-level route segment — sibling to (auth)/ and
+│   │   │                              #   (dashboard)/, not nested inside either (see
+│   │   │                              #   phase-4c-technical-design.md §1.4)
+│   │   ├── layout.tsx                  # getCurrentAdminUser() guard → redirect("/") if null
+│   │   ├── page.tsx                    # redirects to /admin/users
+│   │   ├── users/page.tsx
+│   │   ├── audit-log/page.tsx
+│   │   ├── feature-flags/page.tsx
+│   │   ├── categories/page.tsx         # Manage Categories (the starter template) — deliberately
+│   │   │                              #   NOT under /settings/ or /categories/, since it edits a
+│   │   │                              #   global template, not a per-user resource
+│   │   └── demo-data/page.tsx
+│   │
+│   │                                   # Zero new Route Handlers anywhere in Phase 4c — every
+│   │                                   #   read is a Server Component direct call or searchParam
+│   │                                   #   navigation, every write is a Server Action (see
+│   │                                   #   phase-4c-technical-design.md §7.2)
+│
+├── features/
+│   ├── calendar/                      # NEW MODULE — zero new Prisma models, pure composition
+│   │   ├── types.ts                    # CalendarMonthView, CalendarMonthDay — re-exports Bills'
+│   │   │                              #   own CalendarOccurrence, imports Recurring Income's new
+│   │   │                              #   PaydayCalendarEntry, never redefines either
+│   │   ├── server/
+│   │   │   └── service.ts              # getCalendarMonth(userId, month) — calls ONLY
+│   │   │                              #   bills.service.getCalendarMonth +
+│   │   │                              #   recurring-income.service.getIncomeCalendarMonth, zips
+│   │   │                              #   by day, marks day-1 as the reset marker. Zero Prisma
+│   │   │                              #   imports, zero status-computation logic of its own — see
+│   │   │                              #   phase-4c-technical-design.md §2.2
+│   │   └── components/
+│   │       ├── calendar-grid.tsx        # Client Component — reuses
+│   │       │                          #   components/shared/month-navigator.tsx directly
+│   │       ├── bill-entry.tsx
+│   │       ├── payday-entry.tsx
+│   │       └── budget-reset-marker.tsx
+│   │
+│   ├── bills/                         # existing Phase 2 module — UNCHANGED this phase. Calendar
+│   │   │                              #   v1's getCalendarMonth is reused, not modified, per
+│   │   │                              #   api-contracts.md's existing "Calendar v1 ... unchanged
+│   │   │                              #   through Phase 4b — Calendar v2 is Phase 4c" note
+│   │   └── (no changes)
+│   │
+│   ├── recurring-income/              # existing Phase 3a module — Phase 4c adds:
+│   │   └── server/service.ts          # UPDATED: adds getIncomeCalendarMonth(userId, month) —
+│   │                                  #   the calendar-grouped sibling of getExpectedUpcomingIncome
+│   │                                  #   /getActualReceivedIncomeBySource, reusing occurrence.ts's
+│   │                                  #   existing computeOccurrenceStatus unchanged, plus a direct
+│   │                                  #   IrregularIncomeEvent read for logged-only entries (AC7).
+│   │                                  #   No schema change.
+│   │
+│   ├── categories/                    # existing Phase 1 module — Phase 4c adds:
+│   │   └── server/template.ts         # NEW — owns SystemCategoryTemplate: getSystemCategoryTemplate()
+│   │                                  #   (plain read, no admin check — called by both lib/auth.ts's
+│   │                                  #   signup hook and Admin's display), createTemplateEntry,
+│   │                                  #   updateTemplateEntry, reorderTemplateEntries,
+│   │                                  #   deleteTemplateEntry (business rules only — the ADMIN
+│   │                                  #   check itself lives in features/admin/server/actions.ts)
+│   │
+│   ├── reports/                       # existing Phase 4b module — Phase 4c adds:
+│   │   ├── server/service.ts          # UPDATED: generateReport writes one ReportGenerationEvent
+│   │   │                              #   row on the success path only, immediately before return
+│   │   └── server/audit.ts            # NEW — getReportGenerationEvents(options) — this
+│   │                                  #   codebase's first-ever userId-UNSCOPED read, called only
+│   │                                  #   from Admin's requireAdmin()-gated Audit Log page
+│   │
+│   ├── settings/                      # NEW MODULE (named to match the existing /settings/ route
+│   │   │                              #   namespace Phase 4b's notification-preferences screen
+│   │   │                              #   already established — not features/customization/)
+│   │   ├── types.ts                    # UserPreferenceView, DashboardCardView, AccentColorOption
+│   │   ├── server/
+│   │   │   ├── service.ts              # getUserPreference(userId),
+│   │   │   │                          #   getDashboardCardPreferences(userId) — row-absence
+│   │   │   │                          #   materialization over features/dashboard/dashboard-cards.ts's
+│   │   │   │                          #   canonical list
+│   │   │   ├── validation.ts           # AccentColorSchema, CurrencyDisplaySchema, TimezoneSchema
+│   │   │   │                          #   (Intl.supportedValuesOf("timeZone")-backed, no new
+│   │   │   │                          #   dependency), UpdateDashboardCardVisibilitySchema,
+│   │   │   │                          #   ReorderDashboardCardsSchema
+│   │   │   └── actions.ts              # updateAccentColor, updateCurrencyDisplay, updateTimezone,
+│   │   │                              #   captureInferredTimezone (browser-inference only, §3.3),
+│   │   │                              #   updateDashboardCardVisibility, reorderDashboardCards,
+│   │   │                              #   resetDashboardLayout
+│   │   └── components/
+│   │       ├── timezone-auto-capture.tsx  # Client Component, mounted once in
+│   │       │                          #   app/(dashboard)/layout.tsx — no visible UI
+│   │       ├── accent-color-picker.tsx
+│   │       ├── currency-display-select.tsx
+│   │       ├── timezone-select.tsx
+│   │       └── dashboard-layout-editor.tsx
+│   │
+│   ├── dashboard/                     # existing Phase 1/3b/4a module — Phase 4c adds:
+│   │   └── dashboard-cards.ts         # NEW feature-root constant — DASHBOARD_CARD_KEYS, the
+│   │                                  #   single canonical, ordered source of what Dashboard cards
+│   │                                  #   exist, mirroring DEFAULT_CATEGORIES's own "single source
+│   │                                  #   of truth" framing. Imported by features/settings/ AND by
+│   │                                  #   Dashboard's own page — neither hardcodes a second copy
+│   │
+│   └── admin/                         # NEW MODULE — this codebase's largest fan-in leaf yet
+│       ├── types.ts                    # AdminUserSummary, AuditLogEntry, FeatureFlagView
+│       ├── server/
+│       │   ├── users.ts                # getUsers({ search?, cursor? }) — cross-user, admin-only
+│       │   │                          #   read over Better Auth's own User/Session; "last active"
+│       │   │                          #   = MAX(Session.updatedAt), falling back to createdAt
+│       │   ├── audit-log.ts            # getAuditLog({ type?, start?, end?, cursor? }) — merges
+│       │   │                          #   CategorySuggestion, Notification.emailSentAt/
+│       │   │                          #   emailSendError, the AI generation-cache tables,
+│       │   │                          #   ReportGenerationEvent, and AdminActionLog into one
+│       │   │                          #   filterable, paginated view — a pure composition layer,
+│       │   │                          #   zero business logic of its own
+│       │   ├── feature-flags.ts        # getFeatureFlags() — thin read over lib/feature-flags.ts's
+│       │   │                          #   own FeatureFlag table
+│       │   ├── demo-data.ts            # triggerDemoDataSeed() — thin, no-parameter wrapper around
+│       │   │                          #   the EXISTING prisma/seed-showcase.ts script; environment-
+│       │   │                          #   gated server-side, never client-side only
+│       │   └── actions.ts              # toggleFeatureFlag, seedDemoData,
+│       │                              #   createCategoryTemplateEntry, updateCategoryTemplateEntry,
+│       │                              #   reorderCategoryTemplateEntries, deleteCategoryTemplateEntry
+│       │                              #   — every one calls getCurrentAdminUser() FIRST, then
+│       │                              #   delegates to the owning domain's own function, then
+│       │                              #   writes one AdminActionLog row
+│       └── components/
+│           ├── user-table.tsx          # reuses components/ui/data-table/ directly — no new table
+│           ├── audit-log-table.tsx     #   primitive
+│           ├── feature-flag-toggle.tsx
+│           ├── category-template-editor.tsx
+│           └── seed-demo-data-button.tsx
+│
+└── lib/
+    └── feature-flags.ts               # NEW MODULE — isFeatureEnabled(key: FeatureFlagKey):
+                                        #   Promise<boolean>, fails OPEN on a read error. Read from
+                                        #   inside lib/ai/generate-structured-output.ts and
+                                        #   lib/email/send-notification-email.ts (a lib/-to-lib/
+                                        #   dependency, NOT a new lib/ai/ call site — see
+                                        #   phase-4c-technical-design.md §6)
+```
+
+### Rationale notes
+
+- **`features/calendar/` is a new feature module, not an extension of `features/bills/`** (unlike Calendar v1, which correctly lived inside Bills' own module). The deciding difference: Bills and Recurring Income are not permitted to import each other directly (`Architecture.md`'s Phase 3a dependency graph), so composing both requires a third, neutral leaf module — the same "leaf, zero-cycle-risk" shape already established for Financial Goals/Financial Health Score/Reports. See `phase-4c-technical-design.md` §2.1 for the full reasoning.
+- **`features/settings/` is named to match the already-shipped `/settings/notifications` route namespace** (Phase 4b), not `features/customization/` — one settings surface, one naming convention, even though Notifications' own preferences stay owned by `features/notifications/` (a shared route namespace, not a module merge).
+- **`features/dashboard/dashboard-cards.ts` — the canonical card-key list — lives in Dashboard, not Settings**, because Dashboard is the domain that actually knows what cards exist; Settings only stores preferences *about* an enumeration it doesn't own. This is the same ownership-direction discipline already applied everywhere else in this codebase (a cross-cutting read/constant lives with the domain that defines the concept, not the domain that merely consumes it).
+- **`features/admin/server/audit-log.ts` and `features/reports/server/audit.ts`'s `getReportGenerationEvents` are this codebase's first-ever query functions not scoped to a single authenticated user's own ID** — a deliberate, narrow, explicitly-flagged exception (risk-register #33), safe only because every call site sits behind `getCurrentAdminUser()`.
+- **`app/admin/` is a new top-level route segment, sibling to `(auth)/` and `(dashboard)/`, not nested inside either** — Admin's own Business Value requires operational tooling stay "completely separate from the consumer product," a structurally different concern from either existing layout tree.
+- **Zero new Route Handlers in Phase 4c** — Calendar v2 and Settings are Server-Component-read/Server-Action-write only (no client-refetch hook need, same reasoning already applied to Reports/Notifications in Phase 4b), and Admin's View Users search/pagination is searchParam navigation, not a client fetch hook, mirroring Transactions'/Bills'/Budgeting's own existing convention.
+- **`lib/feature-flags.ts` is placed in `lib/`, not inside `features/admin/`, for a forcing reason, not a preference** — `lib/ai/` and `lib/email/` must each check it from their own single existing choke point, and this codebase's own binding module-boundary rule already forbids either of those files from importing a feature module. See `phase-4c-technical-design.md` §6 for the full reasoning.

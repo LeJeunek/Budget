@@ -1,10 +1,12 @@
-# FinanceOS — Architecture (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b + Phase 4a + Phase 4b foundation)
+# FinanceOS — Architecture (Phase 0 + Phase 1 + Phase 2 + Phase 3a + Phase 3b + Phase 4a + Phase 4b + Phase 4c foundation)
 
-Scope: repo skeleton (Phase 0), the Accounts/Transactions/Dashboard-v1 domain (Phase 1), Budgeting/Savings Goals/Bills/Calendar v1/Notifications v1 plus the Transactions receipt-attachment addendum (Phase 2), Debt Tracker/Investments/Recurring Income plus the Net Worth aggregation update and Net Worth Snapshot job (Phase 3a), the Net Worth History chart, the Analytics suite, and Financial Goals (Phase 3b), the five AI features (Phase 4a), and Reports/Notifications v2 (Phase 4b), per [docs/planning/roadmap.md](../planning/roadmap.md). Later phases extend this document; they do not replace it.
+Scope: repo skeleton (Phase 0), the Accounts/Transactions/Dashboard-v1 domain (Phase 1), Budgeting/Savings Goals/Bills/Calendar v1/Notifications v1 plus the Transactions receipt-attachment addendum (Phase 2), Debt Tracker/Investments/Recurring Income plus the Net Worth aggregation update and Net Worth Snapshot job (Phase 3a), the Net Worth History chart, the Analytics suite, and Financial Goals (Phase 3b), the five AI features (Phase 4a), Reports/Notifications v2 (Phase 4b), and Calendar v2/Customization/Admin (Phase 4c), per [docs/planning/roadmap.md](../planning/roadmap.md). Later phases extend this document; they do not replace it.
 
 **Phase 4a status note — this document is a pointer, not the source of truth, for AI-specific decisions.** Phase 4a's substantial technical design (LLM provider/approach, `lib/ai/`'s internal module boundaries, the Zod structured-output pattern, prompt-injection defenses, the fallback contract, and cost/latency bounds for all five AI features) is documented in full in **[docs/architecture/ai-features-design.md](ai-features-design.md)**, written by the AI Engineer per `roadmap.md`'s Phase 4a milestone 2. That document is already substantial (390+ lines) and explicitly recommended a short pointer from this file rather than folding its content in — this section is that pointer, plus the pieces that document deliberately left to this Architect: where `lib/ai/` and each feature's AI-owned files sit in the overall module map, the five features' API-surface classification (documented fully in `api-contracts.md`'s new Phase 4a section), and the Financial Health Score's historical-snapshot module-placement call (below). For any AI-internal question (why Google Gemini — revised from an initial Anthropic decision, see that document's provider-swap addendum — why `generateObject`, the retry-once policy, the grounding-verification mechanism, the categorization schema's dynamic enum technique), `ai-features-design.md` is authoritative; this document is not repeated or restated there.
 
 **Phase 4b status note — this document is a pointer, not the source of truth, for Reports/Notifications-v2-specific decisions.** Phase 4b's substantial technical design (the PDF generation library choice and its reasoning, the email delivery provider choice and its reasoning, `features/reports/` and `lib/email/`'s internal module boundaries, the per-report-type data-assembly map, the unsubscribe/preference end-to-end design, and the full `Notification` model/enum extension specification for the Database Architect) is documented in full in **[docs/architecture/phase-4b-technical-design.md](phase-4b-technical-design.md)**, written by this Solution Architect per `roadmap.md`'s Phase 4b milestone 3 — the same "substantial cross-cutting decision earns its own file, this document just points to it" pattern `ai-features-design.md` established for Phase 4a. This document's own Phase 4b section (at the end, below) only records the module-map placement and dependency-graph additions that document left to this file; `phase-4b-technical-design.md` is authoritative for the two library/provider decisions and the schema handoff.
+
+**Phase 4c status note — this document is a pointer, not the source of truth, for Calendar v2/Customization/Admin-specific decisions.** Phase 4c's substantial technical design (the admin-authorization mechanism decision and its reasoning, Calendar v2's zero-new-model composition layer, Customization's `UserPreference`/`DashboardCardPreference` schema design, the DB-backed system-category-template model and the signup-hook migration, Reports' new `ReportGenerationEvent` log, and the `lib/feature-flags.ts` primitive) is documented in full in **[docs/architecture/phase-4c-technical-design.md](phase-4c-technical-design.md)**, written by this Solution Architect per `roadmap.md`'s Phase 4c milestone 3 — the same "substantial cross-cutting decision earns its own file, this document just points to it" pattern `ai-features-design.md` and `phase-4b-technical-design.md` both established. This document's own Phase 4c section (at the end, below) only records the module-map placement and dependency-graph additions that document left to this file; `phase-4c-technical-design.md` is authoritative for the five schema decisions and the feature-flag-primitive recommendation.
 
 **Phase 3a status note (unchanged):** the `Account`-linkage schema question (Risk #9, roadmap.md Phase 3a section) is resolved — see "Phase 3a — the Account-linkage handoff" below.
 
@@ -638,3 +640,72 @@ phase-4b-technical-design.md §8).
 - **(Phase 4b) `lib/email/` is this codebase's second cross-feature module with an outbound third-party network dependency** (after `lib/ai/`'s Gemini call) — isolated to exactly one file (`client.ts`), same containment pattern, so a future provider swap or an outage of the provider itself can never propagate past that one file's contract.
 - **(Phase 4b) `evaluate-notifications` is this codebase's fifth cron route and its first whose per-user iteration has an externally visible, irreversible side effect (an email send)** — every prior cron (`net-worth-snapshot`, `categorize-transactions`, `monthly-summary`, `financial-health-score-snapshot`) only ever wrote to that same user's own database rows, recoverable by a corrective write if a bug were found. Flagged as risk-register item #21 — see `phase-4b-technical-design.md` §5/§8 for the structural mitigation (single data-construction point per user per event, no batch/merge-variable send API).
 - **(Phase 4b) `FinancialGoal.completionNotifiedAt` and `Account.lowBalanceNotifiedAt` are this codebase's first "notification-fired latch" fields living on a *source* domain's own model** (rather than being derivable purely from the `Notification` table's own unique constraints, as Large Purchase and Monthly Summary both are) — flagged for visibility since it's an easy-to-miss asymmetry across the four new trigger types; see `phase-4b-technical-design.md` §7.6 for the full per-trigger breakdown of what genuinely needs new persisted state versus what doesn't.
+
+---
+
+## Phase 4c — Calendar v2, Customization, Admin
+
+Per `roadmap.md`'s Phase 4c section, `docs/product/calendar-v2.md`, `docs/product/customization.md`, `docs/product/admin.md`, and **[docs/architecture/phase-4c-technical-design.md](phase-4c-technical-design.md)** (this Architect's own full technical design — the admin-authorization mechanism, Calendar v2's composition layer, Customization's preferences model, the system-category-template model, the Reports generation-event log, and the feature-flag primitive). This section records only the module-map placement and dependency-graph additions that document left to this file, mirroring exactly how the Phase 4b section above handles the identical split with `phase-4b-technical-design.md`.
+
+### Three new modules, one small extension to `lib/`, one extension to `features/categories/` and `features/reports/` — none of them touching `lib/ai/`
+
+- **`features/calendar/`** — NEW feature module. A pure "leaf" consumer, structurally identical to Financial Goals/Financial Health Score/Reports: it reads from Bills and Recurring Income, composes them plus a pure date fact about Budgeting's month boundary, and nothing ever reads from it. **Zero new Prisma models** — this is a read-only composition layer over already-existing data, per the CTO kickoff pass's own confirmed scope. See `phase-4c-technical-design.md` §2 for why this could not simply extend `features/bills/` (Calendar v1's own home) the way v1 did, and for the one new, narrow read function required on Recurring Income (`getIncomeCalendarMonth`, no schema change).
+- **`features/settings/`** — NEW feature module, named to match the `/settings/` route namespace Phase 4b's notification-preferences screen already established (not `features/customization/`). Owns two new models: `UserPreference` (1:1 with `User`, eagerly seeded at signup — accent color, currency display, timezone) and `DashboardCardPreference` (1:many, lazily materialized, row-absence-as-default, mirroring `NotificationPreference`'s existing shape). See `phase-4c-technical-design.md` §3 for the full schema design, the browser-timezone-capture race-safety mechanism, and the String-not-enum reasoning applied to `cardKey`/`accentColor`/`currencyDisplay`.
+- **`features/admin/`** — NEW feature module, this codebase's largest fan-in leaf yet (reads across Better Auth's own `User`/`Session`, Transactions' `CategorySuggestion`, Notifications' `Notification`, the AI generation-cache tables, and Reports' new `ReportGenerationEvent`, plus owns its own `AdminActionLog`). Route-isolated at `app/admin/` (a new top-level segment, sibling to `(auth)`/`(dashboard)`, not nested inside either) behind a `getCurrentAdminUser()`-gated layout. See `phase-4c-technical-design.md` §1/§7 for the authorization-mechanism decision (a plain `role` column via Better Auth's `additionalFields`, not the official `admin` plugin) and the full module/route layout.
+- **`features/categories/`** — existing Phase 1 module, extended with one new file (`server/template.ts`) owning the new, first-ever-global `SystemCategoryTemplate` model. `src/lib/auth.ts`'s signup hook is migrated to read from it instead of the `DEFAULT_CATEGORIES` constant. See `phase-4c-technical-design.md` §4.
+- **`features/reports/`** — existing Phase 4b module, extended with one new model (`ReportGenerationEvent`) and one new file (`server/audit.ts`, exposing this codebase's first-ever `userId`-unscoped read, called only from Admin's `requireAdmin()`-gated Audit Log page). See `phase-4c-technical-design.md` §5.
+- **`lib/feature-flags.ts`** — NEW small cross-feature infrastructure module, placed in `lib/` for a forcing reason, not a stylistic one: `lib/ai/` and `lib/email/` both must check a flag from inside their own single existing choke point (`generate-structured-output.ts`, `send-notification-email.ts`), and this codebase's own binding module-boundary rule already forbids either of those files from importing a feature module — the flag-check primitive has to live in `lib/` for that rule to keep holding. See `phase-4c-technical-design.md` §6.
+
+### Module boundary table additions
+
+| Folder | Owner | May import from | Must NOT import from |
+|---|---|---|---|
+| `features/calendar/server/` | Backend Engineer | `lib/db.ts`, `lib/auth.ts`, `features/bills/server/service.ts`, `features/recurring-income/server/service.ts` (explicit, individually-exported service calls only — never direct Prisma reach-through into either domain's tables) | `app/`, `components/`, `lib/ai/`, `features/budgeting/` (the budget-reset marker is a pure date computation, never a Budgeting query — see `phase-4c-technical-design.md` §2.2) |
+| `features/settings/server/` | Backend Engineer | `lib/db.ts`, `lib/auth.ts`, `features/dashboard/dashboard-cards.ts` (the canonical card-key constant, read-only) | `app/`, `components/`, `lib/ai/` |
+| `features/admin/server/` | Backend Engineer | `lib/db.ts`, `lib/auth.ts` (specifically `getCurrentAdminUser()`), `lib/feature-flags.ts`, other domains' server code only via explicit, individually-exported, deliberately `userId`-unscoped cross-user reads (`features/reports/server/audit.ts`, and equivalent narrow reads on Transactions/Notifications) — a documented, narrow exception to the standing "every query scoped by the authenticated user's own ID" rule, gated entirely by this module's own authorization layer | `app/`, `components/`, `lib/ai/` |
+| `lib/feature-flags.ts` | Backend Engineer | `lib/db.ts` only | `app/`, `components/`, any `features/*`, `lib/ai/`, `lib/email/` — same one-directional "pure fan-in leaf" rule every other `lib/` infrastructure module already follows; `lib/ai/` and `lib/email/` import **from** it, it never imports from either |
+
+### Dependency graph additions
+
+```
+Bills, Recurring Income                    (existing — each read live, never re-derived)
+        │            │
+        └─────┬──────┘
+              ↓
+   features/calendar/server/service.ts        (NEW leaf module — pure composition, zero business
+                                                logic, zero Prisma imports of its own — see
+                                                phase-4c-technical-design.md §2.2)
+
+features/dashboard/dashboard-cards.ts    →    features/settings/server/service.ts   (NEW leaf —
+                                                DashboardCardPreference row-absence materialization)
+
+Better Auth User/Session, Transactions' CategorySuggestion, Notifications' Notification,
+the AI generation-cache tables, Reports' NEW ReportGenerationEvent   (existing/extended)
+        │              │                    │                  │
+        └──────┬───────┴──────────┬─────────┴──────────┬───────┘
+               ↓                  ↓                     ↓
+                    features/admin/server/{users,audit-log}.ts   (NEW leaf module — this
+                                     │                             codebase's largest fan-in yet)
+                                     ↓
+                    features/admin/server/actions.ts   →   features/categories/server/template.ts
+                                                            (SystemCategoryTemplate mutations)
+
+lib/ai/generate-structured-output.ts   ─────┐
+lib/email/send-notification-email.ts  ─────┼──▶  lib/feature-flags.ts  (NEW lib/ leaf — never
+                                             │     imports back into lib/ai/, lib/email/, or any
+features/admin/server/feature-flags.ts ─────┘     feature)
+
+lib/ai/ and lib/email/ never import back into any feature (unchanged) — and, new this phase,
+NEITHER features/calendar/, features/settings/, NOR features/admin/ ever imports from lib/ai/
+at all, confirmed by extending the existing ESLint no-restricted-imports rule to all three
+directories (see phase-4c-technical-design.md §9).
+```
+
+### Risks / scalability notes (Phase 4c)
+
+- **(Phase 4c) `features/admin/`'s two cross-user reads (`users.ts`, `audit-log.ts`) and `features/reports/server/audit.ts`'s `getReportGenerationEvents` are this codebase's first-ever query functions not scoped to a single authenticated user's own ID** — a deliberate, narrow exception to Risk #4's standing rule, safe only because every call site is behind `getCurrentAdminUser()`. Flagged as risk-register item #33, the headline concern for the Security Architect's 4c review gate alongside admin-authorization privilege escalation itself.
+- **(Phase 4c) `lib/feature-flags.ts` is this codebase's second small `lib/`-level infrastructure module added this phase** (after nothing new in 4a/4b beyond `lib/email/`) — it sits on the AI/email hot path, so a read failure must fail open (features stay enabled), never closed; flagged as risk-register item #34.
+- **(Phase 4c) `SystemCategoryTemplate` is this schema's first genuinely global, non-per-user table** — every other model to date carries a `userId` FK. Requires a one-time, ordered deploy-time seed (from today's `DEFAULT_CATEGORIES` constant) before the signup hook is switched over; flagged as risk-register item #35, the same category of required operational step as Phase 4b's `FinancialGoal.completionNotifiedAt` backfill.
+- **(Phase 4c) Several new fields are deliberately plain, application-validated `String` columns rather than DB enums** (`DashboardCardPreference.cardKey`, `FeatureFlag.key`, `UserPreference.accentColor`/`currencyDisplay`) — each set is explicitly expected to grow over time without a schema migration; a stale/renamed key must degrade gracefully at read time, never crash a render. Flagged as risk-register item #36.
+- **(Phase 4c) `AdminActionLog` is a genuinely new persistence need this pass identified, beyond the CTO's five enumerated schema questions** — a load-bearing prerequisite for Admin's own Feature Flags/Manage Categories/Seed Demo Data capabilities to satisfy their own "this action is worth recording" requirement. Flagged as risk-register item #37.
+- **(Phase 4c) Better Auth's official `admin` plugin is evaluated in full and explicitly rejected** (`phase-4c-technical-design.md` §1.2) in favor of a plain `role` column wired via Better Auth's `additionalFields` mechanism — the plugin remains an installed dependency of the base package but is never enabled via `plugins: [...]`; flagged as risk-register item #38 so a future engineer doesn't assume it is active.
