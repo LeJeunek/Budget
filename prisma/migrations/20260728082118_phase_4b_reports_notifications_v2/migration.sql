@@ -92,23 +92,38 @@ WHERE fg."type" = 'NET_WORTH_SAVINGS_TARGET'
     WHERE fga."financialGoalId" = fg.id
   ) >= fg."targetAmount";
 
--- NOTE (flagged, not resolved by this migration): SAVINGS_RATE_TARGET goals
--- are DELIBERATELY NOT backfilled above. This type's completion formula
--- (financial-goals.md's own read-time definition, evaluated against
--- whichever "current" savings-rate figure and time window
--- dashboard.service.computeSavingsRate resolves to) is not yet implemented
--- in this codebase as of this migration (no features/financial-goals or
--- features/dashboard server code exists yet — schema/design phase only) and
--- cannot be faithfully replicated in raw SQL without guessing at that
--- window. Known, accepted consequence: any SAVINGS_RATE_TARGET goal that is
--- already at/above its target percent at feature-launch time will fire one
--- (and only one, per the @@unique([financialGoalId, type]) guarantee)
--- retroactive GOAL_ACHIEVED notification the first time it is evaluated,
--- rather than being silently suppressed like the other two types. Before
--- goal-achieved-trigger.ts ships, re-run an equivalent backfill UPDATE for
--- this type using that formula once it exists, or explicitly accept this gap
--- — flagged for the Backend Engineer/Solution Architect, not silently
--- decided here.
+-- NOTE (originally flagged here, now CLOSED — see below): SAVINGS_RATE_TARGET
+-- goals were DELIBERATELY NOT backfilled above, at the time this migration
+-- was authored. This type's completion formula (financial-goals.md's own
+-- read-time definition, evaluated against whichever "current" savings-rate
+-- figure and time window dashboard.service.computeSavingsRate resolves to)
+-- was not yet implemented in this codebase as of this migration (no
+-- features/financial-goals or features/dashboard server code existed yet —
+-- schema/design phase only) and could not be faithfully replicated in raw
+-- SQL without guessing at that window. This comment originally asked the
+-- Backend Engineer/Solution Architect to either re-run an equivalent
+-- backfill once that formula existed, or explicitly accept the gap, before
+-- goal-achieved-trigger.ts shipped.
+--
+-- Resolution: goal-achieved-trigger.ts shipped without that follow-up ever
+-- happening (caught at the Phase 4b release gate — see
+-- docs/release/phase-4b-notes.md Section 1 and
+-- docs/planning/risk-register.md's SAVINGS_RATE_TARGET backfill entry). The
+-- gap is now closed via a one-time, idempotent TypeScript backfill script —
+-- prisma/backfill-savings-rate-goal-notifications.ts (run via
+-- `npm run backfill:savings-rate-completion`) — which reuses the actual
+-- `computeCurrentRollingSavingsRatePercent`/`getFinancialGoalCompletionStatus`
+-- logic (src/features/financial-goals/server/service.ts, genuinely available
+-- now, unlike at the time this migration was written) rather than
+-- replicating that formula a second time in raw SQL, which is exactly the
+-- fragility this comment originally warned against. This already-applied
+-- migration's executable SQL is intentionally left unchanged (never edit a
+-- migration after it has run against a database) — only this comment was
+-- updated, so a future reader does not mistake "flagged, not silently
+-- decided here" for a still-open gap. That script must be run once against
+-- each environment (including production) before/during the Phase 4b
+-- deploy — it is an operational step, not something that runs
+-- automatically.
 
 -- AlterTable
 ALTER TABLE "notification" ADD COLUMN     "accountId" TEXT,
