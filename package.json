@@ -19,6 +19,7 @@
     "db:seed": "prisma db seed",
     "seed:showcase": "tsx prisma/seed-showcase.ts",
     "backfill:savings-rate-completion": "tsx prisma/backfill-savings-rate-goal-notifications.ts",
+    "grant:admin": "tsx scripts/grant-admin.ts",
     "db:studio": "prisma studio"
   },
   "dependencies": {

@@ -110,6 +110,33 @@ const eslintConfig = [
       ],
     },
   },
+  {
+    // Phase 4c, `features/admin/` — the same build-time enforcement as
+    // `features/reports/**`/`features/notifications/**` above, for the
+    // identical reason (phase-4c-technical-design.md §9's explicit
+    // recommendation): admin.md's carried-over scope item 4 states none of
+    // Admin's six capabilities generate, call, or depend on AI-generated
+    // content — the Audit Log capability only *surfaces* records of AI
+    // feature usage 4a/4b already produced (via the already-existing
+    // generation-cache tables' own `generatedAt`/nullable-content columns),
+    // it never calls a model itself. This rule turns that "zero new lib/ai/
+    // call sites" confirmation into a build-time-enforced guarantee.
+    files: ["src/features/admin/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/lib/ai", "@/lib/ai/*"],
+              message:
+                "features/admin/** must never import from lib/ai/, directly or transitively — admin.md's carried-over scope item 4. The Audit Log surfaces already-persisted records of AI feature usage (generation-cache tables' generatedAt/nullable-content signal); it never generates new AI content itself.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ];
 
 export default eslintConfig;
