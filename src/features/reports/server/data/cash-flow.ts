@@ -16,7 +16,7 @@ import type { ResolvedPeriod } from "../period"
 export async function assembleCashFlowReportData(
   userId: string,
   period: ResolvedPeriod,
-): Promise<Omit<CashFlowReportData, "type" | "period" | "generatedAt">> {
+): Promise<Omit<CashFlowReportData, "type" | "period" | "generatedAt" | "currency">> {
   // See `expense.ts`'s identical note on `getEarliestTransactionDate` — Cash
   // Flow needs the earliest month with *either* income or expense activity
   // (no `direction` filter), matching what "cash flow" conceptually spans.

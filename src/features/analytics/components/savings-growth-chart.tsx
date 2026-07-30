@@ -30,8 +30,11 @@ import {
   YAxis,
 } from "recharts"
 
-import { formatCurrency } from "@/lib/utils"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  useCurrencyDisplay,
+  useFormatCurrency,
+} from "@/app/(dashboard)/currency-preference-provider"
 
 import type { SavingsGrowthPoint } from "../types"
 import { formatCompactCurrency, formatMonthLabel } from "./chart-format"
@@ -41,6 +44,8 @@ export interface SavingsGrowthChartProps {
 }
 
 export function SavingsGrowthChart({ data }: SavingsGrowthChartProps) {
+  const formatCurrency = useFormatCurrency()
+  const currency = useCurrencyDisplay()
   const hasAnyMonth = data.some((point) => point.actualSavings !== null)
 
   if (data.length === 0 || !hasAnyMonth) {
@@ -92,7 +97,7 @@ export function SavingsGrowthChart({ data }: SavingsGrowthChartProps) {
                 stroke="var(--muted-foreground)"
                 fontSize={12}
                 width={56}
-                tickFormatter={formatCompactCurrency}
+                tickFormatter={(value) => formatCompactCurrency(value, currency)}
               />
               <Tooltip
                 formatter={(value) =>

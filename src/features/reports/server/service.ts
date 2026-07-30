@@ -1,4 +1,5 @@
 import { db } from "@/lib/db"
+import { getUserPreference } from "@/features/settings/server/service"
 
 import { assembleCashFlowReportData } from "./data/cash-flow"
 import { assembleExpenseReportData } from "./data/expense"
@@ -106,9 +107,19 @@ export async function generateReport(
     return { status: "error", message: "This period hasn't happened yet." }
   }
 
+  // Phase 4c (phase-4c-technical-design.md §3.6, docs/release/
+  // phase-4c-notes.md §1's blocking finding): resolved once, alongside this
+  // function's existing `userId`-scoped setup, and threaded onto `meta` —
+  // never a second, independently-resolved currency lookup downstream. This
+  // is a pure display-formatting input to `renderReportPdf`'s templates
+  // (`ReportMeta.currency`'s own JSDoc); it never reaches, and cannot affect,
+  // any of the numeric figures `assembleReportData` computes below.
+  const { currencyDisplay } = await getUserPreference(userId)
+
   const meta: ReportMeta = {
     period: toReportPeriodView(resolution.period),
     generatedAt: new Date().toISOString(),
+    currency: currencyDisplay,
   }
 
   const data = await assembleReportData(userId, request, resolution.period, meta)

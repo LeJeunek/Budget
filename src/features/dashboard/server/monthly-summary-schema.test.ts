@@ -30,6 +30,7 @@ function promptInput(
     netWorthChange: 1500,
     topCategories: [{ categoryName: "Groceries", amount: 600 }],
     largestPurchase: { merchant: "Best Buy", categoryName: "Electronics", amount: 899 },
+    currency: "USD",
     ...overrides,
   }
 }
@@ -164,5 +165,19 @@ describe("buildMonthlySummaryPromptContext", () => {
 
     expect(input.topCategories[0]!.categoryName).toBe(adversarialName)
     expect(input.largestPurchase!.merchant).toBe(adversarialName)
+  })
+
+  // (Release-gate fix, phase-4c-notes.md Section 1 follow-up) `currency` is
+  // a formatting instruction for the model's prose, not a fact to verify --
+  // it must never leak into groundingData, which
+  // verify-grounding.ts/verify-narrative-safety.ts only ever check against
+  // real cited numbers.
+  it("passes currency through to promptInput but never into groundingData", () => {
+    const { promptInput: input, groundingData } = buildMonthlySummaryPromptContext(
+      promptInput({ currency: "EUR" }),
+    )
+
+    expect(input.currency).toBe("EUR")
+    expect(groundingData).not.toHaveProperty("currency")
   })
 })

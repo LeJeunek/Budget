@@ -14,6 +14,10 @@ import { formatCurrency } from "./format"
 export interface BudgetOverEmailProps {
   categoryName: string
   allocated: number
+  /** Phase 4c: the recipient's own resolved `UserPreference.currencyDisplay`,
+   * threaded from `email-dispatch.ts` — see `./format.ts`'s `formatCurrency`
+   * JSDoc for the full cross-user-leakage rationale. */
+  currency: string
   unsubscribeUrl: string
   preferencesUrl: string
 }
@@ -21,6 +25,7 @@ export interface BudgetOverEmailProps {
 export function BudgetOverEmail({
   categoryName,
   allocated,
+  currency,
   unsubscribeUrl,
   preferencesUrl,
 }: BudgetOverEmailProps) {
@@ -33,7 +38,7 @@ export function BudgetOverEmail({
     >
       <Text style={{ fontSize: "14px", color: "#374151" }}>
         Your spending in <strong>{categoryName}</strong> has gone over its
-        allocated budget of {formatCurrency(allocated)} for this month.
+        allocated budget of {formatCurrency(allocated, currency)} for this month.
       </Text>
     </NotificationEmailLayout>
   )

@@ -63,6 +63,18 @@ export interface BudgetAdvisorPromptInput {
    * render"), but typed as nullable rather than assumed-always-present so
    * this DTO stays honest about `getBudgetHealthScore`'s own return type. */
   budgetHealthScore: BudgetHealthScore | null
+  /**
+   * (Release-gate fix, phase-4c-notes.md Section 1 follow-up) The user's
+   * chosen display currency -- one of `UserPreference.currencyDisplay`'s
+   * ISO 4217 codes (`USD`/`EUR`/`GBP`/`CAD`/`AUD`/`JPY`), resolved via
+   * `features/settings/server/service.ts`'s `getUserPreference` alongside
+   * this feature's other already-fetched data (`advisor.ts`'s own
+   * `Promise.all` call sites) -- never a new aggregation. A formatting
+   * instruction for the model's prose, not a fact to verify: deliberately
+   * excluded from `buildAdvisorPromptContext`'s `groundingData` map below,
+   * since it is not itself a number `citedFigures` could ever cite.
+   */
+  currency: string
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +168,11 @@ export interface BudgetAdvisorRecommendations {
  * (see those files' own doc comments), so the key scheme only needs to keep
  * every legitimate figure's own object-key slot from colliding with
  * another's, never to be human-readable or stable across calls.
+ *
+ * `currency` (Release-gate fix, phase-4c-notes.md Section 1 follow-up) is
+ * passed straight through onto `promptInput` and deliberately never touches
+ * `groundingData` -- see `BudgetAdvisorPromptInput.currency`'s own doc
+ * comment for why.
  */
 export function buildAdvisorPromptContext(
   month: string,
@@ -166,6 +183,7 @@ export function buildAdvisorPromptContext(
   })[],
   totals: BudgetMonthTotals,
   budgetHealthScore: BudgetHealthScore | null,
+  currency: string,
 ): {
   promptInput: BudgetAdvisorPromptInput
   groundingData: Record<string, number>
@@ -197,7 +215,7 @@ export function buildAdvisorPromptContext(
   }
 
   return {
-    promptInput: { month, categories, totals, budgetHealthScore },
+    promptInput: { month, categories, totals, budgetHealthScore, currency },
     groundingData,
   }
 }

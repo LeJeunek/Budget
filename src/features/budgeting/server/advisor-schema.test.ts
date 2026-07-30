@@ -99,6 +99,7 @@ describe("buildAdvisorPromptContext", () => {
       categories,
       totals,
       { score: 85, label: "Good" },
+      "USD",
     )
 
     expect(promptInput.categories[0]).toMatchObject({
@@ -125,6 +126,7 @@ describe("buildAdvisorPromptContext", () => {
       categories,
       totals,
       null,
+      "USD",
     )
 
     expect(promptInput.categories[0]!.percentUsed).toBe(92)
@@ -141,6 +143,7 @@ describe("buildAdvisorPromptContext", () => {
       categories,
       totals,
       null,
+      "USD",
     )
 
     expect(promptInput.budgetHealthScore).toBeNull()
@@ -154,7 +157,7 @@ describe("buildAdvisorPromptContext", () => {
     ]
     const totals = { totalAllocated: 300, totalSpent: 260, totalRemaining: 40 }
 
-    const { groundingData } = buildAdvisorPromptContext("2026-07", categories, totals, null)
+    const { groundingData } = buildAdvisorPromptContext("2026-07", categories, totals, null, "USD")
 
     // Both categories' distinct figures must survive -- a naive name-keyed
     // map would let the second "Misc" silently overwrite the first's values.
@@ -168,7 +171,7 @@ describe("buildAdvisorPromptContext", () => {
       budgetedCategory({ categoryName: "Dining", allocated: 300, spent: 276, remaining: 24, percentUsed: 92 }),
     ]
     const totals = { totalAllocated: 300, totalSpent: 276, totalRemaining: 24 }
-    const { groundingData } = buildAdvisorPromptContext("2026-07", categories, totals, null)
+    const { groundingData } = buildAdvisorPromptContext("2026-07", categories, totals, null, "USD")
 
     expect(verifyGrounding([{ label: "Dining percentUsed", value: 92 }], groundingData)).toBe(
       true,
@@ -183,7 +186,7 @@ describe("buildAdvisorPromptContext", () => {
       budgetedCategory({ categoryName: "Dining", allocated: 300, spent: 276, remaining: 24, percentUsed: 91.6666666 }),
     ]
     const totals = { totalAllocated: 300, totalSpent: 276, totalRemaining: 24 }
-    const { groundingData } = buildAdvisorPromptContext("2026-07", categories, totals, null)
+    const { groundingData } = buildAdvisorPromptContext("2026-07", categories, totals, null, "USD")
 
     expect(
       verifyNarrativeSafety(
@@ -201,7 +204,7 @@ describe("buildAdvisorPromptContext", () => {
     const categories = [budgetedCategory({ categoryName: adversarialName })]
     const totals = { totalAllocated: 300, totalSpent: 276, totalRemaining: 24 }
 
-    const { promptInput } = buildAdvisorPromptContext("2026-07", categories, totals, null)
+    const { promptInput } = buildAdvisorPromptContext("2026-07", categories, totals, null, "USD")
 
     // This builder is a pure data-shaping function -- it neither redacts nor
     // rejects untrusted text itself (that is `redactText`'s job, applied by
@@ -209,5 +212,26 @@ describe("buildAdvisorPromptContext", () => {
     // neutralization at prompt-assembly time). Confirms no crash/throw and
     // the name is carried through faithfully as inert data either way.
     expect(promptInput.categories[0]!.categoryName).toBe(adversarialName)
+  })
+
+  // (Release-gate fix, phase-4c-notes.md Section 1 follow-up) `currency` is
+  // a formatting instruction for the model's prose, not a fact to verify --
+  // it must never leak into groundingData, which
+  // verify-grounding.ts/verify-narrative-safety.ts only ever check against
+  // real cited numbers.
+  it("passes currency through to promptInput but never into groundingData", () => {
+    const categories = [budgetedCategory({ categoryName: "Dining" })]
+    const totals = { totalAllocated: 300, totalSpent: 276, totalRemaining: 24 }
+
+    const { promptInput, groundingData } = buildAdvisorPromptContext(
+      "2026-07",
+      categories,
+      totals,
+      null,
+      "EUR",
+    )
+
+    expect(promptInput.currency).toBe("EUR")
+    expect(groundingData).not.toHaveProperty("currency")
   })
 })

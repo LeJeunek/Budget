@@ -22,9 +22,9 @@ import {
   ExtraPaymentInput,
   parseExtraPaymentInput,
 } from "@/features/debt/components/extra-payment-input"
-import { formatCurrency } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 
 // Mirrors payoff-math.ts's own MAX_SIMULATION_MONTHS backstop (not exported
 // from that file, since it's an internal implementation detail there — see
@@ -128,6 +128,7 @@ interface StrategyPanelProps {
 }
 
 function StrategyPanel({ title, description, summary, debtNameById }: StrategyPanelProps) {
+  const formatCurrency = useFormatCurrency()
   const isVeryLong = summary.monthsToDebtFree >= VERY_LONG_PAYOFF_MONTHS
 
   return (

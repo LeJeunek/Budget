@@ -21,9 +21,16 @@ import {
 
 export interface DividendHistoryListProps {
   dividends: DividendEntry[]
+  /** The caller's resolved `UserPreference.currencyDisplay`
+   * (docs/release/phase-4c-notes.md Section 1) — this is a Server Component
+   * (see this file's own header comment), so
+   * `app/(dashboard)/investments/[holdingId]/page.tsx` resolves this once
+   * and passes it straight through rather than this component reading a
+   * Context. */
+  currency: string
 }
 
-export function DividendHistoryList({ dividends }: DividendHistoryListProps) {
+export function DividendHistoryList({ dividends, currency }: DividendHistoryListProps) {
   if (dividends.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -45,7 +52,7 @@ export function DividendHistoryList({ dividends }: DividendHistoryListProps) {
           <TableRow key={dividend.id}>
             <TableCell>{formatDate(dividend.date)}</TableCell>
             <TableCell className="text-right font-medium">
-              {formatCurrency(dividend.amount)}
+              {formatCurrency(dividend.amount, currency)}
             </TableCell>
           </TableRow>
         ))}

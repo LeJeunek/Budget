@@ -12,11 +12,16 @@
 /** Compact axis-tick currency formatter (e.g. "$1.2K") — for chart axes only,
  * never for an exact figure shown in a tooltip/legend/table cell (those use
  * `lib/utils.ts`'s `formatCurrency`), same distinction
- * `dashboard/components/chart-format.ts` documents. */
-export function formatCompactCurrency(value: number): string {
+ * `dashboard/components/chart-format.ts` documents.
+ *
+ * `currency` mirrors `formatCurrency`'s own `currency = "USD"` parameter/
+ * default exactly (docs/release/phase-4c-notes.md Section 1) — every call
+ * site should pass the caller's resolved `useCurrencyDisplay()` value rather
+ * than relying on the default. */
+export function formatCompactCurrency(value: number, currency: string = "USD"): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency,
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(value)

@@ -10,6 +10,10 @@ export interface BillDueSoonEmailProps {
   billName: string
   dueDate: Date
   expectedAmount: number
+  /** Phase 4c: the recipient's own resolved `UserPreference.currencyDisplay`,
+   * threaded from `email-dispatch.ts` — see `./format.ts`'s `formatCurrency`
+   * JSDoc for the full cross-user-leakage rationale. */
+  currency: string
   unsubscribeUrl: string
   preferencesUrl: string
 }
@@ -18,6 +22,7 @@ export function BillDueSoonEmail({
   billName,
   dueDate,
   expectedAmount,
+  currency,
   unsubscribeUrl,
   preferencesUrl,
 }: BillDueSoonEmailProps) {
@@ -29,7 +34,7 @@ export function BillDueSoonEmail({
       preferencesUrl={preferencesUrl}
     >
       <Text style={{ fontSize: "14px", color: "#374151" }}>
-        <strong>{billName}</strong> ({formatCurrency(expectedAmount)}) is due
+        <strong>{billName}</strong> ({formatCurrency(expectedAmount, currency)}) is due
         on {formatLongDate(dueDate)}.
       </Text>
     </NotificationEmailLayout>

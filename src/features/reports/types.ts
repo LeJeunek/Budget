@@ -137,6 +137,26 @@ export interface ReportMeta {
   period: ReportPeriodView
   /** ISO-8601 timestamp string. */
   generatedAt: string
+  /**
+   * Phase 4c (phase-4c-technical-design.md §3.6, docs/product/customization.md
+   * Currency Display capability, docs/release/phase-4c-notes.md §1's blocking
+   * finding): the report-generating user's own resolved
+   * `UserPreference.currencyDisplay` (`getUserPreference(userId).currencyDisplay`,
+   * resolved once in `server/service.ts`'s `generateReport`, alongside its
+   * existing `userId`-scoped setup — never a second, independently-scoped
+   * lookup). Every `pdf/templates/*.tsx` template reads this field and passes
+   * it as `formatCurrency`'s second argument for every currency-formatted
+   * figure it renders — this is purely a display concern (which symbol/
+   * grouping convention is used), never a second unit the underlying numeric
+   * fields on this DTO are expressed in. Every `server/data/*.ts` assembler's
+   * own return type is `Omit<XxxReportData, "type" | "period" |
+   * "generatedAt" | "currency">` — `currency` is deliberately excluded
+   * there too, not merely unused, so it is structurally impossible for an
+   * assembler to read or be influenced by it; only `server/service.ts`'s
+   * `generateReport` ever sets this field, after every numeric figure has
+   * already been computed.
+   */
+  currency: string
 }
 
 // ---------------------------------------------------------------------------

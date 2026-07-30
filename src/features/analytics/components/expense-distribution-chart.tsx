@@ -18,8 +18,8 @@
 
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
 
-import { formatCurrency } from "@/lib/utils"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 
 import type { ExpenseDistributionEntry } from "../types"
 import { CHART_PALETTE } from "./chart-format"
@@ -29,6 +29,8 @@ export interface ExpenseDistributionChartProps {
 }
 
 export function ExpenseDistributionChart({ data }: ExpenseDistributionChartProps) {
+  const formatCurrency = useFormatCurrency()
+
   return (
     <Card>
       <CardHeader>

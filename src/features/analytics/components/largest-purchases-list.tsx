@@ -26,9 +26,15 @@ import { formatDateLabel } from "./chart-format"
 
 export interface LargestPurchasesListProps {
   data: LargestPurchase[]
+  /** The caller's resolved `UserPreference.currencyDisplay`
+   * (docs/release/phase-4c-notes.md Section 1) — this is a Server Component
+   * (see this file's own header comment), so
+   * `app/(dashboard)/analytics/page.tsx` resolves this once and passes it
+   * straight through rather than this component reading a Context. */
+  currency: string
 }
 
-export function LargestPurchasesList({ data }: LargestPurchasesListProps) {
+export function LargestPurchasesList({ data, currency }: LargestPurchasesListProps) {
   return (
     <Card>
       <CardHeader>
@@ -69,7 +75,7 @@ export function LargestPurchasesList({ data }: LargestPurchasesListProps) {
                     {purchase.categoryName}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatCurrency(purchase.amount)}
+                    {formatCurrency(purchase.amount, currency)}
                   </TableCell>
                 </TableRow>
               ))}

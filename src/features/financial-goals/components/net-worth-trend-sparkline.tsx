@@ -26,9 +26,9 @@
 
 import { Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip } from "recharts"
 
-import { formatCurrency } from "@/lib/utils"
 import type { FinancialGoalTrendPoint } from "@/features/financial-goals/types"
 import { formatDateLabel } from "@/features/financial-goals/components/financial-goal-shared"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 
 export interface NetWorthTrendSparklineProps {
   points: FinancialGoalTrendPoint[]
@@ -42,6 +42,8 @@ export function NetWorthTrendSparkline({
   points,
   targetAmount,
 }: NetWorthTrendSparklineProps) {
+  const formatCurrency = useFormatCurrency()
+
   if (points.length === 0) {
     return null
   }

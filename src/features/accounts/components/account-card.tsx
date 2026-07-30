@@ -25,8 +25,9 @@ import {
 import { AccountFormDialog } from "@/features/accounts/components/account-form"
 import { ReconciliationPrompt } from "@/features/accounts/components/reconciliation-prompt"
 import { ACCOUNT_TYPE_LABELS } from "@/features/accounts/components/account-form-schema"
-import { cn, formatCurrency } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -52,6 +53,7 @@ export interface AccountCardProps {
 }
 
 export function AccountCard({ account }: AccountCardProps) {
+  const formatCurrency = useFormatCurrency()
   const router = useRouter()
   const [editOpen, setEditOpen] = useState(false)
   const [isTogglingArchive, setIsTogglingArchive] = useState(false)

@@ -25,9 +25,15 @@ import {
 
 export interface PortfolioOverviewSectionProps {
   overview: PortfolioOverview
+  /** The caller's resolved `UserPreference.currencyDisplay`
+   * (docs/release/phase-4c-notes.md Section 1) — this is a Server Component
+   * (see this file's own header comment), so
+   * `app/(dashboard)/investments/page.tsx` resolves this once and passes it
+   * straight through rather than this component reading a Context. */
+  currency: string
 }
 
-function GainLossText({ amount }: { amount: number }) {
+function GainLossText({ amount, currency }: { amount: number; currency: string }) {
   const isNegative = amount < 0
   return (
     <span
@@ -38,13 +44,14 @@ function GainLossText({ amount }: { amount: number }) {
       )}
     >
       {isNegative ? "" : "+"}
-      {formatCurrency(amount)}
+      {formatCurrency(amount, currency)}
     </span>
   )
 }
 
 export function PortfolioOverviewSection({
   overview,
+  currency,
 }: PortfolioOverviewSectionProps) {
   return (
     <div className="flex flex-col gap-4">
@@ -57,7 +64,7 @@ export function PortfolioOverviewSection({
           </CardHeader>
           <CardContent>
             <span className="font-heading text-2xl font-semibold text-foreground">
-              {formatCurrency(overview.totalCurrentValue)}
+              {formatCurrency(overview.totalCurrentValue, currency)}
             </span>
           </CardContent>
         </Card>
@@ -70,7 +77,7 @@ export function PortfolioOverviewSection({
           </CardHeader>
           <CardContent>
             <span className="font-heading text-2xl font-semibold">
-              <GainLossText amount={overview.totalGainLoss} />
+              <GainLossText amount={overview.totalGainLoss} currency={currency} />
             </span>
           </CardContent>
         </Card>
@@ -83,7 +90,7 @@ export function PortfolioOverviewSection({
           </CardHeader>
           <CardContent>
             <span className="font-heading text-2xl font-semibold text-foreground">
-              {formatCurrency(overview.totalDividendIncome)}
+              {formatCurrency(overview.totalDividendIncome, currency)}
             </span>
           </CardContent>
         </Card>
@@ -111,13 +118,13 @@ export function PortfolioOverviewSection({
                       {row.accountName}
                     </TableCell>
                     <TableCell className="text-right">
-                      {formatCurrency(row.currentValue)}
+                      {formatCurrency(row.currentValue, currency)}
                     </TableCell>
                     <TableCell className="text-right">
-                      <GainLossText amount={row.gainLoss} />
+                      <GainLossText amount={row.gainLoss} currency={currency} />
                     </TableCell>
                     <TableCell className="text-right">
-                      {formatCurrency(row.dividendIncome)}
+                      {formatCurrency(row.dividendIncome, currency)}
                     </TableCell>
                   </TableRow>
                 ))}

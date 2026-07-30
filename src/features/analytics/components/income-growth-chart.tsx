@@ -29,8 +29,11 @@ import {
   YAxis,
 } from "recharts"
 
-import { formatCurrency } from "@/lib/utils"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  useCurrencyDisplay,
+  useFormatCurrency,
+} from "@/app/(dashboard)/currency-preference-provider"
 
 import type { IncomeGrowthPoint, IncomeSourceType } from "../types"
 import { CHART_PALETTE, formatCompactCurrency, formatMonthLabel } from "./chart-format"
@@ -41,6 +44,9 @@ export interface IncomeGrowthChartProps {
 }
 
 export function IncomeGrowthChart({ data }: IncomeGrowthChartProps) {
+  const formatCurrency = useFormatCurrency()
+  const currency = useCurrencyDisplay()
+
   if (data.length === 0) {
     return (
       <Card>
@@ -101,7 +107,7 @@ export function IncomeGrowthChart({ data }: IncomeGrowthChartProps) {
                 stroke="var(--muted-foreground)"
                 fontSize={12}
                 width={56}
-                tickFormatter={formatCompactCurrency}
+                tickFormatter={(value) => formatCompactCurrency(value, currency)}
               />
               <Tooltip
                 formatter={(value, name) => [formatCurrency(Number(value)), name]}

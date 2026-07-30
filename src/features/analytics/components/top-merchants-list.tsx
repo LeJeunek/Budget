@@ -26,9 +26,15 @@ import type { TopMerchant } from "../types"
 
 export interface TopMerchantsListProps {
   data: TopMerchant[]
+  /** The caller's resolved `UserPreference.currencyDisplay`
+   * (docs/release/phase-4c-notes.md Section 1) — this is a Server Component
+   * (see this file's own header comment), so
+   * `app/(dashboard)/analytics/page.tsx` resolves this once and passes it
+   * straight through rather than this component reading a Context. */
+  currency: string
 }
 
-export function TopMerchantsList({ data }: TopMerchantsListProps) {
+export function TopMerchantsList({ data, currency }: TopMerchantsListProps) {
   return (
     <Card>
       <CardHeader>
@@ -67,7 +73,7 @@ export function TopMerchantsList({ data }: TopMerchantsListProps) {
                     {merchant.transactionCount}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatCurrency(merchant.totalSpend)}
+                    {formatCurrency(merchant.totalSpend, currency)}
                   </TableCell>
                 </TableRow>
               ))}

@@ -24,10 +24,11 @@ import type { BillOccurrence } from "@/features/bills/types"
 import { unmarkOccurrencePaid } from "@/features/bills/server/actions"
 import { OccurrenceStatusBadge } from "@/features/bills/components/occurrence-status-badge"
 import { MarkPaidDialog, type MarkPaidOccurrenceSummary } from "@/features/bills/components/mark-paid-dialog"
-import { formatCurrency, formatDate } from "@/lib/utils"
+import { formatDate } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DataTable, DataTableColumnHeader } from "@/components/shared/data-table"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 
 export interface OccurrenceHistoryTableProps {
   billId: string
@@ -41,6 +42,7 @@ export function OccurrenceHistoryTable({
   expectedAmount,
   occurrences,
 }: OccurrenceHistoryTableProps) {
+  const formatCurrency = useFormatCurrency()
   const router = useRouter()
   const [markPaidTarget, setMarkPaidTarget] = useState<MarkPaidOccurrenceSummary | null>(null)
   const [unmarkingId, setUnmarkingId] = useState<string | null>(null)

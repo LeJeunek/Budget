@@ -82,6 +82,19 @@ export interface MonthlySummaryPromptInput {
   topCategories: MonthlySummaryCategoryInput[]
   /** `null` when the month has no expense transactions at all. */
   largestPurchase: MonthlySummaryLargestPurchaseInput | null
+  /**
+   * (Release-gate fix, phase-4c-notes.md Section 1 follow-up) The user's
+   * chosen display currency -- one of `UserPreference.currencyDisplay`'s
+   * ISO 4217 codes (`USD`/`EUR`/`GBP`/`CAD`/`AUD`/`JPY`), resolved via
+   * `features/settings/server/service.ts`'s `getUserPreference` at the same
+   * `monthly-summary.ts` call site every other field here is gathered from
+   * (`gatherMonthlySummaryData`'s own `Promise.all`) -- never a new
+   * aggregation. This is a formatting instruction for the model's prose, not
+   * a fact to verify: deliberately excluded from
+   * `buildMonthlySummaryPromptContext`'s `groundingData` map below, since it
+   * is not itself a number `citedFigures` could ever cite.
+   */
+  currency: string
 }
 
 // ---------------------------------------------------------------------------

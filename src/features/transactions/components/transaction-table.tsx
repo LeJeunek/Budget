@@ -42,7 +42,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { cn, formatCurrency, formatDate } from "@/lib/utils"
+import { cn, formatDate } from "@/lib/utils"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 import { useAccounts } from "@/features/accounts/hooks/use-accounts"
 import type { Category } from "@/features/categories/types"
 import { UNCATEGORIZED_CATEGORY_ID, type Transaction } from "@/features/transactions/types"
@@ -153,6 +154,7 @@ export function TransactionTable({
   onEdit,
   onSplit,
 }: TransactionTableProps) {
+  const formatCurrency = useFormatCurrency()
   const router = useRouter()
   const { data: accounts } = useAccounts()
 
@@ -518,6 +520,7 @@ export function TransactionTable({
       suggestionsByTransactionId,
       requestingSuggestionIds,
       handleRequestSuggestion,
+      formatCurrency,
     ],
   )
 

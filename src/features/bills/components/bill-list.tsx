@@ -30,8 +30,9 @@ import { archiveBill, unarchiveBill } from "@/features/bills/server/actions"
 import { BillFormDialog, BILL_SCHEDULE_LABELS } from "@/features/bills/components/bill-form"
 import { OccurrenceStatusBadge } from "@/features/bills/components/occurrence-status-badge"
 import type { Category } from "@/features/categories/types"
-import { formatCurrency, formatDate } from "@/lib/utils"
+import { formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 import {
   Table,
   TableBody,
@@ -88,6 +89,7 @@ function BillRow({
   bill: BillWithNextOccurrence
   categories: Category[]
 }) {
+  const formatCurrency = useFormatCurrency()
   const router = useRouter()
   const [editOpen, setEditOpen] = useState(false)
   const [isTogglingArchive, setIsTogglingArchive] = useState(false)

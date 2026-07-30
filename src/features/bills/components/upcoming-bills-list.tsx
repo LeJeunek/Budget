@@ -14,8 +14,9 @@ import Link from "next/link"
 import type { UpcomingOccurrence } from "@/features/bills/types"
 import { OccurrenceStatusBadge } from "@/features/bills/components/occurrence-status-badge"
 import { MarkPaidDialog, type MarkPaidOccurrenceSummary } from "@/features/bills/components/mark-paid-dialog"
-import { formatCurrency, formatDate } from "@/lib/utils"
+import { formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 import {
   Table,
   TableBody,
@@ -30,6 +31,7 @@ export interface UpcomingBillsListProps {
 }
 
 export function UpcomingBillsList({ occurrences }: UpcomingBillsListProps) {
+  const formatCurrency = useFormatCurrency()
   const [markPaidTarget, setMarkPaidTarget] = useState<MarkPaidOccurrenceSummary | null>(null)
 
   if (occurrences.length === 0) {

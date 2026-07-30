@@ -31,9 +31,15 @@ import {
 
 export interface IrregularEventHistoryListProps {
   events: IrregularIncomeEvent[]
+  /** The caller's resolved `UserPreference.currencyDisplay`
+   * (docs/release/phase-4c-notes.md Section 1) — this component has no
+   * `"use client"` directive of its own and is rendered from
+   * `IncomeStreamDetailClient` (a Client Component), which resolves this via
+   * `useCurrencyDisplay()` and passes it straight through as a plain prop. */
+  currency: string
 }
 
-export function IrregularEventHistoryList({ events }: IrregularEventHistoryListProps) {
+export function IrregularEventHistoryList({ events, currency }: IrregularEventHistoryListProps) {
   if (events.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -57,7 +63,7 @@ export function IrregularEventHistoryList({ events }: IrregularEventHistoryListP
           {events.map((event) => (
             <TableRow key={event.id}>
               <TableCell>{formatDate(event.date)}</TableCell>
-              <TableCell>{formatCurrency(event.amount)}</TableCell>
+              <TableCell>{formatCurrency(event.amount, currency)}</TableCell>
               <TableCell>{event.transactionId ? "Linked transaction" : "Manual entry"}</TableCell>
             </TableRow>
           ))}

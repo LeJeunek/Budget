@@ -24,8 +24,8 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
 
 import type { AllocationEntry } from "@/features/investments/types"
-import { formatCurrency } from "@/lib/utils"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 
 const SLICE_COLORS = [
   "var(--chart-1)",
@@ -42,6 +42,7 @@ export interface AllocationChartProps {
 }
 
 export function AllocationChart({ title, data, emptyMessage }: AllocationChartProps) {
+  const formatCurrency = useFormatCurrency()
   const hasData = data.length > 0
 
   return (

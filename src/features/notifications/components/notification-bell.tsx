@@ -24,6 +24,7 @@ import { Bell, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { cn, formatCurrency, formatDate } from "@/lib/utils"
+import { useCurrencyDisplay } from "@/app/(dashboard)/currency-preference-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -54,7 +55,7 @@ export interface NotificationBellProps {
  * typecheck instead of silently rendering nothing, mirroring
  * `server/service.ts`'s own exhaustiveness guard on the server side.
  */
-function formatNotificationMessage(notification: Notification): string {
+function formatNotificationMessage(notification: Notification, currency: string): string {
   switch (notification.type) {
     case "BUDGET_OVER":
       return `You're over budget in ${notification.categoryName} this month.`
@@ -70,9 +71,9 @@ function formatNotificationMessage(notification: Notification): string {
     case "GOAL_ACHIEVED":
       return `You achieved your goal: ${notification.goalName}!`
     case "LARGE_PURCHASE":
-      return `A ${formatCurrency(notification.amount)} purchase at ${notification.merchant} exceeded your Large Purchase threshold.`
+      return `A ${formatCurrency(notification.amount, currency)} purchase at ${notification.merchant} exceeded your Large Purchase threshold.`
     case "LOW_BALANCE":
-      return `${notification.accountName}'s balance dropped below your Low Balance threshold — now ${formatCurrency(notification.balance)}.`
+      return `${notification.accountName}'s balance dropped below your Low Balance threshold — now ${formatCurrency(notification.balance, currency)}.`
     case "MONTHLY_SUMMARY_READY":
       return `Your summary for ${notification.month} is ready.`
     default: {
@@ -106,6 +107,7 @@ function NotificationRow({
   onDismiss: (id: string) => void
   isDismissing: boolean
 }) {
+  const currency = useCurrencyDisplay()
   const isUnread = notification.readAt === null
 
   return (
@@ -123,7 +125,7 @@ function NotificationRow({
         aria-label={isUnread ? "Mark notification as read" : undefined}
       >
         <p className="text-sm leading-snug text-foreground">
-          {formatNotificationMessage(notification)}
+          {formatNotificationMessage(notification, currency)}
         </p>
         <p className="mt-0.5 text-xs text-muted-foreground">
           {formatDate(notification.createdAt)}

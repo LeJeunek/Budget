@@ -37,12 +37,15 @@ function formatSavingsRate(rate: number | null): string {
   return rate === null ? "N/A" : `${(rate * 100).toFixed(1)}%`
 }
 
-function formatNetWorthPoint(point: { date: string; netWorth: number } | null): string {
-  return point ? `${formatCurrency(point.netWorth)} (as of ${point.date})` : "Not available"
+function formatNetWorthPoint(
+  point: { date: string; netWorth: number } | null,
+  currency: string,
+): string {
+  return point ? `${formatCurrency(point.netWorth, currency)} (as of ${point.date})` : "Not available"
 }
 
 export function MonthlyReportTemplate({ data }: { data: MonthlyReportData }) {
-  const { summary, netWorth, spendingByCategory, budgetVsActual, narrative } = data
+  const { summary, netWorth, spendingByCategory, budgetVsActual, narrative, currency } = data
 
   return (
     <ReportDocument type={data.type} period={data.period} generatedAt={data.generatedAt}>
@@ -51,15 +54,15 @@ export function MonthlyReportTemplate({ data }: { data: MonthlyReportData }) {
           <View style={styles.statRow}>
             <View style={styles.stat}>
               <Text style={styles.statLabel}>Income</Text>
-              <Text style={styles.statValue}>{formatCurrency(summary.income)}</Text>
+              <Text style={styles.statValue}>{formatCurrency(summary.income, currency)}</Text>
             </View>
             <View style={styles.stat}>
               <Text style={styles.statLabel}>Expenses</Text>
-              <Text style={styles.statValue}>{formatCurrency(summary.expenses)}</Text>
+              <Text style={styles.statValue}>{formatCurrency(summary.expenses, currency)}</Text>
             </View>
             <View style={styles.stat}>
               <Text style={styles.statLabel}>Cash Flow</Text>
-              <Text style={styles.statValue}>{formatCurrency(summary.cashFlow)}</Text>
+              <Text style={styles.statValue}>{formatCurrency(summary.cashFlow, currency)}</Text>
             </View>
             <View style={styles.stat}>
               <Text style={styles.statLabel}>Savings Rate</Text>
@@ -74,16 +77,16 @@ export function MonthlyReportTemplate({ data }: { data: MonthlyReportData }) {
       <ReportSection title="Net Worth">
         <View style={styles.netWorthRow}>
           <Text style={styles.netWorthLabel}>Start of month</Text>
-          <Text style={styles.netWorthValue}>{formatNetWorthPoint(netWorth.start)}</Text>
+          <Text style={styles.netWorthValue}>{formatNetWorthPoint(netWorth.start, currency)}</Text>
         </View>
         <View style={styles.netWorthRow}>
           <Text style={styles.netWorthLabel}>End of month</Text>
-          <Text style={styles.netWorthValue}>{formatNetWorthPoint(netWorth.end)}</Text>
+          <Text style={styles.netWorthValue}>{formatNetWorthPoint(netWorth.end, currency)}</Text>
         </View>
         <View style={styles.netWorthRow}>
           <Text style={styles.netWorthLabel}>Change</Text>
           <Text style={styles.netWorthValue}>
-            {netWorth.change === null ? "Not available" : formatCurrency(netWorth.change)}
+            {netWorth.change === null ? "Not available" : formatCurrency(netWorth.change, currency)}
           </Text>
         </View>
       </ReportSection>
@@ -98,7 +101,7 @@ export function MonthlyReportTemplate({ data }: { data: MonthlyReportData }) {
                 header: "Amount",
                 width: 40,
                 align: "right",
-                render: (r) => formatCurrency(r.amount),
+                render: (r) => formatCurrency(r.amount, currency),
               },
             ]}
             rows={spendingByCategory}
@@ -118,21 +121,21 @@ export function MonthlyReportTemplate({ data }: { data: MonthlyReportData }) {
                 header: "Allocated",
                 width: 20,
                 align: "right",
-                render: (r) => (r.allocated === null ? "Unset" : formatCurrency(r.allocated)),
+                render: (r) => (r.allocated === null ? "Unset" : formatCurrency(r.allocated, currency)),
               },
               {
                 key: "spent",
                 header: "Spent",
                 width: 20,
                 align: "right",
-                render: (r) => formatCurrency(r.spent),
+                render: (r) => formatCurrency(r.spent, currency),
               },
               {
                 key: "remaining",
                 header: "Remaining",
                 width: 20,
                 align: "right",
-                render: (r) => (r.remaining === null ? "N/A" : formatCurrency(r.remaining)),
+                render: (r) => (r.remaining === null ? "N/A" : formatCurrency(r.remaining, currency)),
               },
             ]}
             rows={budgetVsActual.categories}

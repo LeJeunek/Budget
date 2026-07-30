@@ -21,10 +21,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { cn, formatCurrency } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import type { Category } from "@/features/categories/types"
 import type { Transaction } from "@/features/transactions/types"
 import { useSplitTransaction } from "@/features/transactions/hooks/use-transactions"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 
 /**
  * Split-transaction dialog, per docs/product/transactions.md AC13/14:
@@ -69,6 +70,7 @@ function toCentsOrNull(value: string): number | null {
 }
 
 export function SplitDialog({ transaction, open, onOpenChange, categories }: SplitDialogProps) {
+  const formatCurrency = useFormatCurrency()
   const [rows, setRows] = React.useState<SplitRow[]>([EMPTY_ROW, EMPTY_ROW])
   const [formError, setFormError] = React.useState<string | null>(null)
   const splitTransaction = useSplitTransaction()

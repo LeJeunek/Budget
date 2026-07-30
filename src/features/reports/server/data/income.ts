@@ -66,7 +66,7 @@ async function buildStreamActivity(
 export async function assembleIncomeReportData(
   userId: string,
   period: ResolvedPeriod,
-): Promise<Omit<IncomeReportData, "type" | "period" | "generatedAt">> {
+): Promise<Omit<IncomeReportData, "type" | "period" | "generatedAt" | "currency">> {
   const [monthlyTrend, incomeStreams] = await Promise.all([
     getIncomeGrowth(userId, period),
     getIncomeStreams(userId),

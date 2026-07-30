@@ -8,7 +8,7 @@ import { ReportTable } from "../report-table"
 
 /** Income Report template (reports.md §4). */
 export function IncomeReportTemplate({ data }: { data: IncomeReportData }) {
-  const { monthlyTrend, bySource, streams, hasStreams } = data
+  const { monthlyTrend, bySource, streams, hasStreams, currency } = data
   const totalIncome = monthlyTrend.reduce((sum, point) => sum + point.total, 0)
 
   return (
@@ -23,7 +23,7 @@ export function IncomeReportTemplate({ data }: { data: IncomeReportData }) {
                 header: "Total Income",
                 width: 50,
                 align: "right",
-                render: (r) => formatCurrency(r.total),
+                render: (r) => formatCurrency(r.total, currency),
               },
             ]}
             rows={monthlyTrend}
@@ -43,7 +43,7 @@ export function IncomeReportTemplate({ data }: { data: IncomeReportData }) {
                 header: "Amount",
                 width: 30,
                 align: "right",
-                render: (r) => formatCurrency(r.amount),
+                render: (r) => formatCurrency(r.amount, currency),
               },
               {
                 key: "percent",
@@ -56,7 +56,7 @@ export function IncomeReportTemplate({ data }: { data: IncomeReportData }) {
             rows={bySource}
           />
         ) : (
-          <NoDataState message={`No income was recorded (total: ${formatCurrency(totalIncome)}).`} />
+          <NoDataState message={`No income was recorded (total: ${formatCurrency(totalIncome, currency)}).`} />
         )}
       </ReportSection>
 
@@ -86,7 +86,7 @@ export function IncomeReportTemplate({ data }: { data: IncomeReportData }) {
                   header: "Total Received",
                   width: 15,
                   align: "right",
-                  render: (r) => formatCurrency(r.receivedTotal),
+                  render: (r) => formatCurrency(r.receivedTotal, currency),
                 },
               ]}
               rows={streams}

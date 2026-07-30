@@ -31,8 +31,9 @@ import {
   INCOME_TYPE_LABELS,
   IncomeStreamFormDialog,
 } from "@/features/recurring-income/components/income-stream-form"
-import { formatCurrency, formatDate } from "@/lib/utils"
+import { formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 import {
   Table,
   TableBody,
@@ -82,6 +83,7 @@ export function IncomeStreamList({ streams, emptyMessage = "No income streams." 
 }
 
 function StreamRow({ stream }: { stream: IncomeStreamSummary }) {
+  const formatCurrency = useFormatCurrency()
   const router = useRouter()
   const [editOpen, setEditOpen] = useState(false)
   const [isTogglingArchive, setIsTogglingArchive] = useState(false)

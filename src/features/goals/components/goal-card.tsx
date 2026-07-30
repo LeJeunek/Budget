@@ -29,8 +29,8 @@ import { toast } from "sonner"
 import type { GoalWithProgress } from "@/features/goals/types"
 import { archiveGoal, unarchiveGoal } from "@/features/goals/server/actions"
 import { GoalFormDialog } from "@/features/goals/components/goal-form"
-import { formatCurrency } from "@/lib/utils"
 import { ProgressRing } from "@/components/shared/progress-ring"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -95,6 +95,7 @@ export interface GoalCardProps {
 }
 
 export function GoalCard({ goal }: GoalCardProps) {
+  const formatCurrency = useFormatCurrency()
   const router = useRouter()
   const [editOpen, setEditOpen] = useState(false)
   const [isTogglingArchive, setIsTogglingArchive] = useState(false)

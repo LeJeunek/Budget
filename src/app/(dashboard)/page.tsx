@@ -25,7 +25,10 @@ import {
   getSummaryHistory,
 } from "@/features/dashboard/server/monthly-summary"
 import { getFinancialHealthScore } from "@/features/financial-health-score/server/service"
-import { getDashboardCardPreferences } from "@/features/settings/server/service"
+import {
+  getDashboardCardPreferences,
+  getUserPreference,
+} from "@/features/settings/server/service"
 import { buildDashboardCardGroups } from "./_lib/dashboard-card-groups"
 
 /**
@@ -114,6 +117,7 @@ export default async function DashboardPage() {
     monthlyRecapHistory,
     financialHealthScore,
     cardPreferences,
+    userPreference,
   ] = await Promise.all([
     getNetWorth(user.id),
     getMonthlySummary(user.id, new Date()),
@@ -160,6 +164,14 @@ export default async function DashboardPage() {
     // module doc above. A Server-Component-direct-call read, same contract
     // as every other entry in this batch.
     getDashboardCardPreferences(user.id),
+    // (Phase 4c release-gate fix, docs/release/phase-4c-notes.md Section 1)
+    // Resolved here (not re-fetched by `layout.tsx`'s own already-resolved
+    // value) since this Server Component page can't read the
+    // `CurrencyPreferenceProvider` Context that layout mounts for Client
+    // Components — every stat card below is a Server Component too, so it
+    // needs `currencyDisplay` threaded in as a plain value via
+    // `DashboardCardData.currency`, not consumed via a hook.
+    getUserPreference(user.id),
   ])
 
   // Dependent on `defaultRangeResolution` above, so it can't join the
@@ -209,6 +221,7 @@ export default async function DashboardPage() {
       netWorthHistory,
       mostRecentMonthlyRecap,
       monthlyRecapHistory,
+      currency: userPreference.currencyDisplay,
     },
     cardPreferences,
   )

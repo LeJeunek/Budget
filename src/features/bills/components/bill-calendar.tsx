@@ -25,7 +25,8 @@ import Link from "next/link"
 
 import { MonthNavigator } from "@/components/shared/month-navigator"
 import type { CalendarDay } from "@/features/bills/types"
-import { cn, formatCurrency } from "@/lib/utils"
+import { cn } from "@/lib/utils"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
@@ -55,6 +56,7 @@ export interface BillCalendarProps {
 }
 
 export function BillCalendar({ month, onMonthChange, days }: BillCalendarProps) {
+  const formatCurrency = useFormatCurrency()
   const leadingBlanks = days.length > 0 ? weekdayOf(days[0].day) : 0
   const trailingBlanks = days.length > 0 ? (7 - ((leadingBlanks + days.length) % 7)) % 7 : 0
 

@@ -57,12 +57,18 @@ const ENTRY_CLASSNAME =
 
 export interface PaydayEntryProps {
   payday: PaydayCalendarEntry
+  /** The caller's resolved `UserPreference.currencyDisplay`
+   * (docs/release/phase-4c-notes.md Section 1) — this component has no
+   * `"use client"` directive of its own and is rendered from `CalendarGrid`
+   * (a Client Component), which resolves this via `useCurrencyDisplay()` and
+   * passes it straight through as a plain prop. */
+  currency: string
 }
 
 /** Selecting an entry navigates to that income stream's detail/receipt
  * history (AC6, the same "click an entry, land on its source" interaction
  * `BillEntry`/Calendar v1 AC4 already established). */
-export function PaydayEntry({ payday }: PaydayEntryProps) {
+export function PaydayEntry({ payday, currency }: PaydayEntryProps) {
   const statusLabel = payday.status ? STATUS_LABEL[payday.status] : "Logged"
 
   return (
@@ -72,11 +78,11 @@ export function PaydayEntry({ payday }: PaydayEntryProps) {
         "flex items-center gap-1 truncate rounded border px-1.5 py-0.5 text-[0.7rem] leading-tight hover:opacity-80",
         ENTRY_CLASSNAME,
       )}
-      title={`${payday.streamName} — ${formatCurrency(payday.amount)} (${statusLabel})`}
+      title={`${payday.streamName} — ${formatCurrency(payday.amount, currency)} (${statusLabel})`}
     >
       <ArrowDownToLine className="size-3 shrink-0" aria-hidden="true" />
       <span className="truncate">
-        {payday.streamName} · {formatCurrency(payday.amount)} · {statusLabel}
+        {payday.streamName} · {formatCurrency(payday.amount, currency)} · {statusLabel}
       </span>
     </Link>
   )

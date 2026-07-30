@@ -84,7 +84,7 @@ function buildNetWorthChange(
 export async function assembleYearlyReportData(
   userId: string,
   period: ResolvedPeriod,
-): Promise<Omit<YearlyReportData, "type" | "period" | "generatedAt">> {
+): Promise<Omit<YearlyReportData, "type" | "period" | "generatedAt" | "currency">> {
   const yearStart = assertConcretePeriodStart(period)
   const monthKeys = enumerateMonthKeys(yearStart, period.end)
 

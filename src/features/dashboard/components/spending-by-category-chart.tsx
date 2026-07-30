@@ -16,8 +16,8 @@
 
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
 
-import { formatCurrency } from "@/lib/utils"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 
 import type { CategorySpending } from "../types"
 
@@ -38,6 +38,8 @@ export interface SpendingByCategoryChartProps {
 }
 
 export function SpendingByCategoryChart({ data }: SpendingByCategoryChartProps) {
+  const formatCurrency = useFormatCurrency()
+
   // A row-with-zero-total can't happen from the service (grouped rows only
   // exist when there was at least one expense), but an empty array is the
   // real "no spending yet this month" case dashboard-overview.md's edge

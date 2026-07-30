@@ -25,7 +25,8 @@ import type { PendingCategorySuggestion } from "@/features/transactions/server/c
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { cn, formatCurrency, formatDate } from "@/lib/utils"
+import { cn, formatDate } from "@/lib/utils"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 
 export interface TransactionDetailClientProps {
   transaction: TransactionDetail
@@ -36,6 +37,7 @@ export function TransactionDetailClient({
   transaction,
   pendingSuggestion,
 }: TransactionDetailClientProps) {
+  const formatCurrency = useFormatCurrency()
   const isExpense = transaction.amount < 0
 
   return (

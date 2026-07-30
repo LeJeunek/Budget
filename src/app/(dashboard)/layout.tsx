@@ -7,6 +7,7 @@ import { TopNav } from "@/components/shared/top-nav"
 import { NotificationBell } from "@/features/notifications/components/notification-bell"
 import { TimezoneAutoCapture } from "@/features/settings/components/timezone-auto-capture"
 import { getUserPreference } from "@/features/settings/server/service"
+import { CurrencyPreferenceProvider } from "./currency-preference-provider"
 
 /**
  * Authenticated app shell (see docs/architecture/folder-tree.md:
@@ -46,6 +47,17 @@ import { getUserPreference } from "@/features/settings/server/service"
  * so none of those overrides apply and the product's current default look
  * is unchanged, per that capability's own "never sets an accent color" Edge
  * Case.
+ *
+ * **Phase 4c release-gate fix (docs/release/phase-4c-notes.md Section 1,
+ * "Currency Display is not wired to any surface outside its own settings-page
+ * preview"):** this layout also threads the same `preference.currencyDisplay`
+ * value into a `CurrencyPreferenceProvider` (`./currency-preference-provider.tsx`)
+ * wrapping the entire shell below — the mounting point for every Client
+ * Component's `useCurrencyDisplay()`/`useFormatCurrency()` read, exactly one
+ * `getUserPreference` call shared with the accent-color read above, never a
+ * second fetch. Server Components still need their own `getUserPreference`
+ * call (or a `currency` prop threaded down from one) since they can't consume
+ * a Context — see that provider file's own JSDoc for the full split.
  */
 export default async function DashboardLayout({
   children,
@@ -65,20 +77,22 @@ export default async function DashboardLayout({
       className="flex h-svh overflow-hidden"
       data-accent={preference.accentColor ?? undefined}
     >
-      {/* Phase 4c (phase-4c-technical-design.md §3.3): renders no visible UI
-          of its own — see its own JSDoc. Mounted here, alongside where
-          `ThemeProvider` is mounted (root layout), per that section's
-          "component built by the feature owner, mounted by the Frontend Lead
-          in the authenticated layout" split. */}
-      <TimezoneAutoCapture />
-      <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <TopNav
-          user={{ name: user.name, email: user.email }}
-          notificationBell={<NotificationBell />}
-        />
-        <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
-      </div>
+      <CurrencyPreferenceProvider currency={preference.currencyDisplay}>
+        {/* Phase 4c (phase-4c-technical-design.md §3.3): renders no visible UI
+            of its own — see its own JSDoc. Mounted here, alongside where
+            `ThemeProvider` is mounted (root layout), per that section's
+            "component built by the feature owner, mounted by the Frontend Lead
+            in the authenticated layout" split. */}
+        <TimezoneAutoCapture />
+        <Sidebar />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <TopNav
+            user={{ name: user.name, email: user.email }}
+            notificationBell={<NotificationBell />}
+          />
+          <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
+        </div>
+      </CurrencyPreferenceProvider>
     </div>
   )
 }

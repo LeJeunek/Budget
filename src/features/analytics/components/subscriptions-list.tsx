@@ -35,11 +35,11 @@ import { useRouter } from "next/navigation"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { toast } from "sonner"
 
-import { formatCurrency } from "@/lib/utils"
 import {
   dismissSubscriptionCandidate,
   undismissSubscriptionMerchant,
 } from "@/features/analytics/server/actions"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -93,6 +93,7 @@ export function SubscriptionsList({
   activeAnnualizedTotal,
   dismissedMerchants,
 }: SubscriptionsListProps) {
+  const formatCurrency = useFormatCurrency()
   const router = useRouter()
   const [dismissingMerchant, setDismissingMerchant] = useState<string | null>(null)
   const [undismissingMerchant, setUndismissingMerchant] = useState<string | null>(null)

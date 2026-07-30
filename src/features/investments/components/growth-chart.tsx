@@ -26,19 +26,26 @@
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 
 import type { GrowthPoint } from "@/features/investments/types"
-import { formatCurrency, formatDate } from "@/lib/utils"
+import { formatDate } from "@/lib/utils"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  useCurrencyDisplay,
+  useFormatCurrency,
+} from "@/app/(dashboard)/currency-preference-provider"
 
 /** Compact axis-tick currency formatter — duplicated from
  * `features/dashboard/components/chart-format.ts`'s `formatCompactCurrency`
  * rather than imported, since that file lives in the Dashboard feature's own
  * components directory and folder-tree.md's module boundary keeps each
  * feature's `components/` self-contained (no cross-feature imports between
- * sibling feature UI layers). */
-function formatCompactCurrency(value: number): string {
+ * sibling feature UI layers).
+ *
+ * `currency` mirrors `formatCurrency`'s own `currency = "USD"` parameter/
+ * default exactly (docs/release/phase-4c-notes.md Section 1). */
+function formatCompactCurrency(value: number, currency: string = "USD"): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency,
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(value)
@@ -50,6 +57,9 @@ export interface GrowthChartProps {
 }
 
 export function GrowthChart({ title, data }: GrowthChartProps) {
+  const formatCurrency = useFormatCurrency()
+  const currency = useCurrencyDisplay()
+
   if (data.length === 0) {
     return (
       <Card>
@@ -117,7 +127,7 @@ export function GrowthChart({ title, data }: GrowthChartProps) {
                 stroke="var(--muted-foreground)"
                 fontSize={12}
                 width={56}
-                tickFormatter={formatCompactCurrency}
+                tickFormatter={(value) => formatCompactCurrency(value, currency)}
               />
               <Tooltip
                 labelFormatter={(value) => formatDate(value as string)}

@@ -7,6 +7,7 @@ import {
   getBudgetMonth,
 } from "@/features/budgeting/server/service"
 import { getBudgetAdvisorRecommendations } from "@/features/budgeting/server/advisor"
+import { getUserPreference } from "@/features/settings/server/service"
 import {
   currentMonthString,
   formatMonthLabel,
@@ -68,10 +69,17 @@ export default async function BudgetingPage({
   const resolvedSearchParams = await searchParams
   const month = resolvedSearchParams.month ?? currentMonthString()
 
-  const [budgetMonth, healthScore, categories] = await Promise.all([
+  const [budgetMonth, healthScore, categories, userPreference] = await Promise.all([
     getBudgetMonth(user.id, month),
     getBudgetHealthScore(user.id, month),
     getCategories(user.id),
+    // (Phase 4c release-gate fix, docs/release/phase-4c-notes.md Section 1):
+    // `BudgetSummaryCards` below is a Server Component and can't read the
+    // `CurrencyPreferenceProvider` Context `app/(dashboard)/layout.tsx` mounts
+    // for Client Components — resolved here, alongside every other
+    // independent fetch this page already batches, and passed straight
+    // through as a plain prop.
+    getUserPreference(user.id),
   ])
 
   const colorByCategoryId = new Map(
@@ -140,6 +148,7 @@ export default async function BudgetingPage({
             <BudgetSummaryCards
               totals={budgetMonth.totals}
               uncategorizedSpent={budgetMonth.uncategorizedSpent}
+              currency={userPreference.currencyDisplay}
             />
             <BudgetHealthScoreBadge score={healthScore} />
           </div>

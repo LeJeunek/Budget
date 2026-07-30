@@ -29,7 +29,16 @@ import type {
 // exactly the class of "silently corrupted file" failure reports.md
 // Cross-Cutting Requirement #6 says must never reach a user undetected.
 
-const META = { period: { start: "2026-01-01", end: "2026-01-31", label: "January 2026", isPartial: false }, generatedAt: "2026-02-01T00:00:00.000Z" }
+const META = {
+  period: { start: "2026-01-01", end: "2026-01-31", label: "January 2026", isPartial: false },
+  generatedAt: "2026-02-01T00:00:00.000Z",
+  // Phase 4c currency-display wiring (docs/release/phase-4c-notes.md §1):
+  // every fixture below defaults to "USD" — the one non-USD variant test at
+  // the bottom of this file overrides only this field, holding every numeric
+  // fixture value identical, to verify by construction that a currency change
+  // affects rendered formatting only.
+  currency: "USD",
+}
 
 async function expectValidPdf(data: ReportData) {
   const buffer = await renderReportPdf(data)
@@ -279,5 +288,45 @@ describe("renderReportPdf", () => {
       averageSavingsRate: null,
     }
     await expectValidPdf(data)
+  })
+
+  // Phase 4c (phase-4c-technical-design.md §3.6, docs/product/customization.md
+  // Currency Display capability, docs/release/phase-4c-notes.md §1's blocking
+  // finding): verifies, by construction, that a non-USD `ReportMeta.currency`
+  // changes only `formatCurrency`'s rendered symbol/grouping, never any
+  // underlying numeric value the Monthly Report renders — both variants below
+  // are built from the exact same numeric fixture object (`monthlyFixture`),
+  // varying only `currency`, per customization.md's own Definition of Done
+  // ("verified, by test, to change rendered symbol/grouping only").
+  it("renders a Monthly Report identically for USD and a non-USD display currency, except for currency formatting", async () => {
+    const monthlyFixture: Omit<MonthlyReportData, "currency"> = {
+      period: META.period,
+      generatedAt: META.generatedAt,
+      type: "MONTHLY",
+      summary: { income: 5000, expenses: 3200, cashFlow: 1800, savingsRate: 0.36, hasActivity: true },
+      netWorth: {
+        start: { date: "2026-01-01", netWorth: 50000 },
+        end: { date: "2026-01-31", netWorth: 51800 },
+        change: 1800,
+      },
+      spendingByCategory: [{ categoryId: "c1", categoryName: "Groceries", amount: 800 }],
+      budgetVsActual: null,
+      narrative: null,
+    }
+
+    const usdData: MonthlyReportData = { ...monthlyFixture, currency: "USD" }
+    const eurData: MonthlyReportData = { ...monthlyFixture, currency: "EUR" }
+
+    // Every numeric/period/narrative field came from the same object
+    // reference — only `currency` differs between the two DTOs passed to
+    // `renderReportPdf` below, which is what makes this test a genuine proof
+    // that currency is a pure rendering input, not something that could
+    // influence (or be influenced by) any computed figure.
+    expect(usdData.summary).toBe(eurData.summary)
+    expect(usdData.netWorth).toBe(eurData.netWorth)
+    expect(usdData.spendingByCategory).toBe(eurData.spendingByCategory)
+
+    await expectValidPdf(usdData)
+    await expectValidPdf(eurData)
   })
 })

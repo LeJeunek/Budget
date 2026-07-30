@@ -22,6 +22,7 @@ import {
   getSubscriptionCandidates,
 } from "@/features/analytics/server/subscriptions"
 import { getSpendingInsights } from "@/features/analytics/server/insights"
+import { getUserPreference } from "@/features/settings/server/service"
 
 import { ReportingPeriodSelector } from "@/features/analytics/components/reporting-period-selector"
 import { SpendingInsightsWidget } from "@/features/analytics/components/spending-insights-widget"
@@ -103,6 +104,7 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     subscriptionCandidates,
     dismissedSubscriptionMerchants,
     spendingInsights,
+    userPreference,
   ] = await Promise.all([
     getYearlySpending(user.id),
     getCategoryTrends(user.id, range),
@@ -125,6 +127,15 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     // this same shared reporting-period control when surfaced on the
     // Analytics page — no separate, competing period concept.
     getSpendingInsights(user.id, period),
+    // (Phase 4c release-gate fix, docs/release/phase-4c-notes.md Section 1)
+    // Resolved here, alongside every other independent fetch this page
+    // already batches, since this page's own currency-formatting children
+    // below (`TopMerchantsList`, `LargestPurchasesList`, `DailySpendingHeatmap`,
+    // `BudgetVsActualTable`) are all Server Components and can't read the
+    // `CurrencyPreferenceProvider` Context `app/(dashboard)/layout.tsx` mounts
+    // for Client Components — they need `currencyDisplay` threaded in as a
+    // plain prop instead.
+    getUserPreference(user.id),
   ])
 
   // Both derived in-memory from results already fetched above — no extra
@@ -173,13 +184,16 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
 
       <CategoryTrendsChart data={categoryTrends} />
 
-      <BudgetVsActualTable data={budgetVsActual} />
+      <BudgetVsActualTable data={budgetVsActual} currency={userPreference.currencyDisplay} />
 
-      <DailySpendingHeatmap data={dailyHeatmap} />
+      <DailySpendingHeatmap data={dailyHeatmap} currency={userPreference.currencyDisplay} />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <TopMerchantsList data={topMerchants} />
-        <LargestPurchasesList data={largestPurchases} />
+        <TopMerchantsList data={topMerchants} currency={userPreference.currencyDisplay} />
+        <LargestPurchasesList
+          data={largestPurchases}
+          currency={userPreference.currencyDisplay}
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">

@@ -16,8 +16,11 @@
 
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 
-import { formatCurrency } from "@/lib/utils"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  useCurrencyDisplay,
+  useFormatCurrency,
+} from "@/app/(dashboard)/currency-preference-provider"
 
 import type { MonthlyTrend } from "../types"
 import { formatCompactCurrency } from "./chart-format"
@@ -46,6 +49,9 @@ function formatMonthLabel(monthKey: string): string {
 }
 
 export function MonthlyTrendsChart({ data }: MonthlyTrendsChartProps) {
+  const formatCurrency = useFormatCurrency()
+  const currency = useCurrencyDisplay()
+
   // Only a genuinely empty series (e.g. a user whose signup month floor
   // dropped every requested month — not expected in practice since the
   // current in-progress month is always included, but defensive per the
@@ -101,7 +107,7 @@ export function MonthlyTrendsChart({ data }: MonthlyTrendsChartProps) {
                 stroke="var(--muted-foreground)"
                 fontSize={12}
                 width={56}
-                tickFormatter={formatCompactCurrency}
+                tickFormatter={(value) => formatCompactCurrency(value, currency)}
               />
               <Tooltip
                 formatter={(value) => formatCurrency(Number(value))}

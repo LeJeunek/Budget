@@ -8,7 +8,7 @@ import { ReportTable } from "../report-table"
 
 /** Expense Report template (reports.md §5). */
 export function ExpenseReportTemplate({ data }: { data: ExpenseReportData }) {
-  const { monthlyTrend, byCategory, topMerchants, largestPurchases } = data
+  const { monthlyTrend, byCategory, topMerchants, largestPurchases, currency } = data
 
   return (
     <ReportDocument type={data.type} period={data.period} generatedAt={data.generatedAt}>
@@ -22,7 +22,7 @@ export function ExpenseReportTemplate({ data }: { data: ExpenseReportData }) {
                 header: "Total Expenses",
                 width: 50,
                 align: "right",
-                render: (r) => formatCurrency(r.expenses),
+                render: (r) => formatCurrency(r.expenses, currency),
               },
             ]}
             rows={monthlyTrend}
@@ -42,7 +42,7 @@ export function ExpenseReportTemplate({ data }: { data: ExpenseReportData }) {
                 header: "Amount",
                 width: 40,
                 align: "right",
-                render: (r) => formatCurrency(r.amount),
+                render: (r) => formatCurrency(r.amount, currency),
               },
             ]}
             rows={byCategory}
@@ -62,7 +62,7 @@ export function ExpenseReportTemplate({ data }: { data: ExpenseReportData }) {
                 header: "Total Spend",
                 width: 25,
                 align: "right",
-                render: (r) => formatCurrency(r.totalSpend),
+                render: (r) => formatCurrency(r.totalSpend, currency),
               },
               {
                 key: "count",
@@ -91,7 +91,7 @@ export function ExpenseReportTemplate({ data }: { data: ExpenseReportData }) {
                 header: "Amount",
                 width: 20,
                 align: "right",
-                render: (r) => formatCurrency(r.amount),
+                render: (r) => formatCurrency(r.amount, currency),
               },
             ]}
             rows={largestPurchases}

@@ -28,7 +28,8 @@ import { markOccurrencePaid } from "@/features/bills/server/actions"
 import type { MarkPaidInput } from "@/features/bills/server/validation"
 import type { ApiResult } from "@/lib/api-response"
 import type { TransactionListResult } from "@/features/transactions/types"
-import { cn, formatCurrency, formatDate } from "@/lib/utils"
+import { cn, formatDate } from "@/lib/utils"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -230,6 +231,7 @@ function TransactionPicker({
   selectedTransactionId: string | null
   onSelect: (id: string) => void
 }) {
+  const formatCurrency = useFormatCurrency()
   const [search, setSearch] = React.useState("")
   const [results, setResults] = React.useState<PickerTransaction[]>([])
   const [isLoading, setIsLoading] = React.useState(false)

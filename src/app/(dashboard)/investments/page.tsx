@@ -15,6 +15,7 @@ import { ContainerHoldingsSection } from "@/features/investments/components/cont
 import { PortfolioOverviewSection } from "@/features/investments/components/portfolio-overview-section"
 import { AllocationChart } from "@/features/investments/components/allocation-chart"
 import { GrowthChart } from "@/features/investments/components/growth-chart"
+import { getUserPreference } from "@/features/settings/server/service"
 import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
@@ -41,14 +42,26 @@ export default async function InvestmentsPage() {
     redirect("/login")
   }
 
-  const [containers, portfolioOverview, assetAllocation, sectorAllocation, growthHistory] =
-    await Promise.all([
-      getContainers(user.id),
-      getPortfolioOverview(user.id),
-      getAllocation(user.id, { by: "assetType" }),
-      getAllocation(user.id, { by: "sector" }),
-      getGrowthHistory(user.id),
-    ])
+  const [
+    containers,
+    portfolioOverview,
+    assetAllocation,
+    sectorAllocation,
+    growthHistory,
+    userPreference,
+  ] = await Promise.all([
+    getContainers(user.id),
+    getPortfolioOverview(user.id),
+    getAllocation(user.id, { by: "assetType" }),
+    getAllocation(user.id, { by: "sector" }),
+    getGrowthHistory(user.id),
+    // (Phase 4c release-gate fix, docs/release/phase-4c-notes.md Section 1):
+    // `PortfolioOverviewSection` below is a Server Component and can't read
+    // the `CurrencyPreferenceProvider` Context `app/(dashboard)/layout.tsx`
+    // mounts for Client Components — resolved here and threaded through as a
+    // plain prop.
+    getUserPreference(user.id),
+  ])
 
   const [activeHoldingsLists, closedHoldingsLists] = await Promise.all([
     Promise.all(
@@ -97,7 +110,10 @@ export default async function InvestmentsPage() {
         <EmptyInvestmentsState containers={containers} />
       ) : (
         <>
-          <PortfolioOverviewSection overview={portfolioOverview} />
+          <PortfolioOverviewSection
+            overview={portfolioOverview}
+            currency={userPreference.currencyDisplay}
+          />
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <AllocationChart

@@ -38,6 +38,12 @@ import { formatMonthLabel } from "./chart-format"
 
 export interface BudgetVsActualTableProps {
   data: BudgetVsActualMonth[]
+  /** The caller's resolved `UserPreference.currencyDisplay`
+   * (docs/release/phase-4c-notes.md Section 1) — this is a Server Component
+   * (see this file's own header comment), so it can't read
+   * `useCurrencyDisplay()`; `app/(dashboard)/analytics/page.tsx` resolves this
+   * once and passes it straight through. */
+  currency: string
 }
 
 interface CategoryRow {
@@ -73,7 +79,7 @@ function buildCategoryRows(data: BudgetVsActualMonth[]): CategoryRow[] {
   return [...rowsById.values()].sort((a, b) => a.categoryName.localeCompare(b.categoryName))
 }
 
-export function BudgetVsActualTable({ data }: BudgetVsActualTableProps) {
+export function BudgetVsActualTable({ data, currency }: BudgetVsActualTableProps) {
   const categoryRows = buildCategoryRows(data)
 
   if (data.length === 0 || categoryRows.length === 0) {
@@ -137,10 +143,12 @@ export function BudgetVsActualTable({ data }: BudgetVsActualTableProps) {
                       key={monthEntry.month}
                       className={cn("text-right", isOverBudget && "text-destructive")}
                     >
-                      {formatCurrency(cell.actual)}
+                      {formatCurrency(cell.actual, currency)}
                       <span className="text-muted-foreground">
                         {" / "}
-                        {cell.allocated === null ? "unset" : formatCurrency(cell.allocated)}
+                        {cell.allocated === null
+                          ? "unset"
+                          : formatCurrency(cell.allocated, currency)}
                       </span>
                     </TableCell>
                   )

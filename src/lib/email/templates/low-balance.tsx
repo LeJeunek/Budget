@@ -10,6 +10,10 @@ import { formatCurrency } from "./format"
 export interface LowBalanceEmailProps {
   accountName: string
   balance: number
+  /** Phase 4c: the recipient's own resolved `UserPreference.currencyDisplay`,
+   * threaded from `email-dispatch.ts` — see `./format.ts`'s `formatCurrency`
+   * JSDoc for the full cross-user-leakage rationale. */
+  currency: string
   unsubscribeUrl: string
   preferencesUrl: string
 }
@@ -17,6 +21,7 @@ export interface LowBalanceEmailProps {
 export function LowBalanceEmail({
   accountName,
   balance,
+  currency,
   unsubscribeUrl,
   preferencesUrl,
 }: LowBalanceEmailProps) {
@@ -29,7 +34,7 @@ export function LowBalanceEmail({
     >
       <Text style={{ fontSize: "14px", color: "#374151" }}>
         Your <strong>{accountName}</strong> balance has dropped below your
-        low-balance threshold. Current balance: {formatCurrency(balance)}.
+        low-balance threshold. Current balance: {formatCurrency(balance, currency)}.
       </Text>
     </NotificationEmailLayout>
   )

@@ -1,6 +1,7 @@
 import { createElement, type ReactElement } from "react"
 
 import { db } from "@/lib/db"
+import { getUserPreference } from "@/features/settings/server/service"
 import { sendNotificationEmail } from "@/lib/email/send-notification-email"
 import { generateUnsubscribeToken } from "@/lib/email/unsubscribe-token"
 import { BudgetOverEmail } from "@/lib/email/templates/budget-over"
@@ -34,9 +35,23 @@ import { getEmailEnabledForType } from "./preferences"
  * `createNotificationIfNew`) from its own already-userId-scoped read — this
  * function never issues a second, independently-scoped query to
  * "re-fetch today's large purchase/goal/account/summary for this user." The
- * only additional read here is `db.user.findUnique({ where: { id: userId } })`
- * for the recipient's own email address, itself scoped by the same `userId`
- * the caller already resolved.
+ * only additional reads here are `db.user.findUnique({ where: { id: userId } })`
+ * for the recipient's own email address and (Phase 4c, below)
+ * `getUserPreference(userId)` for the recipient's own display-currency
+ * preference — both scoped by the exact same `userId` the caller already
+ * resolved, never a second, independently-scoped lookup that could resolve to
+ * a different user's preference.
+ *
+ * **Phase 4c (phase-4c-technical-design.md §3.6, docs/release/
+ * phase-4c-notes.md §1's blocking finding):** every email template with a
+ * currency-formatted figure (`BudgetOverEmail`, `BillDueSoonEmail`,
+ * `BillLateEmail`, `LargePurchaseEmail`, `LowBalanceEmail`) now requires a
+ * `currency` prop, resolved once here from `getUserPreference(userId).
+ * currencyDisplay` and threaded into `buildEmailContent` below — the
+ * identical "resolve once per already-authorized `userId`, thread down"
+ * shape `server/service.ts`'s `generateReport` uses for Reports.
+ * `GoalAchievedEmail`/`MonthlySummaryReadyEmail` render no currency figure at
+ * all and are left unchanged.
  *
  * **AC7 ("an email failure never affects in-app delivery"):**
  * `sendNotificationEmail` never throws (see its own JSDoc), so a Resend
@@ -72,7 +87,9 @@ export async function dispatchNotificationEmail(
   const unsubscribeUrl = `${baseUrl}/api/notifications/unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`
   const preferencesUrl = `${baseUrl}/settings/notifications`
 
-  const emailContent = buildEmailContent(notification, unsubscribeUrl, preferencesUrl)
+  const { currencyDisplay } = await getUserPreference(userId)
+
+  const emailContent = buildEmailContent(notification, unsubscribeUrl, preferencesUrl, currencyDisplay)
 
   const result = await sendNotificationEmail({
     to: user.email,
@@ -117,6 +134,7 @@ function buildEmailContent(
   notification: Notification,
   unsubscribeUrl: string,
   preferencesUrl: string,
+  currency: string,
 ): EmailContent {
   switch (notification.type) {
     case "BUDGET_OVER":
@@ -125,6 +143,7 @@ function buildEmailContent(
         template: createElement(BudgetOverEmail, {
           categoryName: notification.categoryName,
           allocated: notification.allocated,
+          currency,
           unsubscribeUrl,
           preferencesUrl,
         }),
@@ -136,6 +155,7 @@ function buildEmailContent(
           billName: notification.billName,
           dueDate: notification.dueDate,
           expectedAmount: notification.expectedAmount,
+          currency,
           unsubscribeUrl,
           preferencesUrl,
         }),
@@ -147,6 +167,7 @@ function buildEmailContent(
           billName: notification.billName,
           dueDate: notification.dueDate,
           expectedAmount: notification.expectedAmount,
+          currency,
           unsubscribeUrl,
           preferencesUrl,
         }),
@@ -167,6 +188,7 @@ function buildEmailContent(
           merchant: notification.merchant,
           amount: notification.amount,
           date: notification.date,
+          currency,
           unsubscribeUrl,
           preferencesUrl,
         }),
@@ -177,6 +199,7 @@ function buildEmailContent(
         template: createElement(LowBalanceEmail, {
           accountName: notification.accountName,
           balance: notification.balance,
+          currency,
           unsubscribeUrl,
           preferencesUrl,
         }),

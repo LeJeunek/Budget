@@ -17,7 +17,8 @@ import { archiveBill, unarchiveBill } from "@/features/bills/server/actions"
 import { BillFormDialog, BILL_SCHEDULE_LABELS } from "@/features/bills/components/bill-form"
 import { OccurrenceHistoryTable } from "@/features/bills/components/occurrence-history-table"
 import type { Category } from "@/features/categories/types"
-import { cn, formatCurrency, formatDate } from "@/lib/utils"
+import { cn, formatDate } from "@/lib/utils"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -34,6 +35,7 @@ export interface BillDetailClientProps {
 }
 
 export function BillDetailClient({ bill, categories }: BillDetailClientProps) {
+  const formatCurrency = useFormatCurrency()
   const router = useRouter()
   const [editOpen, setEditOpen] = useState(false)
   const [isTogglingArchive, setIsTogglingArchive] = useState(false)

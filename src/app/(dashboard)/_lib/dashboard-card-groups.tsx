@@ -82,6 +82,15 @@ export interface DashboardCardData {
   netWorthHistory: Awaited<ReturnType<typeof getNetWorthHistory>>
   mostRecentMonthlyRecap: Awaited<ReturnType<typeof getMostRecentSummary>>
   monthlyRecapHistory: Awaited<ReturnType<typeof getSummaryHistory>>
+  /**
+   * The caller's resolved `UserPreference.currencyDisplay`
+   * (docs/release/phase-4c-notes.md Section 1). This module's own render
+   * bodies are Server Components (no `useContext`), so `page.tsx` resolves
+   * this once via `getUserPreference` (the very same call it already makes
+   * for `getDashboardCardPreferences`, sharing that batch) and threads it
+   * through this data bag rather than each stat card re-fetching it.
+   */
+  currency: string
 }
 
 /**
@@ -122,7 +131,7 @@ function buildCardRenderers(data: DashboardCardData): DashboardCardRenderEntry[]
       render: () => (
         <StatCard
           label="Net Worth"
-          value={formatCurrency(data.netWorth.total)}
+          value={formatCurrency(data.netWorth.total, data.currency)}
           icon={Wallet}
         />
       ),
@@ -133,7 +142,7 @@ function buildCardRenderers(data: DashboardCardData): DashboardCardRenderEntry[]
       render: () => (
         <StatCard
           label="Monthly Income"
-          value={formatCurrency(data.monthlySummary.income)}
+          value={formatCurrency(data.monthlySummary.income, data.currency)}
           icon={TrendingUp}
         />
       ),
@@ -144,7 +153,7 @@ function buildCardRenderers(data: DashboardCardData): DashboardCardRenderEntry[]
       render: () => (
         <StatCard
           label="Monthly Expenses"
-          value={formatCurrency(data.monthlySummary.expenses)}
+          value={formatCurrency(data.monthlySummary.expenses, data.currency)}
           icon={TrendingDown}
         />
       ),
@@ -163,7 +172,7 @@ function buildCardRenderers(data: DashboardCardData): DashboardCardRenderEntry[]
           value={
             data.budgetSummary === null
               ? "No budget set yet"
-              : formatCurrency(data.budgetSummary.totalRemaining)
+              : formatCurrency(data.budgetSummary.totalRemaining, data.currency)
           }
           icon={Target}
         />
@@ -175,7 +184,7 @@ function buildCardRenderers(data: DashboardCardData): DashboardCardRenderEntry[]
       render: () => (
         <StatCard
           label="Cash Flow"
-          value={formatCurrency(data.monthlySummary.cashFlow)}
+          value={formatCurrency(data.monthlySummary.cashFlow, data.currency)}
           icon={ArrowLeftRight}
         />
       ),

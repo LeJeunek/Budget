@@ -27,7 +27,7 @@ import type { ResolvedPeriod } from "../period"
 export async function assembleExpenseReportData(
   userId: string,
   period: ResolvedPeriod,
-): Promise<Omit<ExpenseReportData, "type" | "period" | "generatedAt">> {
+): Promise<Omit<ExpenseReportData, "type" | "period" | "generatedAt" | "currency">> {
   // "All Time" (`period.start === null`) has no concrete floor to loop
   // months from until resolved against this user's own real history — every
   // period-aware Analytics function already does this internally, but this

@@ -30,10 +30,11 @@ import { toast } from "sonner"
 
 import type { BudgetCategoryLine } from "@/features/budgeting/types"
 import { setCategoryAllocation } from "@/features/budgeting/server/actions"
-import { cn, formatCurrency } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 
 export interface BudgetCategoryRowProps {
   /** `"YYYY-MM"` — the month this line belongs to, passed straight through
@@ -63,6 +64,7 @@ export function BudgetCategoryRow({
   color,
   isEditable,
 }: BudgetCategoryRowProps) {
+  const formatCurrency = useFormatCurrency()
   const router = useRouter()
   const [inputValue, setInputValue] = useState(() =>
     allocationToInputValue(line.allocated),

@@ -24,9 +24,16 @@ import {
 
 export interface ValueHistoryListProps {
   entries: HoldingValueHistoryEntry[]
+  /** The caller's resolved `UserPreference.currencyDisplay`
+   * (docs/release/phase-4c-notes.md Section 1) — this is a Server Component
+   * (see this file's own header comment), so
+   * `app/(dashboard)/investments/[holdingId]/page.tsx` resolves this once
+   * and passes it straight through rather than this component reading a
+   * Context. */
+  currency: string
 }
 
-export function ValueHistoryList({ entries }: ValueHistoryListProps) {
+export function ValueHistoryList({ entries, currency }: ValueHistoryListProps) {
   if (entries.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -50,10 +57,10 @@ export function ValueHistoryList({ entries }: ValueHistoryListProps) {
           <TableRow key={entry.id}>
             <TableCell>{formatDate(entry.recordedAt)}</TableCell>
             <TableCell className="text-right text-muted-foreground">
-              {formatCurrency(entry.previousValue)}
+              {formatCurrency(entry.previousValue, currency)}
             </TableCell>
             <TableCell className="text-right font-medium">
-              {formatCurrency(entry.newValue)}
+              {formatCurrency(entry.newValue, currency)}
             </TableCell>
           </TableRow>
         ))}

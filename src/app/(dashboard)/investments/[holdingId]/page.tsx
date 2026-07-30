@@ -17,6 +17,7 @@ import {
   SECTOR_LABELS,
 } from "@/features/investments/components/investment-labels"
 import { cn, formatCurrency } from "@/lib/utils"
+import { getUserPreference } from "@/features/settings/server/service"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
@@ -59,9 +60,16 @@ export default async function HoldingDetailPage({
     return <HoldingNotFound />
   }
 
-  const [containers, growthHistory] = await Promise.all([
+  const [containers, growthHistory, userPreference] = await Promise.all([
     getContainers(user.id),
     getGrowthHistory(user.id, { holdingId }),
+    // (Phase 4c release-gate fix, docs/release/phase-4c-notes.md Section 1):
+    // this page and its `ValueHistoryList`/`DividendHistoryList` children
+    // below are all Server Components and can't read the
+    // `CurrencyPreferenceProvider` Context `app/(dashboard)/layout.tsx`
+    // mounts for Client Components — resolved here and threaded through as a
+    // plain prop.
+    getUserPreference(user.id),
   ])
 
   const container = containers.find((c) => c.id === holding.accountId)
@@ -105,13 +113,13 @@ export default async function HoldingDetailPage({
           <div className="flex flex-col gap-1">
             <span className="text-xs text-muted-foreground">Current value</span>
             <span className="font-heading text-xl font-semibold text-foreground">
-              {formatCurrency(holding.currentValue)}
+              {formatCurrency(holding.currentValue, userPreference.currencyDisplay)}
             </span>
           </div>
           <div className="flex flex-col gap-1">
             <span className="text-xs text-muted-foreground">Cost basis</span>
             <span className="font-heading text-xl font-semibold text-foreground">
-              {formatCurrency(holding.costBasis)}
+              {formatCurrency(holding.costBasis, userPreference.currencyDisplay)}
             </span>
           </div>
           <div className="flex flex-col gap-1">
@@ -125,7 +133,7 @@ export default async function HoldingDetailPage({
               )}
             >
               {isGainNegative ? "" : "+"}
-              {formatCurrency(holding.gainLossAmount)}
+              {formatCurrency(holding.gainLossAmount, userPreference.currencyDisplay)}
               {holding.gainLossPercent !== null &&
                 ` (${holding.gainLossPercent >= 0 ? "+" : ""}${holding.gainLossPercent.toFixed(1)}%)`}
             </span>
@@ -135,7 +143,7 @@ export default async function HoldingDetailPage({
               Total dividend income
             </span>
             <span className="font-heading text-xl font-semibold text-foreground">
-              {formatCurrency(totalDividends)}
+              {formatCurrency(totalDividends, userPreference.currencyDisplay)}
             </span>
           </div>
         </CardContent>
@@ -148,7 +156,10 @@ export default async function HoldingDetailPage({
           <CardTitle>Value update history</CardTitle>
         </CardHeader>
         <CardContent>
-          <ValueHistoryList entries={holding.valueHistory} />
+          <ValueHistoryList
+            entries={holding.valueHistory}
+            currency={userPreference.currencyDisplay}
+          />
         </CardContent>
       </Card>
 
@@ -157,7 +168,10 @@ export default async function HoldingDetailPage({
           <CardTitle>Dividend history</CardTitle>
         </CardHeader>
         <CardContent>
-          <DividendHistoryList dividends={holding.dividends} />
+          <DividendHistoryList
+            dividends={holding.dividends}
+            currency={userPreference.currencyDisplay}
+          />
         </CardContent>
       </Card>
     </div>

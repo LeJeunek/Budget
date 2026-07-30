@@ -12,8 +12,11 @@
 
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 
-import { formatCurrency } from "@/lib/utils"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  useCurrencyDisplay,
+  useFormatCurrency,
+} from "@/app/(dashboard)/currency-preference-provider"
 
 import { formatCompactCurrency } from "./chart-format"
 
@@ -23,6 +26,9 @@ export interface IncomeVsExpenseChartProps {
 }
 
 export function IncomeVsExpenseChart({ income, expenses }: IncomeVsExpenseChartProps) {
+  const formatCurrency = useFormatCurrency()
+  const currency = useCurrencyDisplay()
+
   // Mirrors the "user has accounts but no transactions yet" edge case from
   // dashboard-overview.md: both figures at exactly 0 means no activity this
   // month, which reads as an empty state rather than a legitimate two-bar
@@ -67,7 +73,7 @@ export function IncomeVsExpenseChart({ income, expenses }: IncomeVsExpenseChartP
                   stroke="var(--muted-foreground)"
                   fontSize={12}
                   width={56}
-                  tickFormatter={formatCompactCurrency}
+                  tickFormatter={(value) => formatCompactCurrency(value, currency)}
                 />
                 <Tooltip
                   formatter={(value) => formatCurrency(Number(value))}

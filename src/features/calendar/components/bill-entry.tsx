@@ -42,12 +42,18 @@ const STATUS_ENTRY_CLASSNAME: Record<CalendarOccurrence["status"], string> = {
 
 export interface BillEntryProps {
   occurrence: CalendarOccurrence
+  /** The caller's resolved `UserPreference.currencyDisplay`
+   * (docs/release/phase-4c-notes.md Section 1) — this component has no
+   * `"use client"` directive of its own and is rendered from `CalendarGrid`
+   * (a Client Component), which resolves this via `useCurrencyDisplay()` and
+   * passes it straight through as a plain prop. */
+  currency: string
 }
 
 /** Selecting an entry navigates to that bill's detail page (AC3, the same
  * "click an entry, land on its source" interaction Calendar v1 AC4 already
  * established). */
-export function BillEntry({ occurrence }: BillEntryProps) {
+export function BillEntry({ occurrence, currency }: BillEntryProps) {
   return (
     <Link
       href={`/bills/${occurrence.billId}`}
@@ -55,11 +61,11 @@ export function BillEntry({ occurrence }: BillEntryProps) {
         "flex items-center gap-1 truncate rounded border px-1.5 py-0.5 text-[0.7rem] leading-tight hover:opacity-80",
         STATUS_ENTRY_CLASSNAME[occurrence.status],
       )}
-      title={`${occurrence.billName} — ${formatCurrency(occurrence.amount)}`}
+      title={`${occurrence.billName} — ${formatCurrency(occurrence.amount, currency)}`}
     >
       <Receipt className="size-3 shrink-0" aria-hidden="true" />
       <span className="truncate">
-        {occurrence.billName} · {formatCurrency(occurrence.amount)}
+        {occurrence.billName} · {formatCurrency(occurrence.amount, currency)}
       </span>
     </Link>
   )

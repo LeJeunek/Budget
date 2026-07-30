@@ -31,7 +31,11 @@ import {
 import { OccurrenceHistoryTable } from "@/features/recurring-income/components/occurrence-history-table"
 import { IrregularEventHistoryList } from "@/features/recurring-income/components/irregular-event-history-list"
 import { LogIncomeEventButton } from "@/features/recurring-income/components/irregular-event-form"
-import { cn, formatCurrency, formatDate } from "@/lib/utils"
+import { cn, formatDate } from "@/lib/utils"
+import {
+  useCurrencyDisplay,
+  useFormatCurrency,
+} from "@/app/(dashboard)/currency-preference-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -47,6 +51,8 @@ export interface IncomeStreamDetailClientProps {
 }
 
 export function IncomeStreamDetailClient({ stream }: IncomeStreamDetailClientProps) {
+  const formatCurrency = useFormatCurrency()
+  const currency = useCurrencyDisplay()
   const router = useRouter()
   const [editOpen, setEditOpen] = useState(false)
   const [isTogglingArchive, setIsTogglingArchive] = useState(false)
@@ -134,7 +140,7 @@ export function IncomeStreamDetailClient({ stream }: IncomeStreamDetailClientPro
             <h2 className="font-heading text-lg font-medium text-foreground">Logged income</h2>
             <LogIncomeEventButton streamId={stream.id} streamName={stream.name} />
           </div>
-          <IrregularEventHistoryList events={stream.events} />
+          <IrregularEventHistoryList events={stream.events} currency={currency} />
         </section>
       ) : (
         <section className="flex flex-col gap-2">

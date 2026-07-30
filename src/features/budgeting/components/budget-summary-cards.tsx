@@ -24,30 +24,40 @@ import type { BudgetMonthTotals } from "@/features/budgeting/types"
 export interface BudgetSummaryCardsProps {
   totals: BudgetMonthTotals
   uncategorizedSpent: number
+  /** The caller's resolved `UserPreference.currencyDisplay`
+   * (docs/release/phase-4c-notes.md Section 1) — this is a Server Component
+   * (no hooks/interactivity of its own — see this file's header comment), so
+   * `app/(dashboard)/budgeting/page.tsx` resolves this once and passes it
+   * straight through rather than this component reading a Context. */
+  currency: string
 }
 
 export function BudgetSummaryCards({
   totals,
   uncategorizedSpent,
+  currency,
 }: BudgetSummaryCardsProps) {
   return (
     <div className="flex flex-col gap-3">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard
           label="Total Allocated"
-          value={formatCurrency(totals.totalAllocated)}
+          value={formatCurrency(totals.totalAllocated, currency)}
         />
-        <StatCard label="Total Spent" value={formatCurrency(totals.totalSpent)} />
+        <StatCard
+          label="Total Spent"
+          value={formatCurrency(totals.totalSpent, currency)}
+        />
         <StatCard
           label="Total Remaining"
-          value={formatCurrency(totals.totalRemaining)}
+          value={formatCurrency(totals.totalRemaining, currency)}
         />
       </div>
 
       <p className="rounded-md border border-dashed border-border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
         Uncategorized spending this month:{" "}
         <span className="font-medium text-foreground">
-          {formatCurrency(uncategorizedSpent)}
+          {formatCurrency(uncategorizedSpent, currency)}
         </span>
       </p>
     </div>

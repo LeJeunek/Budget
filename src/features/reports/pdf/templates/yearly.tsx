@@ -29,8 +29,11 @@ function formatSavingsRate(rate: number | null): string {
   return rate === null ? "N/A" : `${(rate * 100).toFixed(1)}%`
 }
 
-function formatNetWorthPoint(point: { date: string; netWorth: number } | null): string {
-  return point ? `${formatCurrency(point.netWorth)} (as of ${point.date})` : "Not available"
+function formatNetWorthPoint(
+  point: { date: string; netWorth: number } | null,
+  currency: string,
+): string {
+  return point ? `${formatCurrency(point.netWorth, currency)} (as of ${point.date})` : "Not available"
 }
 
 export function YearlyReportTemplate({ data }: { data: YearlyReportData }) {
@@ -45,6 +48,7 @@ export function YearlyReportTemplate({ data }: { data: YearlyReportData }) {
     debts,
     investments,
     recurringIncome,
+    currency,
   } = data
 
   return (
@@ -53,15 +57,15 @@ export function YearlyReportTemplate({ data }: { data: YearlyReportData }) {
         <View style={styles.statRow}>
           <View style={styles.stat}>
             <Text style={styles.statLabel}>Income</Text>
-            <Text style={styles.statValue}>{formatCurrency(annualTotals.income)}</Text>
+            <Text style={styles.statValue}>{formatCurrency(annualTotals.income, currency)}</Text>
           </View>
           <View style={styles.stat}>
             <Text style={styles.statLabel}>Expenses</Text>
-            <Text style={styles.statValue}>{formatCurrency(annualTotals.expenses)}</Text>
+            <Text style={styles.statValue}>{formatCurrency(annualTotals.expenses, currency)}</Text>
           </View>
           <View style={styles.stat}>
             <Text style={styles.statLabel}>Cash Flow</Text>
-            <Text style={styles.statValue}>{formatCurrency(annualTotals.cashFlow)}</Text>
+            <Text style={styles.statValue}>{formatCurrency(annualTotals.cashFlow, currency)}</Text>
           </View>
           <View style={styles.stat}>
             <Text style={styles.statLabel}>Savings Rate</Text>
@@ -73,16 +77,16 @@ export function YearlyReportTemplate({ data }: { data: YearlyReportData }) {
       <ReportSection title="Net Worth">
         <View style={styles.netWorthRow}>
           <Text style={styles.netWorthLabel}>Start of year</Text>
-          <Text style={styles.netWorthValue}>{formatNetWorthPoint(netWorth.start)}</Text>
+          <Text style={styles.netWorthValue}>{formatNetWorthPoint(netWorth.start, currency)}</Text>
         </View>
         <View style={styles.netWorthRow}>
           <Text style={styles.netWorthLabel}>End of year</Text>
-          <Text style={styles.netWorthValue}>{formatNetWorthPoint(netWorth.end)}</Text>
+          <Text style={styles.netWorthValue}>{formatNetWorthPoint(netWorth.end, currency)}</Text>
         </View>
         <View style={styles.netWorthRow}>
           <Text style={styles.netWorthLabel}>Change</Text>
           <Text style={styles.netWorthValue}>
-            {netWorth.change === null ? "Not available" : formatCurrency(netWorth.change)}
+            {netWorth.change === null ? "Not available" : formatCurrency(netWorth.change, currency)}
           </Text>
         </View>
       </ReportSection>
@@ -97,21 +101,21 @@ export function YearlyReportTemplate({ data }: { data: YearlyReportData }) {
                 header: "Income",
                 width: 25,
                 align: "right",
-                render: (r) => formatCurrency(r.income),
+                render: (r) => formatCurrency(r.income, currency),
               },
               {
                 key: "expenses",
                 header: "Expenses",
                 width: 25,
                 align: "right",
-                render: (r) => formatCurrency(r.expenses),
+                render: (r) => formatCurrency(r.expenses, currency),
               },
               {
                 key: "cashFlow",
                 header: "Cash Flow",
                 width: 25,
                 align: "right",
-                render: (r) => formatCurrency(r.cashFlow),
+                render: (r) => formatCurrency(r.cashFlow, currency),
               },
             ]}
             rows={monthlyTrend}
@@ -131,7 +135,7 @@ export function YearlyReportTemplate({ data }: { data: YearlyReportData }) {
                 header: "Total for Year",
                 width: 60,
                 align: "right",
-                render: (r) => formatCurrency(r.points.reduce((sum, p) => sum + p.amount, 0)),
+                render: (r) => formatCurrency(r.points.reduce((sum, p) => sum + p.amount, 0), currency),
               },
             ]}
             rows={categoryTrends}
@@ -151,7 +155,7 @@ export function YearlyReportTemplate({ data }: { data: YearlyReportData }) {
                 header: "Total Spend",
                 width: 25,
                 align: "right",
-                render: (r) => formatCurrency(r.totalSpend),
+                render: (r) => formatCurrency(r.totalSpend, currency),
               },
               {
                 key: "count",
@@ -180,7 +184,7 @@ export function YearlyReportTemplate({ data }: { data: YearlyReportData }) {
                 header: "Amount",
                 width: 20,
                 align: "right",
-                render: (r) => formatCurrency(r.amount),
+                render: (r) => formatCurrency(r.amount, currency),
               },
             ]}
             rows={largestPurchases}
@@ -203,14 +207,14 @@ export function YearlyReportTemplate({ data }: { data: YearlyReportData }) {
                     header: "Allocated",
                     width: 30,
                     align: "right",
-                    render: (r) => (r.allocated === null ? "Unset" : formatCurrency(r.allocated)),
+                    render: (r) => (r.allocated === null ? "Unset" : formatCurrency(r.allocated, currency)),
                   },
                   {
                     key: "actual",
                     header: "Actual",
                     width: 30,
                     align: "right",
-                    render: (r) => formatCurrency(r.actual),
+                    render: (r) => formatCurrency(r.actual, currency),
                   },
                 ]}
                 rows={month.categories}
@@ -232,7 +236,7 @@ export function YearlyReportTemplate({ data }: { data: YearlyReportData }) {
                 header: "Balance",
                 width: 20,
                 align: "right",
-                render: (r) => formatCurrency(r.effectiveBalance),
+                render: (r) => formatCurrency(r.effectiveBalance, currency),
               },
               {
                 key: "rate",
@@ -246,7 +250,7 @@ export function YearlyReportTemplate({ data }: { data: YearlyReportData }) {
                 header: "Min. Payment",
                 width: 15,
                 align: "right",
-                render: (r) => formatCurrency(r.minimumPayment),
+                render: (r) => formatCurrency(r.minimumPayment, currency),
               },
               {
                 key: "payoffDate",
@@ -269,7 +273,7 @@ export function YearlyReportTemplate({ data }: { data: YearlyReportData }) {
             <View style={styles.statRow}>
               <View style={styles.stat}>
                 <Text style={styles.statLabel}>Portfolio Value</Text>
-                <Text style={styles.statValue}>{formatCurrency(investments.totalCurrentValue)}</Text>
+                <Text style={styles.statValue}>{formatCurrency(investments.totalCurrentValue, currency)}</Text>
               </View>
               <View style={styles.stat}>
                 {/* Interpolates the requested year (`data.period.label`,
@@ -281,11 +285,11 @@ export function YearlyReportTemplate({ data }: { data: YearlyReportData }) {
                  * (see docs/testing/bug-reports/
                  * yearly-report-hardcoded-gain-loss-this-year-label.md). */}
                 <Text style={styles.statLabel}>Gain/Loss ({data.period.label})</Text>
-                <Text style={styles.statValue}>{formatCurrency(investments.gainLossForYear)}</Text>
+                <Text style={styles.statValue}>{formatCurrency(investments.gainLossForYear, currency)}</Text>
               </View>
               <View style={styles.stat}>
                 <Text style={styles.statLabel}>Dividend Income</Text>
-                <Text style={styles.statValue}>{formatCurrency(investments.dividendIncome.total)}</Text>
+                <Text style={styles.statValue}>{formatCurrency(investments.dividendIncome.total, currency)}</Text>
               </View>
             </View>
             {investments.allocation.length > 0 ? (
@@ -297,7 +301,7 @@ export function YearlyReportTemplate({ data }: { data: YearlyReportData }) {
                     header: "Value",
                     width: 25,
                     align: "right",
-                    render: (r) => formatCurrency(r.value),
+                    render: (r) => formatCurrency(r.value, currency),
                   },
                   {
                     key: "percent",
@@ -341,7 +345,7 @@ export function YearlyReportTemplate({ data }: { data: YearlyReportData }) {
                 header: "Total Received",
                 width: 15,
                 align: "right",
-                render: (r) => formatCurrency(r.receivedTotal),
+                render: (r) => formatCurrency(r.receivedTotal, currency),
               },
             ]}
             rows={recurringIncome.streams}

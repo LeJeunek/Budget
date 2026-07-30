@@ -48,7 +48,6 @@ import {
   MEASUREMENT_BASIS_LABELS,
   clampPercent,
 } from "@/features/financial-goals/components/financial-goal-shared"
-import { formatCurrency } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -59,6 +58,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Progress } from "@/components/ui/progress"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 
 export interface FinancialGoalCardProps {
   goal: FinancialGoalWithProgress
@@ -197,6 +197,7 @@ export function FinancialGoalProgressBody({ goal }: { goal: FinancialGoalWithPro
 }
 
 function DebtPayoffProgress({ goal }: { goal: FinancialGoalWithProgress }) {
+  const formatCurrency = useFormatCurrency()
   const startingBalance = goal.startingBalance ?? 0
   const currentEffectiveBalance = goal.currentEffectiveBalance ?? 0
   const percentPaidOff = goal.percentPaidOff ?? 0
@@ -236,6 +237,7 @@ function DebtPayoffProgress({ goal }: { goal: FinancialGoalWithProgress }) {
 }
 
 function NetWorthSavingsProgress({ goal }: { goal: FinancialGoalWithProgress }) {
+  const formatCurrency = useFormatCurrency()
   const targetAmount = goal.targetAmount ?? 0
   const currentMeasuredValue = goal.currentMeasuredValue ?? 0
   const distanceToTarget = goal.distanceToTarget ?? targetAmount - currentMeasuredValue

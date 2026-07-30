@@ -19,6 +19,7 @@ import { AddIncomeStreamButton } from "@/features/recurring-income/components/in
 import { IncomeStreamList } from "@/features/recurring-income/components/income-stream-list"
 import { ExpectedUpcomingIncomeCard } from "@/features/recurring-income/components/expected-upcoming-income-card"
 import { Card, CardContent } from "@/components/ui/card"
+import { useCurrencyDisplay } from "@/app/(dashboard)/currency-preference-provider"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 export interface IncomeClientProps {
@@ -32,6 +33,7 @@ export function IncomeClient({
   archivedStreams,
   expectedUpcomingIncome,
 }: IncomeClientProps) {
+  const currency = useCurrencyDisplay()
   const hasAnyStreams = activeStreams.length > 0 || archivedStreams.length > 0
 
   return (
@@ -52,7 +54,7 @@ export function IncomeClient({
       ) : (
         <>
           {activeStreams.length > 0 && (
-            <ExpectedUpcomingIncomeCard data={expectedUpcomingIncome} />
+            <ExpectedUpcomingIncomeCard data={expectedUpcomingIncome} currency={currency} />
           )}
 
           <Tabs defaultValue="active">

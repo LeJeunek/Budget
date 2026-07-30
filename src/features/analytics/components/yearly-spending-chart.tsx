@@ -13,8 +13,11 @@
 
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 
-import { formatCurrency } from "@/lib/utils"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  useCurrencyDisplay,
+  useFormatCurrency,
+} from "@/app/(dashboard)/currency-preference-provider"
 
 import type { YearlySpendingPoint } from "../types"
 import { formatCompactCurrency } from "./chart-format"
@@ -24,6 +27,9 @@ export interface YearlySpendingChartProps {
 }
 
 export function YearlySpendingChart({ data }: YearlySpendingChartProps) {
+  const formatCurrency = useFormatCurrency()
+  const currency = useCurrencyDisplay()
+
   return (
     <Card>
       <CardHeader>
@@ -72,7 +78,7 @@ export function YearlySpendingChart({ data }: YearlySpendingChartProps) {
                     stroke="var(--muted-foreground)"
                     fontSize={12}
                     width={56}
-                    tickFormatter={formatCompactCurrency}
+                    tickFormatter={(value) => formatCompactCurrency(value, currency)}
                   />
                   <Tooltip
                     formatter={(value) => formatCurrency(Number(value))}

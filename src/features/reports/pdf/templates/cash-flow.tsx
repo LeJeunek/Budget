@@ -22,7 +22,7 @@ function formatSavingsRate(rate: number | null): string {
 }
 
 export function CashFlowReportTemplate({ data }: { data: CashFlowReportData }) {
-  const { monthlyTrend, cumulativeCashFlow, averageSavingsRate } = data
+  const { monthlyTrend, cumulativeCashFlow, averageSavingsRate, currency } = data
   const finalCumulative = cumulativeCashFlow.length > 0 ? cumulativeCashFlow[cumulativeCashFlow.length - 1] : 0
 
   return (
@@ -31,7 +31,7 @@ export function CashFlowReportTemplate({ data }: { data: CashFlowReportData }) {
         <View style={styles.statRow}>
           <View style={styles.stat}>
             <Text style={styles.statLabel}>Cumulative Net Cash Flow</Text>
-            <Text style={styles.statValue}>{formatCurrency(finalCumulative)}</Text>
+            <Text style={styles.statValue}>{formatCurrency(finalCumulative, currency)}</Text>
           </View>
           <View style={styles.stat}>
             <Text style={styles.statLabel}>Average Savings Rate</Text>
@@ -50,28 +50,28 @@ export function CashFlowReportTemplate({ data }: { data: CashFlowReportData }) {
                 header: "Income",
                 width: 20,
                 align: "right",
-                render: (r) => formatCurrency(r.income),
+                render: (r) => formatCurrency(r.income, currency),
               },
               {
                 key: "expenses",
                 header: "Expenses",
                 width: 20,
                 align: "right",
-                render: (r) => formatCurrency(r.expenses),
+                render: (r) => formatCurrency(r.expenses, currency),
               },
               {
                 key: "cashFlow",
                 header: "Net Cash Flow",
                 width: 20,
                 align: "right",
-                render: (r) => formatCurrency(r.cashFlow),
+                render: (r) => formatCurrency(r.cashFlow, currency),
               },
               {
                 key: "cumulative",
                 header: "Cumulative",
                 width: 20,
                 align: "right",
-                render: (r, index) => formatCurrency(cumulativeCashFlow[index]),
+                render: (r, index) => formatCurrency(cumulativeCashFlow[index], currency),
               },
             ]}
             rows={monthlyTrend}

@@ -25,8 +25,11 @@ import {
   YAxis,
 } from "recharts"
 
-import { formatCurrency } from "@/lib/utils"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  useCurrencyDisplay,
+  useFormatCurrency,
+} from "@/app/(dashboard)/currency-preference-provider"
 
 import type { CategoryTrend } from "../types"
 import { CHART_PALETTE, formatCompactCurrency, formatMonthLabel } from "./chart-format"
@@ -44,6 +47,9 @@ export interface CategoryTrendsChartProps {
 const MAX_RENDERED_CATEGORIES = 8
 
 export function CategoryTrendsChart({ data }: CategoryTrendsChartProps) {
+  const formatCurrency = useFormatCurrency()
+  const currency = useCurrencyDisplay()
+
   if (data.length === 0) {
     return (
       <Card>
@@ -116,7 +122,7 @@ export function CategoryTrendsChart({ data }: CategoryTrendsChartProps) {
                 stroke="var(--muted-foreground)"
                 fontSize={12}
                 width={56}
-                tickFormatter={formatCompactCurrency}
+                tickFormatter={(value) => formatCompactCurrency(value, currency)}
               />
               <Tooltip
                 formatter={(value) => formatCurrency(Number(value))}

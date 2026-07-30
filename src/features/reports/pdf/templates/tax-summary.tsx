@@ -28,7 +28,7 @@ const DISCLAIMER_TEXT =
   "This report is a reference summary of your own tracked FinanceOS data. It is not tax advice, does not calculate any tax owed or deductibility, and does not map any figure to a specific tax form or line. FinanceOS does not model tax categories, deductibility, or filing status. Consult a qualified tax professional for tax preparation and advice."
 
 export function TaxSummaryReportTemplate({ data }: { data: TaxSummaryReportData }) {
-  const { incomeBySource, expenseByCategory, investments } = data
+  const { incomeBySource, expenseByCategory, investments, currency } = data
 
   return (
     <ReportDocument
@@ -47,7 +47,7 @@ export function TaxSummaryReportTemplate({ data }: { data: TaxSummaryReportData 
                 header: "Amount",
                 width: 30,
                 align: "right",
-                render: (r) => formatCurrency(r.amount),
+                render: (r) => formatCurrency(r.amount, currency),
               },
               {
                 key: "percent",
@@ -74,7 +74,7 @@ export function TaxSummaryReportTemplate({ data }: { data: TaxSummaryReportData 
                 header: "Amount",
                 width: 40,
                 align: "right",
-                render: (r) => formatCurrency(r.amount),
+                render: (r) => formatCurrency(r.amount, currency),
               },
             ]}
             rows={expenseByCategory}
@@ -96,7 +96,7 @@ export function TaxSummaryReportTemplate({ data }: { data: TaxSummaryReportData 
                     header: "Dividend Income",
                     width: 40,
                     align: "right",
-                    render: (r) => formatCurrency(r.amount),
+                    render: (r) => formatCurrency(r.amount, currency),
                   },
                 ]}
                 rows={investments.dividendIncome.byHolding}
@@ -104,11 +104,11 @@ export function TaxSummaryReportTemplate({ data }: { data: TaxSummaryReportData 
             ) : null}
             <View style={styles.statRow}>
               <Text style={styles.statLabel}>Total Dividend Income (portfolio-wide)</Text>
-              <Text style={styles.statValue}>{formatCurrency(investments.dividendIncome.total)}</Text>
+              <Text style={styles.statValue}>{formatCurrency(investments.dividendIncome.total, currency)}</Text>
             </View>
             <View style={styles.statRow}>
               <Text style={styles.statLabel}>Cumulative Gain/Loss (since acquisition)</Text>
-              <Text style={styles.statValue}>{formatCurrency(investments.cumulativeGainLoss)}</Text>
+              <Text style={styles.statValue}>{formatCurrency(investments.cumulativeGainLoss, currency)}</Text>
             </View>
           </>
         ) : (

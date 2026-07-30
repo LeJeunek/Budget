@@ -29,14 +29,20 @@ import { formatCurrency } from "@/lib/utils"
 
 export interface ExpectedUpcomingIncomeCardProps {
   data: ExpectedUpcomingIncome
+  /** The caller's resolved `UserPreference.currencyDisplay`
+   * (docs/release/phase-4c-notes.md Section 1) — this component has no
+   * `"use client"` directive of its own and is rendered from `IncomeClient`
+   * (a Client Component), which resolves this via `useCurrencyDisplay()` and
+   * passes it straight through as a plain prop. */
+  currency: string
 }
 
-export function ExpectedUpcomingIncomeCard({ data }: ExpectedUpcomingIncomeCardProps) {
+export function ExpectedUpcomingIncomeCard({ data, currency }: ExpectedUpcomingIncomeCardProps) {
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
       <StatCard
         label="Expected upcoming income (this month)"
-        value={formatCurrency(data.total)}
+        value={formatCurrency(data.total, currency)}
         icon={Banknote}
         className="sm:max-w-xs"
       />
@@ -52,7 +58,9 @@ export function ExpectedUpcomingIncomeCard({ data }: ExpectedUpcomingIncomeCardP
             {data.byStream.map((entry) => (
               <div key={entry.streamId} className="flex items-center justify-between text-sm">
                 <span className="text-foreground">{entry.streamName}</span>
-                <span className="text-muted-foreground">{formatCurrency(entry.nextOccurrenceAmount)}</span>
+                <span className="text-muted-foreground">
+                  {formatCurrency(entry.nextOccurrenceAmount, currency)}
+                </span>
               </div>
             ))}
           </CardContent>

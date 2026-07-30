@@ -42,9 +42,13 @@ import {
   YAxis,
 } from "recharts"
 
-import { cn, formatCurrency } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  useCurrencyDisplay,
+  useFormatCurrency,
+} from "@/app/(dashboard)/currency-preference-provider"
 
 import type { NetWorthHistoryRange, NetWorthHistoryResponse } from "../types"
 import { useNetWorthHistory } from "../hooks/use-net-worth-history"
@@ -87,6 +91,8 @@ export function NetWorthHistoryChart({
   initialRange,
   initialData,
 }: NetWorthHistoryChartProps) {
+  const formatCurrency = useFormatCurrency()
+  const currency = useCurrencyDisplay()
   const [range, setRange] = React.useState<NetWorthHistoryRange>(initialRange)
   const [view, setView] = React.useState<BreakdownView>("net-worth")
 
@@ -179,7 +185,7 @@ export function NetWorthHistoryChart({
                     stroke="var(--muted-foreground)"
                     fontSize={12}
                     width={64}
-                    tickFormatter={formatCompactCurrency}
+                    tickFormatter={(value) => formatCompactCurrency(value, currency)}
                   />
                   <Tooltip
                     labelFormatter={(value) => formatDateLabel(String(value))}

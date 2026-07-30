@@ -36,6 +36,12 @@ import { formatMonthLabel } from "./chart-format"
 
 export interface DailySpendingHeatmapProps {
   data: DailySpendingHeatmapPoint[]
+  /** The caller's resolved `UserPreference.currencyDisplay`
+   * (docs/release/phase-4c-notes.md Section 1) — this is a Server Component
+   * (see this file's own header comment), so it can't read
+   * `useCurrencyDisplay()`; `app/(dashboard)/analytics/page.tsx` resolves this
+   * once and passes it straight through. */
+  currency: string
 }
 
 const MAX_RENDERED_MONTHS = 6
@@ -88,7 +94,7 @@ function intensityToOpacity(relativeIntensity: number): number {
   return Math.min(0.15 + relativeIntensity * 0.35, 1)
 }
 
-export function DailySpendingHeatmap({ data }: DailySpendingHeatmapProps) {
+export function DailySpendingHeatmap({ data, currency }: DailySpendingHeatmapProps) {
   if (data.length === 0) {
     return (
       <Card>
@@ -171,7 +177,7 @@ export function DailySpendingHeatmap({ data }: DailySpendingHeatmapProps) {
                           </TooltipTrigger>
                           <TooltipContent>
                             {point
-                              ? `${formatCurrency(point.amount)} on ${dateKey}`
+                              ? `${formatCurrency(point.amount, currency)} on ${dateKey}`
                               : `No spending on ${dateKey}`}
                           </TooltipContent>
                         </Tooltip>

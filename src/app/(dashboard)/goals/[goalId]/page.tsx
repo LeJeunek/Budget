@@ -9,6 +9,7 @@ import { GoalDetailActions } from "@/features/goals/components/goal-detail-actio
 import { ContributionForm } from "@/features/goals/components/contribution-form"
 import { ContributionHistoryList } from "@/features/goals/components/contribution-history-list"
 import { formatCurrency, formatDate } from "@/lib/utils"
+import { getUserPreference } from "@/features/settings/server/service"
 import { ProgressRing } from "@/components/shared/progress-ring"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -41,7 +42,14 @@ export default async function GoalDetailPage({
   }
 
   const { goalId } = await params
-  const goal = await getGoalById(user.id, goalId)
+  const [goal, userPreference] = await Promise.all([
+    getGoalById(user.id, goalId),
+    // (Phase 4c release-gate fix, docs/release/phase-4c-notes.md Section 1):
+    // this page's own currency figures below are formatted directly in this
+    // Server Component, so it needs `currencyDisplay` resolved here rather
+    // than via `useCurrencyDisplay()` (a Client-Component-only hook).
+    getUserPreference(user.id),
+  ])
 
   if (!goal) {
     return <GoalNotFound />
@@ -88,19 +96,19 @@ export default async function GoalDetailPage({
 
           <div className="flex flex-1 flex-col gap-1 text-center sm:text-left">
             <span className="font-heading text-2xl font-semibold text-foreground">
-              {formatCurrency(goal.currentProgress)}{" "}
+              {formatCurrency(goal.currentProgress, userPreference.currencyDisplay)}{" "}
               <span className="text-base font-normal text-muted-foreground">
-                of {formatCurrency(goal.targetAmount)}
+                of {formatCurrency(goal.targetAmount, userPreference.currencyDisplay)}
               </span>
             </span>
             {goal.overageAmount > 0 ? (
               <span className="text-sm text-muted-foreground">
-                {formatCurrency(goal.overageAmount)} over your{" "}
-                {formatCurrency(goal.targetAmount)} target
+                {formatCurrency(goal.overageAmount, userPreference.currencyDisplay)} over your{" "}
+                {formatCurrency(goal.targetAmount, userPreference.currencyDisplay)} target
               </span>
             ) : (
               <span className="text-sm text-muted-foreground">
-                {formatCurrency(goal.remainingAmount)} remaining
+                {formatCurrency(goal.remainingAmount, userPreference.currencyDisplay)} remaining
               </span>
             )}
             {goal.targetDate && (
@@ -111,7 +119,7 @@ export default async function GoalDetailPage({
             {goal.plannedMonthlyContribution !== null && (
               <span className="text-sm text-muted-foreground">
                 Planned monthly contribution:{" "}
-                {formatCurrency(goal.plannedMonthlyContribution)}
+                {formatCurrency(goal.plannedMonthlyContribution, userPreference.currencyDisplay)}
               </span>
             )}
             <EstimatedCompletionLine goal={goal} />

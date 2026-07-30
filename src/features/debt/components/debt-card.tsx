@@ -30,7 +30,8 @@ import {
 import { DEBT_TYPE_LABELS } from "@/features/debt/components/debt-form-schema"
 import { DebtFormDialog } from "@/features/debt/components/debt-form"
 import { LinkAccountDialog } from "@/features/debt/components/link-account-dialog"
-import { cn, formatCurrency } from "@/lib/utils"
+import { cn } from "@/lib/utils"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -66,6 +67,7 @@ export interface DebtCardProps {
 }
 
 export function DebtCard({ debt, eligibleAccounts }: DebtCardProps) {
+  const formatCurrency = useFormatCurrency()
   const router = useRouter()
   const [editOpen, setEditOpen] = useState(false)
   const [linkOpen, setLinkOpen] = useState(false)

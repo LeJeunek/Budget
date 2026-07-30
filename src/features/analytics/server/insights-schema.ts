@@ -48,6 +48,18 @@ export interface SpendingInsightCandidateInput {
  */
 export interface SpendingInsightsPromptInput {
   candidates: SpendingInsightCandidateInput[]
+  /**
+   * (Release-gate fix, phase-4c-notes.md Section 1 follow-up) The user's
+   * chosen display currency -- one of `UserPreference.currencyDisplay`'s
+   * ISO 4217 codes (`USD`/`EUR`/`GBP`/`CAD`/`AUD`/`JPY`), resolved via
+   * `features/settings/server/service.ts`'s `getUserPreference` alongside
+   * this feature's other already-fetched data (`insights.ts`'s own call
+   * sites) -- never a new aggregation. A formatting instruction for the
+   * model's prose, not a fact to verify: deliberately excluded from
+   * `buildInsightsPromptContext`'s `groundingData` map below, since it is
+   * not itself a number `citedFigures` could ever cite.
+   */
+  currency: string
 }
 
 // ---------------------------------------------------------------------------
@@ -135,8 +147,16 @@ export type SpendingInsightsOutput = z.infer<typeof SpendingInsightsSchema>
  * `verify-grounding.ts`/`verify-narrative-safety.ts` both match by numeric
  * *value*, never by key, so the key scheme only needs to avoid same-call
  * collisions, never to be human-readable or stable across calls.
+ *
+ * `currency` (Release-gate fix, phase-4c-notes.md Section 1 follow-up) is
+ * passed straight through onto `promptInput` and deliberately never touches
+ * `groundingData` -- see `SpendingInsightsPromptInput.currency`'s own doc
+ * comment for why.
  */
-export function buildInsightsPromptContext(candidates: SpendingInsightCandidate[]): {
+export function buildInsightsPromptContext(
+  candidates: SpendingInsightCandidate[],
+  currency: string,
+): {
   promptInput: SpendingInsightsPromptInput
   groundingData: Record<string, number>
 } {
@@ -154,5 +174,5 @@ export function buildInsightsPromptContext(candidates: SpendingInsightCandidate[
     })
   })
 
-  return { promptInput: { candidates: promptCandidates }, groundingData }
+  return { promptInput: { candidates: promptCandidates, currency }, groundingData }
 }

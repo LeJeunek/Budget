@@ -49,6 +49,7 @@ import { MonthNavigator } from "@/components/shared/month-navigator"
 import type { CalendarMonthDay } from "@/features/calendar/types"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { useCurrencyDisplay } from "@/app/(dashboard)/currency-preference-provider"
 
 import { BillEntry } from "./bill-entry"
 import { PaydayEntry } from "./payday-entry"
@@ -88,6 +89,7 @@ export function CalendarGrid({
   budgetResetMonth,
   hasNoDataAnywhere,
 }: CalendarGridProps) {
+  const currency = useCurrencyDisplay()
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -139,10 +141,18 @@ export function CalendarGrid({
               </span>
               <div className="flex flex-col gap-1">
                 {day.bills.map((occurrence) => (
-                  <BillEntry key={occurrence.billOccurrenceId} occurrence={occurrence} />
+                  <BillEntry
+                    key={occurrence.billOccurrenceId}
+                    occurrence={occurrence}
+                    currency={currency}
+                  />
                 ))}
                 {day.paydays.map((payday, index) => (
-                  <PaydayEntry key={`${payday.streamId}-${index}`} payday={payday} />
+                  <PaydayEntry
+                    key={`${payday.streamId}-${index}`}
+                    payday={payday}
+                    currency={currency}
+                  />
                 ))}
               </div>
             </div>

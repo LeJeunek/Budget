@@ -9,6 +9,7 @@ import { AddDebtButton } from "@/features/debt/components/debt-form"
 import { DebtList } from "@/features/debt/components/debt-list"
 import { StrategyComparison } from "@/features/debt/components/strategy-comparison"
 import { formatCurrency } from "@/lib/utils"
+import { getUserPreference } from "@/features/settings/server/service"
 import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
@@ -49,10 +50,15 @@ export default async function DebtPage() {
     redirect("/login")
   }
 
-  const [activeDebts, archivedDebts, accounts] = await Promise.all([
+  const [activeDebts, archivedDebts, accounts, userPreference] = await Promise.all([
     getDebts(user.id),
     getDebts(user.id, { includeArchived: true }),
     getAccounts(user.id),
+    // (Phase 4c release-gate fix, docs/release/phase-4c-notes.md Section 1):
+    // this page's own "Total active debt" figure below is formatted directly
+    // in this Server Component, so it needs `currencyDisplay` resolved here
+    // rather than via `useCurrencyDisplay()` (a Client-Component-only hook).
+    getUserPreference(user.id),
   ])
 
   const hasAnyDebts = activeDebts.length > 0 || archivedDebts.length > 0
@@ -103,7 +109,7 @@ export default async function DebtPage() {
                   Total active debt
                 </span>
                 <span className="font-heading text-xl font-semibold text-foreground">
-                  {formatCurrency(totalActiveBalance)}
+                  {formatCurrency(totalActiveBalance, userPreference.currencyDisplay)}
                 </span>
               </CardContent>
             </Card>

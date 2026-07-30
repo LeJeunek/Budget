@@ -29,8 +29,9 @@ import * as React from "react"
 
 import type { ApiResult } from "@/lib/api-response"
 import type { TransactionListResult } from "@/features/transactions/types"
-import { cn, formatCurrency, formatDate } from "@/lib/utils"
+import { cn, formatDate } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
 interface PickerTransaction {
@@ -53,6 +54,7 @@ export function TransactionPicker({
   selectedTransactionId,
   onSelect,
 }: TransactionPickerProps) {
+  const formatCurrency = useFormatCurrency()
   const [search, setSearch] = React.useState("")
   const [results, setResults] = React.useState<PickerTransaction[]>([])
   const [isLoading, setIsLoading] = React.useState(false)

@@ -55,8 +55,8 @@ import type { Account } from "@/features/accounts/types"
 import { updateAccount } from "@/features/accounts/server/actions"
 import { isBalanceAdjustableAccountType } from "@/features/transactions/server/balance-adjustment"
 import { getAccountBalanceReconciliationPreview } from "@/features/transactions/server/reconciliation-actions"
-import { formatCurrency } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 
 const DISMISSED_KEY_PREFIX = "financeos:reconciliation-dismissed:"
 
@@ -94,6 +94,7 @@ export interface ReconciliationPromptProps {
 }
 
 export function ReconciliationPrompt({ account }: ReconciliationPromptProps) {
+  const formatCurrency = useFormatCurrency()
   const router = useRouter()
   const queryClient = useQueryClient()
   const [isApplying, setIsApplying] = useState(false)

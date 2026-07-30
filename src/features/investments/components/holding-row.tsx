@@ -32,7 +32,8 @@ import { closeHolding } from "@/features/investments/server/actions"
 import { HoldingFormDialog } from "./holding-form"
 import { DividendFormDialog } from "./dividend-form"
 import { ASSET_TYPE_LABELS, SECTOR_LABELS } from "./investment-labels"
-import { cn, formatCurrency } from "@/lib/utils"
+import { cn } from "@/lib/utils"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -51,6 +52,7 @@ export interface HoldingRowProps {
 }
 
 export function HoldingRow({ holding, containers }: HoldingRowProps) {
+  const formatCurrency = useFormatCurrency()
   const router = useRouter()
   const [editOpen, setEditOpen] = useState(false)
   const [dividendOpen, setDividendOpen] = useState(false)

@@ -19,7 +19,7 @@ import { assertConcretePeriodStart, type ResolvedPeriod } from "../period"
 export async function assembleTaxSummaryReportData(
   userId: string,
   period: ResolvedPeriod,
-): Promise<Omit<TaxSummaryReportData, "type" | "period" | "generatedAt">> {
+): Promise<Omit<TaxSummaryReportData, "type" | "period" | "generatedAt" | "currency">> {
   const yearStart = assertConcretePeriodStart(period)
 
   const [incomeBySource, expenseByCategory, dividendIncome, portfolioOverview] = await Promise.all([
