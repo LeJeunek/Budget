@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import { DASHBOARD_CARD_KEYS } from "@/features/dashboard/dashboard-cards"
 
-import { materializeDashboardCardPreferences } from "./service"
+import { materializeDashboardCardPreferences, wouldHideLastVisibleCard } from "./service"
 
 // Coverage for `materializeDashboardCardPreferences` — the row-absence
 // materialization algorithm phase-4c-technical-design.md §3.5 specifies,
@@ -90,5 +90,97 @@ describe("materializeDashboardCardPreferences", () => {
     for (const card of DASHBOARD_CARD_KEYS) {
       expect(result.find((view) => view.key === card.key)?.label).toBe(card.label)
     }
+  })
+})
+
+// Coverage for `wouldHideLastVisibleCard` — AC3's "at least one Dashboard
+// card must remain visible" guard, extracted as a pure predicate specifically
+// so it can be unit-tested without a database (this file's own top-of-file
+// note). This is the exact guard `updateDashboardCardVisibility`
+// (`server/actions.ts`) now re-evaluates INSIDE a `Serializable`
+// `db.$transaction`, against a snapshot read fresh from that transaction, to
+// fix the TOCTOU race in dashboard-card-visibility-toctou-empty-dashboard.md
+// (two concurrent requests hiding two different cards, each reading a stale
+// "2 still visible" snapshot before either had written, both passing this
+// exact guard, and jointly leaving zero cards visible). These tests confirm
+// the guard's own decision is correct for every state it could be asked to
+// evaluate; they cannot, by themselves, exercise the cross-transaction
+// concurrency control (Postgres's `Serializable` isolation forcing one of two
+// truly-concurrent transactions to abort with `P2034`) that makes each
+// evaluation run against an isolated, not-concurrently-invalidated snapshot
+// in the first place — this codebase has no integration-test database (see
+// `lib/ai/rate-limit.test.ts`'s identical note), so that mechanism is instead
+// verified at the source level in `actions.test.ts`.
+describe("wouldHideLastVisibleCard", () => {
+  const [cardA, cardB, cardC] = DASHBOARD_CARD_KEYS
+
+  it("allows hiding a card when at least one other card would remain visible", () => {
+    const current = DASHBOARD_CARD_KEYS.map((card, index) => ({
+      key: card.key,
+      label: card.label,
+      order: index,
+      visible: true,
+    }))
+    expect(wouldHideLastVisibleCard(current, cardA.key, false)).toBe(false)
+  })
+
+  it("blocks hiding the one and only currently-visible card", () => {
+    const current = DASHBOARD_CARD_KEYS.map((card, index) => ({
+      key: card.key,
+      label: card.label,
+      order: index,
+      visible: card.key === cardA.key,
+    }))
+    expect(wouldHideLastVisibleCard(current, cardA.key, false)).toBe(true)
+  })
+
+  it("the concurrency-relevant case: with exactly two cards visible (A, B), hiding EITHER one alone is allowed, but each request's own guard is only valid against ITS OWN read — this is why the guard must be re-evaluated inside a Serializable transaction, not trusted from a pre-transaction read", () => {
+    const currentTwoVisible = DASHBOARD_CARD_KEYS.map((card, index) => ({
+      key: card.key,
+      label: card.label,
+      order: index,
+      visible: card.key === cardA.key || card.key === cardB.key,
+    }))
+    // Each individually reads as safe against this shared "2 visible" snapshot...
+    expect(wouldHideLastVisibleCard(currentTwoVisible, cardA.key, false)).toBe(false)
+    expect(wouldHideLastVisibleCard(currentTwoVisible, cardB.key, false)).toBe(false)
+
+    // ...but if BOTH were applied without re-reading in between (the bug),
+    // the resulting state has zero visible cards among A/B — which the guard
+    // WOULD correctly block, if only it were asked about that resulting
+    // state rather than the stale shared snapshot both requests started
+    // from. This is exactly why `updateDashboardCardVisibility` re-reads
+    // `current` from inside the Serializable transaction on every call
+    // rather than ever reusing a caller-supplied snapshot.
+    const afterBothHidesApplied = currentTwoVisible.map((card) =>
+      card.key === cardA.key || card.key === cardB.key ? { ...card, visible: false } : card,
+    )
+    // Every card other than A/B was explicitly set to `visible: false` in
+    // this test's own setup above (not left at some default), so once A and
+    // B are hidden too, no card remains visible at all — demonstrating the
+    // unguarded result the Serializable transaction fix exists to prevent.
+    expect(afterBothHidesApplied.some((card) => card.visible)).toBe(false)
+    expect(afterBothHidesApplied.find((c) => c.key === cardA.key)?.visible).toBe(false)
+    expect(afterBothHidesApplied.find((c) => c.key === cardB.key)?.visible).toBe(false)
+  })
+
+  it("allows unhiding a card regardless of current visibility counts (visible: true never triggers the guard)", () => {
+    const current = DASHBOARD_CARD_KEYS.map((card, index) => ({
+      key: card.key,
+      label: card.label,
+      order: index,
+      visible: card.key === cardA.key,
+    }))
+    expect(wouldHideLastVisibleCard(current, cardC.key, true)).toBe(false)
+  })
+
+  it("hiding an already-hidden card never triggers the guard (it isn't in currentlyVisible to begin with)", () => {
+    const current = DASHBOARD_CARD_KEYS.map((card, index) => ({
+      key: card.key,
+      label: card.label,
+      order: index,
+      visible: card.key === cardA.key,
+    }))
+    expect(wouldHideLastVisibleCard(current, cardB.key, false)).toBe(false)
   })
 })

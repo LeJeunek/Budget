@@ -275,6 +275,30 @@ export async function getBills(
 }
 
 /**
+ * True if the caller has EVER created a Bill row at all — active OR
+ * archived, since a bill is never physically removed on archive (bills.md
+ * AC5), only flagged via `archivedAt`. Backs Calendar v2's combined
+ * empty-state check (calendar-v2.md's Edge Case: "the user has genuinely
+ * never set up any bill or income stream anywhere in the app") — see
+ * `app/(dashboard)/calendar/page.tsx`'s own JSDoc for why this replaced two
+ * full `getBills` list reads there (Phase 4c performance follow-up,
+ * phase-4c-performance-review.md Finding 2: that page previously called
+ * `getBills` twice — active and archived — purely to compute this one
+ * boolean, quadrupling an already-N+1-shaped read on every calendar page
+ * load).
+ *
+ * Deliberately a single indexed `findFirst` existence probe (`Bill.userId`
+ * is indexed, `@@index([userId])`) that never calls
+ * `ensureOccurrencesGenerated` at all — this only needs to know "does at
+ * least one row exist," never each bill's next-occurrence detail the
+ * ordinary list views (`getBills`) compute.
+ */
+export async function hasAnyBills(userId: string): Promise<boolean> {
+  const bill = await db.bill.findFirst({ where: { userId }, select: { id: true } })
+  return bill !== null
+}
+
+/**
  * Fetches a single bill by id, scoped to the calling user, with its full
  * occurrence history (bills.md AC10) — most recent due date first, matching
  * `features/transactions/server`'s default "most recent first" list

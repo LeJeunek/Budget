@@ -1,5 +1,5 @@
 import { db } from "@/lib/db"
-import type { SystemCategoryTemplate } from "@prisma/client"
+import { Prisma, type SystemCategoryTemplate } from "@prisma/client"
 
 /**
  * `SystemCategoryTemplate` read/write layer — Admin's DB-backed
@@ -83,6 +83,44 @@ export class CategoryTemplateWouldBeEmptyError extends Error {
 }
 
 /**
+ * Thrown by `deleteTemplateEntry` when Postgres's `Serializable` isolation
+ * aborts its transaction because a concurrent request against this same
+ * table (almost always another concurrent delete) could not be serialized
+ * against it — see that function's own JSDoc
+ * (category-template-delete-toctou-zero-entries.md). Distinct from
+ * `CategoryTemplateWouldBeEmptyError`: this is not a confirmed business-rule
+ * violation (the guard never got a clean answer either way), it is "someone
+ * else changed this table at the same instant — the safe, correct response
+ * is to ask the caller to retry against fresh state," which is what admin
+ * users see when this bubbles up as an `ApiResult` failure.
+ */
+export class CategoryTemplateConcurrentModificationError extends Error {
+  constructor() {
+    super(
+      "The starter-category template was changed by another action at the same moment — please try again",
+    )
+    this.name = "CategoryTemplateConcurrentModificationError"
+  }
+}
+
+/** True for Prisma's "record to update/delete not found" error (P2025) —
+ * thrown when a row that passed an earlier existence check is concurrently
+ * deleted before the write that assumed it still existed. See
+ * `updateTemplateEntry`/`reorderTemplateEntries`'s own JSDoc
+ * (category-template-update-delete-race-unhandled-error.md). */
+function isRecordNotFoundError(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025"
+}
+
+/** True for Prisma's "transaction failed due to a write conflict or a
+ * deadlock" error (P2034) — the error Postgres's `Serializable` isolation
+ * surfaces when two concurrent transactions touching this table can't both
+ * be serialized. See `deleteTemplateEntry`'s own JSDoc. */
+function isTransactionConflictError(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034"
+}
+
+/**
  * Plain read, ordered by `order` ascending — no admin check (see this file's
  * own doc comment). Called by both `lib/auth.ts`'s signup hook (§4.3) and
  * Admin's own Manage Categories display screen.
@@ -141,6 +179,16 @@ export interface UpdateTemplateEntryInput {
  * Renames and/or recolors an entry. A name change is checked for
  * case-insensitive duplicates against every other entry, same rule as
  * `createTemplateEntry`.
+ *
+ * The final `update()` is wrapped in its own try/catch for Prisma's P2025
+ * ("record to update not found"): a real async gap exists between the
+ * existence check above and this write (widened further by the extra
+ * `findCaseInsensitiveDuplicate` round trip on a rename), during which a
+ * concurrent `deleteTemplateEntry` can remove this exact row. Without this,
+ * that timing produces a raw, unhandled Prisma error instead of the same
+ * friendly `CategoryTemplateEntryNotFoundError` the earlier-timed version of
+ * the identical scenario already throws via the `findUnique` check above —
+ * see category-template-update-delete-race-unhandled-error.md.
  */
 export async function updateTemplateEntry(
   input: UpdateTemplateEntryInput,
@@ -162,13 +210,20 @@ export async function updateTemplateEntry(
     }
   }
 
-  return db.systemCategoryTemplate.update({
-    where: { id: input.id },
-    data: {
-      ...(input.name !== undefined ? { name: input.name } : {}),
-      ...(input.color !== undefined ? { color: input.color } : {}),
-    },
-  })
+  try {
+    return await db.systemCategoryTemplate.update({
+      where: { id: input.id },
+      data: {
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.color !== undefined ? { color: input.color } : {}),
+      },
+    })
+  } catch (error) {
+    if (isRecordNotFoundError(error)) {
+      throw new CategoryTemplateEntryNotFoundError()
+    }
+    throw error
+  }
 }
 
 /**
@@ -176,37 +231,90 @@ export async function updateTemplateEntry(
  * top-to-bottom id order (every existing entry must appear exactly once).
  * Applied as one batch of `order` updates inside a single transaction so a
  * partial reorder can never be observed mid-write.
+ *
+ * Same P2025 risk as `updateTemplateEntry` above, widened here across
+ * however many ids `orderedIds` contains: any one of them can be
+ * concurrently deleted between this function being called and its own
+ * `update()` for that id executing inside the batch. Caught and translated
+ * to the same friendly `CategoryTemplateEntryNotFoundError` rather than
+ * left to escape as a raw Prisma error (previously this function had no
+ * error handling around the transaction at all).
  */
 export async function reorderTemplateEntries(
   orderedIds: string[],
 ): Promise<SystemCategoryTemplateEntry[]> {
-  await db.$transaction(
-    orderedIds.map((id, index) =>
-      db.systemCategoryTemplate.update({
-        where: { id },
-        data: { order: index },
-      }),
-    ),
-  )
+  try {
+    await db.$transaction(
+      orderedIds.map((id, index) =>
+        db.systemCategoryTemplate.update({
+          where: { id },
+          data: { order: index },
+        }),
+      ),
+    )
+  } catch (error) {
+    if (isRecordNotFoundError(error)) {
+      throw new CategoryTemplateEntryNotFoundError()
+    }
+    throw error
+  }
 
   return getSystemCategoryTemplate()
 }
 
 /**
- * AC6's "never zero entries" guard — counts the table before deleting;
- * removing the last remaining row is rejected outright rather than silently
- * leaving the next signup with no starter categories at all.
+ * AC6's "never zero entries" guard. The existence check, the "would this
+ * leave zero entries" count, and the delete itself are wrapped in a single
+ * `db.$transaction` under `Serializable` isolation — a fix for a
+ * count-then-delete TOCTOU race (bug report:
+ * category-template-delete-toctou-zero-entries.md): two concurrent deletes
+ * of the last two remaining entries could each read `count() === 2` before
+ * either had deleted anything, both pass the `total <= 1` guard, and both
+ * succeed, leaving zero rows.
+ *
+ * `Serializable` (not just wrapping the two statements in an ordinary
+ * transaction) is what actually closes this — this is a textbook "write
+ * skew" anomaly: the two concurrent deletes never touch the SAME row, so
+ * even `Repeatable Read` would let both through unmodified. Only
+ * `Serializable`'s cross-transaction read/write dependency tracking
+ * recognizes that each transaction's own `count()` read was invalidated by
+ * the other's concurrent `delete()`, and aborts one of them with Postgres's
+ * "could not serialize access" error (Prisma's `P2034`) rather than letting
+ * both commit. That abort is caught below and re-surfaced as
+ * `CategoryTemplateConcurrentModificationError` — the caller (`deleteCategoryTemplateEntry`)
+ * translates it into the same kind of friendly, try-again `ApiResult`
+ * failure as every other guard in this file, never a raw unhandled error.
+ * Mirrors `features/settings/server/actions.ts`'s
+ * `updateDashboardCardVisibility` fix for the identical class of bug, for
+ * consistency across this codebase's two "never let a count drop to zero
+ * under concurrency" guards.
  */
 export async function deleteTemplateEntry(id: string): Promise<void> {
-  const entry = await db.systemCategoryTemplate.findUnique({ where: { id } })
-  if (!entry) {
-    throw new CategoryTemplateEntryNotFoundError()
-  }
+  try {
+    await db.$transaction(
+      async (tx) => {
+        const entry = await tx.systemCategoryTemplate.findUnique({ where: { id } })
+        if (!entry) {
+          throw new CategoryTemplateEntryNotFoundError()
+        }
 
-  const total = await db.systemCategoryTemplate.count()
-  if (total <= 1) {
-    throw new CategoryTemplateWouldBeEmptyError()
-  }
+        const total = await tx.systemCategoryTemplate.count()
+        if (total <= 1) {
+          throw new CategoryTemplateWouldBeEmptyError()
+        }
 
-  await db.systemCategoryTemplate.delete({ where: { id } })
+        await tx.systemCategoryTemplate.delete({ where: { id } })
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    )
+  } catch (error) {
+    // `CategoryTemplateEntryNotFoundError`/`CategoryTemplateWouldBeEmptyError`
+    // thrown inside the callback above propagate through `$transaction`
+    // unchanged (Prisma re-throws whatever the callback threw once it rolls
+    // back), so only the Serializable-conflict case needs translating here.
+    if (isTransactionConflictError(error)) {
+      throw new CategoryTemplateConcurrentModificationError()
+    }
+    throw error
+  }
 }

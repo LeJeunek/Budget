@@ -284,6 +284,26 @@ export async function getIncomeStreams(
 }
 
 /**
+ * True if the caller has EVER created an IncomeStream row at all — active OR
+ * archived, since a stream is never physically removed on archive (AC6),
+ * only flagged via `archivedAt`. Backs Calendar v2's combined empty-state
+ * check, mirroring `features/bills/server/service.ts`'s `hasAnyBills`
+ * exactly — see `app/(dashboard)/calendar/page.tsx`'s own JSDoc for why this
+ * replaced two full `getIncomeStreams` list reads there (Phase 4c
+ * performance follow-up, phase-4c-performance-review.md Finding 2).
+ *
+ * Deliberately a single indexed `findFirst` existence probe
+ * (`IncomeStream.userId` is indexed, `@@index([userId])`) that never calls
+ * `ensureOccurrencesGenerated` at all — this only needs to know "does at
+ * least one row exist," never each stream's next-expected-date detail the
+ * ordinary list view (`getIncomeStreams`) computes.
+ */
+export async function hasAnyIncomeStreams(userId: string): Promise<boolean> {
+  const stream = await db.incomeStream.findFirst({ where: { userId }, select: { id: true } })
+  return stream !== null
+}
+
+/**
  * Fetches a single income stream by id, scoped to the calling user, with its
  * full receipt history — AC12. Returns `null` for a missing id *or* an id
  * owned by a different user, same "don't leak existence" rule as

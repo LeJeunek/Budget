@@ -1,11 +1,18 @@
 "use server"
 
+import { Prisma } from "@prisma/client"
+
 import { getCurrentUser } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { ok, fail, type ApiResult } from "@/lib/api-response"
 
 import type { DashboardCardView, UserPreferenceView } from "../types"
-import { getDashboardCardPreferences, getUserPreference } from "./service"
+import {
+  getDashboardCardPreferences,
+  getUserPreference,
+  materializeDashboardCardPreferences,
+  wouldHideLastVisibleCard,
+} from "./service"
 import {
   ReorderDashboardCardsSchema,
   TimezoneSchema,
@@ -160,26 +167,80 @@ export async function captureInferredTimezone(
 // `NotificationThresholdSettings`'s own upsert-on-first-write precedent.
 // ---------------------------------------------------------------------------
 
-/** Writes every entry in `cards` as its own upserted
- * `DashboardCardPreference` row for `userId` — the one place this module
- * turns a fully-resolved, in-memory `DashboardCardView[]` back into durable
- * rows. `Promise.all` (not a `db.$transaction` batch): each upsert targets a
- * distinct `(userId, cardKey)` row with no cross-row invariant to protect
- * (unlike, say, a balance transfer), so there is nothing a transaction would
- * add here beyond what independent, per-row upserts already guarantee. */
+/**
+ * Writes every entry in `cards` as its own upserted `DashboardCardPreference`
+ * row for `userId` — the one place this module turns a fully-resolved,
+ * in-memory `DashboardCardView[]` back into durable rows.
+ *
+ * Takes an explicit Prisma client (`db` itself, or a `Prisma.TransactionClient`)
+ * rather than always reaching for the top-level `db` singleton, so this same
+ * write logic can run either standalone (`reorderDashboardCards` — no
+ * cross-row invariant to protect, matching `resetDashboardLayout`'s equally
+ * uncoordinated `deleteMany`) or as the write half of
+ * `updateDashboardCardVisibility`'s Serializable transaction below, where it
+ * MUST run against that transaction's own `tx` for the "read the guard,
+ * write the result" atomicity that fix depends on — see that function's own
+ * JSDoc.
+ *
+ * Sequential (`for`/`await`), not `Promise.all`: Prisma's own guidance for
+ * interactive transactions (`$transaction(async (tx) => ...)`) is to await
+ * each query against `tx` one at a time rather than fire several
+ * concurrently against the same transaction client, since the underlying
+ * connection is not safe to share across concurrent in-flight queries. This
+ * applies uniformly here (one function, one calling convention) rather than
+ * branching this function's own internals on "am I inside a transaction
+ * right now" — at this table's realistic size (a handful of Dashboard
+ * cards, per `dashboard-cards.ts`), the lost parallelism versus the prior
+ * `Promise.all` is not measurable.
+ */
 async function persistAllCardPreferences(
+  client: Prisma.TransactionClient,
   userId: string,
   cards: DashboardCardView[],
 ): Promise<void> {
-  await Promise.all(
-    cards.map((card) =>
-      db.dashboardCardPreference.upsert({
-        where: { userId_cardKey: { userId, cardKey: card.key } },
-        update: { order: card.order, visible: card.visible },
-        create: { userId, cardKey: card.key, order: card.order, visible: card.visible },
-      }),
-    ),
-  )
+  for (const card of cards) {
+    await client.dashboardCardPreference.upsert({
+      where: { userId_cardKey: { userId, cardKey: card.key } },
+      update: { order: card.order, visible: card.visible },
+      create: { userId, cardKey: card.key, order: card.order, visible: card.visible },
+    })
+  }
+}
+
+/**
+ * Thrown inside `updateDashboardCardVisibility`'s transaction when applying
+ * the requested change would leave zero Dashboard cards visible (AC3's hard
+ * invariant) — caught immediately below the transaction and translated into
+ * the same friendly `ApiResult` failure the guard has always produced.
+ * A named `Error` subclass (rather than returning a sentinel from inside the
+ * transaction callback) so `throw`ing it inside the `$transaction` callback
+ * both aborts/rolls back the transaction AND carries a specific, catchable
+ * signal back out — mirroring this codebase's standing "domain guard throws
+ * a named Error, the Server Action boundary translates it to `ApiResult`"
+ * convention (e.g. `features/categories/server/template.ts`'s
+ * `CategoryTemplateWouldBeEmptyError`).
+ */
+class DashboardCardWouldHideLastVisibleCardError extends Error {
+  constructor() {
+    super(
+      "At least one Dashboard card must remain visible — unhide another card before hiding this one.",
+    )
+    this.name = "DashboardCardWouldHideLastVisibleCardError"
+  }
+}
+
+/**
+ * True for Prisma's "transaction failed due to a write conflict or a
+ * deadlock" error (P2034) — the exact error Postgres's Serializable
+ * isolation surfaces when two concurrent transactions touching the same
+ * user's `DashboardCardPreference` rows can't both be serialized. This is
+ * the losing transaction's own signal that its read-then-guard-then-write
+ * was invalidated by a concurrent writer, per
+ * `updateDashboardCardVisibility`'s JSDoc — never a bug, always translated
+ * to a "try again" failure rather than left to escape as a raw Prisma error.
+ */
+function isTransactionConflictError(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034"
 }
 
 /**
@@ -187,6 +248,28 @@ async function persistAllCardPreferences(
  * least one card must remain visible" guard: hiding the last currently
  * visible card is rejected with a clear, user-facing error rather than
  * silently producing an empty Dashboard.
+ *
+ * The read (current state), the guard check, and the write are wrapped in a
+ * single `db.$transaction` under `Serializable` isolation — a fix for a
+ * check-then-write TOCTOU race (bug report:
+ * dashboard-card-visibility-toctou-empty-dashboard.md): two concurrent
+ * requests hiding two DIFFERENT cards could each read a stale "2 still
+ * visible" snapshot before either had written anything, both pass the guard,
+ * and jointly leave zero cards visible once both writes landed. Plain
+ * `Serializable` isolation (rather than a hand-rolled row lock/raw SQL) is
+ * what closes this: Postgres's serializable snapshot isolation guarantees
+ * that if two concurrent transactions' reads-and-writes could not have
+ * produced the same result had they run one-at-a-time, at least one of them
+ * is aborted with a "could not serialize access" error (Prisma's `P2034`)
+ * rather than silently committing an interleaved, TOCTOU-vulnerable result —
+ * exactly the "both requests' own read-then-guard is only valid against a
+ * snapshot nothing else can concurrently invalidate out from under it"
+ * property this guard needs. The guard itself is re-evaluated INSIDE the
+ * transaction (a fresh `tx.dashboardCardPreference.findMany` +
+ * `materializeDashboardCardPreferences`, effectively the "how many are
+ * currently visible" count re-verified against this transaction's own
+ * consistent read) rather than trusting any state read before the
+ * transaction began.
  */
 export async function updateDashboardCardVisibility(
   input: unknown,
@@ -200,22 +283,36 @@ export async function updateDashboardCardVisibility(
   }
   const { key, visible } = parsed.data
 
-  const current = await getDashboardCardPreferences(user.id)
+  try {
+    const updated = await db.$transaction(
+      async (tx) => {
+        const rows = await tx.dashboardCardPreference.findMany({ where: { userId: user.id } })
+        const current = materializeDashboardCardPreferences(rows)
 
-  if (!visible) {
-    const currentlyVisible = current.filter((card) => card.visible)
-    const targetIsCurrentlyVisible = currentlyVisible.some((card) => card.key === key)
-    if (targetIsCurrentlyVisible && currentlyVisible.length <= 1) {
+        if (wouldHideLastVisibleCard(current, key, visible)) {
+          throw new DashboardCardWouldHideLastVisibleCardError()
+        }
+
+        const nextCards = current.map((card) => (card.key === key ? { ...card, visible } : card))
+        await persistAllCardPreferences(tx, user.id, nextCards)
+
+        return nextCards
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    )
+
+    return ok(updated)
+  } catch (error) {
+    if (error instanceof DashboardCardWouldHideLastVisibleCardError) {
+      return fail(error.message)
+    }
+    if (isTransactionConflictError(error)) {
       return fail(
-        "At least one Dashboard card must remain visible — unhide another card before hiding this one.",
+        "Your Dashboard card settings changed at the same moment from somewhere else — please try again.",
       )
     }
+    throw error
   }
-
-  const updated = current.map((card) => (card.key === key ? { ...card, visible } : card))
-  await persistAllCardPreferences(user.id, updated)
-
-  return ok(updated)
 }
 
 /**
@@ -248,7 +345,7 @@ export async function reorderDashboardCards(
     }
   })
 
-  await persistAllCardPreferences(user.id, reordered)
+  await persistAllCardPreferences(db, user.id, reordered)
 
   return ok(reordered)
 }

@@ -12,6 +12,7 @@ import {
   DuplicateCategoryTemplateNameError,
   CategoryTemplateEntryNotFoundError,
   CategoryTemplateWouldBeEmptyError,
+  CategoryTemplateConcurrentModificationError,
   type SystemCategoryTemplateEntry,
 } from "@/features/categories/server/template"
 import { triggerDemoDataSeed } from "@/features/admin/server/demo-data"
@@ -210,6 +211,13 @@ export async function updateCategoryTemplateEntry(
  * top-to-bottom id order. No single `templateEntryId` applies to a reorder,
  * so its `AdminActionLog.details` omits that field (per
  * `CategoryTemplateChangedDetails`'s own comment).
+ *
+ * Wrapped in try/catch (previously this action had none at all — see
+ * category-template-update-delete-race-unhandled-error.md): a concurrent
+ * `deleteCategoryTemplateEntry` can remove one of `orderedIds`' rows
+ * mid-reorder, which `reorderTemplateEntries` now translates to
+ * `CategoryTemplateEntryNotFoundError` instead of letting Prisma's raw
+ * P2025 escape.
  */
 export async function reorderCategoryTemplateEntries(
   input: unknown,
@@ -222,24 +230,36 @@ export async function reorderCategoryTemplateEntries(
     return fail(parsed.error.issues[0]?.message ?? "Invalid reorder input")
   }
 
-  const reordered = await reorderTemplateEntries(parsed.data.orderedIds)
+  try {
+    const reordered = await reorderTemplateEntries(parsed.data.orderedIds)
 
-  await db.adminActionLog.create({
-    data: {
-      adminUserId: admin.id,
-      action: "CATEGORY_TEMPLATE_CHANGED",
-      details: { operation: "REORDER" },
-    },
-  })
+    await db.adminActionLog.create({
+      data: {
+        adminUserId: admin.id,
+        action: "CATEGORY_TEMPLATE_CHANGED",
+        details: { operation: "REORDER" },
+      },
+    })
 
-  return ok(reordered)
+    return ok(reordered)
+  } catch (error) {
+    if (error instanceof CategoryTemplateEntryNotFoundError) {
+      return fail(error.message)
+    }
+    throw error
+  }
 }
 
 /**
  * AC6's "never zero entries" guard is enforced by `template.ts`'s
  * `deleteTemplateEntry` itself (`CategoryTemplateWouldBeEmptyError`) — this
  * wrapper only translates that thrown error into a friendly `ApiResult`
- * failure, never re-implements the count check.
+ * failure, never re-implements the count check. Also translates
+ * `CategoryTemplateConcurrentModificationError` — `deleteTemplateEntry`'s
+ * Serializable-transaction fix for the count-then-delete TOCTOU race
+ * (category-template-delete-toctou-zero-entries.md) — into the same kind of
+ * friendly, try-again failure, rather than letting Postgres's raw
+ * serialization-conflict error escape.
  */
 export async function deleteCategoryTemplateEntry(
   input: unknown,
@@ -268,7 +288,8 @@ export async function deleteCategoryTemplateEntry(
   } catch (error) {
     if (
       error instanceof CategoryTemplateEntryNotFoundError ||
-      error instanceof CategoryTemplateWouldBeEmptyError
+      error instanceof CategoryTemplateWouldBeEmptyError ||
+      error instanceof CategoryTemplateConcurrentModificationError
     ) {
       return fail(error.message)
     }

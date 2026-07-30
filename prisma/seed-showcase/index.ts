@@ -28,6 +28,39 @@ export async function main(): Promise<void> {
   // that needs to categorize a row.
   const categoryMap = await getCategoryMap(user.id)
 
+  // Precondition check (bug report:
+  // seed-demo-data-false-success-on-swallowed-category-seed-failure.md).
+  // `src/lib/auth.ts`'s signup hook wraps category seeding in its own
+  // try/catch and only `console.error`s on failure -- deliberately, so an
+  // ordinary signup is never blocked by a seeding hiccup -- which means
+  // `createOrReplaceShowcaseUser` above can resolve successfully even when
+  // category seeding produced zero rows (an empty `SystemCategoryTemplate`,
+  // e.g. via the admin-triggerable race documented in
+  // category-template-delete-toctou-zero-entries.md, or any transient DB
+  // error during that one `createMany` call). Every domain seeded below
+  // (createBills/createExpenseTransactions/createBudgets/
+  // createCategorySuggestion) looks up category ids by name from
+  // `categoryMap`, and every one of those FKs (Bill.categoryId,
+  // Transaction.categoryId, BudgetCategory.categoryId) is nullable -- so an
+  // empty map would NOT throw anywhere downstream, it would silently
+  // produce a fully-uncategorized demo account while this script still
+  // exits 0. `triggerDemoDataSeed`/`seedDemoData` would then report
+  // unqualified success to the admin, exactly the "silent partial refresh"
+  // admin.md Capability 6 AC4 requires never happen. Failing loudly HERE,
+  // immediately after the one read that would otherwise let this slip
+  // through unnoticed, is what makes this script's existing
+  // `main().catch(...) -> process.exit(1)` path fire, giving
+  // `triggerDemoDataSeed` an honest non-zero exit code to report as a
+  // failure instead.
+  if (Object.keys(categoryMap).length === 0) {
+    throw new Error(
+      "Showcase user has zero categories after signup -- category seeding " +
+        "in src/lib/auth.ts's signup hook must have failed, or " +
+        "SystemCategoryTemplate is empty. Refusing to seed the rest of the " +
+        "demo account's data uncategorized.",
+    )
+  }
+
   const accounts = await createAccounts(user.id)
   console.log("Accounts: Checking, Savings, Credit Card, Brokerage, 401(k) created.")
 

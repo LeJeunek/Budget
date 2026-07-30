@@ -802,6 +802,15 @@ model Notification {
   @@index([accountId])
   @@index([userId, readAt])
   @@index([userId, createdAt])
+  // Phase 4c performance follow-up (phase-4c-performance-review.md Finding 1):
+  // Admin's Audit Log's fetchNotificationEmailEntries reads this table
+  // filtered ONLY by [gte, lt) createdAt window (plus an emailSentAt/
+  // emailSendError OR-filter with no index dependency of its own) + ORDER BY
+  // createdAt DESC LIMIT 50 — never scoped by userId. The two composite
+  // indexes above both lead with userId, so neither covers this shape; a
+  // dedicated single-column index on createdAt does, mirroring
+  // AdminActionLog's identical @@index([createdAt]).
+  @@index([createdAt])
   @@map("notification")
 }
 
@@ -1710,6 +1719,15 @@ model CategorySuggestion {
   // same (userId, source, status) shape to count REJECTED distinctly from
   // PENDING/ACCEPTED, per user, per source.
   @@index([userId, source, status])
+  // Phase 4c performance follow-up (phase-4c-performance-review.md Finding 1):
+  // Admin's Audit Log (features/admin/server/audit-log.ts) reads this table
+  // filtered ONLY by [gte, lt) createdAt window + ORDER BY createdAt DESC
+  // LIMIT 50, with no userId predicate at all — the first cross-user reader
+  // of this table. None of the three composite indexes above lead with
+  // createdAt, so that query shape couldn't use any of them. Mirrors the
+  // dedicated @@index([createdAt]) Database Architect already gave
+  // AdminActionLog for the identical reason.
+  @@index([createdAt])
   @@map("category_suggestion")
 }
 
@@ -1777,6 +1795,13 @@ model BudgetAdvisorCache {
   // plain @@index([userId]) is added.
   @@unique([userId, month])
   @@index([userId, month])
+  // Phase 4c performance follow-up (phase-4c-performance-review.md Finding 1):
+  // Admin's Audit Log's fetchBudgetAdvisorEntries reads this table filtered
+  // ONLY by [gte, lt) generatedAt window + ORDER BY generatedAt DESC LIMIT
+  // 50, never scoped by userId — the (userId, month) unique/index above
+  // can't serve that shape. Mirrors ReportGenerationEvent/AdminActionLog's
+  // own dedicated timestamp indexes, added for the identical reason.
+  @@index([generatedAt])
   @@map("budget_advisor_cache")
 }
 
@@ -1868,6 +1893,12 @@ model MonthlySummary {
   // @@index([userId]).
   @@unique([userId, month])
   @@index([userId, month])
+  // Phase 4c performance follow-up (phase-4c-performance-review.md Finding 1):
+  // Admin's Audit Log's fetchMonthlySummaryEntries reads this table filtered
+  // ONLY by [gte, lt) generatedAt window + ORDER BY generatedAt DESC LIMIT
+  // 50, never scoped by userId — same gap, same fix, as BudgetAdvisorCache
+  // above.
+  @@index([generatedAt])
   @@map("monthly_summary")
 }
 
@@ -1917,6 +1948,12 @@ model SpendingInsightsCache {
   // `period` standing in for `month`.
   @@unique([userId, period])
   @@index([userId, period])
+  // Phase 4c performance follow-up (phase-4c-performance-review.md Finding 1):
+  // Admin's Audit Log's fetchSpendingInsightsEntries reads this table
+  // filtered ONLY by [gte, lt) generatedAt window + ORDER BY generatedAt
+  // DESC LIMIT 50, never scoped by userId — same gap, same fix, as
+  // BudgetAdvisorCache/MonthlySummary above.
+  @@index([generatedAt])
   @@map("spending_insights_cache")
 }
 
@@ -2019,6 +2056,13 @@ model FinancialHealthScoreSnapshot {
   // rationale to NetWorthSnapshot's own two indexes.
   @@unique([userId, capturedDate])
   @@index([userId, capturedAt])
+  // Phase 4c performance follow-up (phase-4c-performance-review.md Finding 1):
+  // Admin's Audit Log's fetchHealthScoreNarrativeEntries reads this table
+  // filtered ONLY by [gte, lt) capturedAt window + ORDER BY capturedAt DESC
+  // LIMIT 50, never scoped by userId — neither index above (both userId-led)
+  // covers that shape. Mirrors ReportGenerationEvent/AdminActionLog's own
+  // dedicated timestamp indexes.
+  @@index([capturedAt])
   @@map("financial_health_score_snapshot")
 }
 

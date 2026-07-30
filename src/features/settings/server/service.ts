@@ -108,6 +108,36 @@ export function materializeDashboardCardPreferences(
 }
 
 /**
+ * AC3's "at least one Dashboard card must remain visible" guard, as a pure
+ * predicate: true when hiding `key` (from `current`'s already-materialized
+ * state) would leave zero visible cards. Extracted out of
+ * `server/actions.ts`'s `updateDashboardCardVisibility` specifically so the
+ * guard's own logic is unit-testable without a database — the same "pure,
+ * database-free function" rationale `materializeDashboardCardPreferences`
+ * above already documents.
+ *
+ * `updateDashboardCardVisibility` calls this INSIDE a `Serializable`
+ * `db.$transaction`, against a `current` snapshot read fresh from that same
+ * transaction (never a snapshot read before the transaction began) — that
+ * placement, not this function's own logic, is what closes the TOCTOU race
+ * documented in dashboard-card-visibility-toctou-empty-dashboard.md; this
+ * function only expresses the invariant itself, correctly, for whatever
+ * `current` it's given.
+ */
+export function wouldHideLastVisibleCard(
+  current: DashboardCardView[],
+  key: string,
+  visible: boolean,
+): boolean {
+  if (visible) {
+    return false
+  }
+  const currentlyVisible = current.filter((card) => card.visible)
+  const targetIsCurrentlyVisible = currentlyVisible.some((card) => card.key === key)
+  return targetIsCurrentlyVisible && currentlyVisible.length <= 1
+}
+
+/**
  * Every Dashboard card's fully-resolved show/hide/order state for `userId`,
  * per §3.5. `DashboardCardPreference` is LAZILY materialized (unlike
  * `UserPreference` above) — row absence here is the ordinary, expected case

@@ -75,22 +75,49 @@ export type CurrencyDisplayInput = z.infer<typeof CurrencyDisplaySchema>
 // rather than a hand-maintained list, so this always matches whatever
 // IANA tz database version the running Node/ICU actually ships.
 //
-// Deliberately validated via `Intl.DateTimeFormat`'s own timezone
-// resolution (does constructing one with this value throw?) rather than
-// `Intl.supportedValuesOf("timeZone")` set-membership: confirmed by direct
-// testing against this project's actual Node/ICU build that
-// `supportedValuesOf("timeZone")` — an enumeration of ICU's *canonical* zone
-// names — does not include `"UTC"` on this runtime, even though `"UTC"` is a
-// universally valid, ECMA-402-recognized timezone identifier and is this
-// exact column's own `prisma/schema.prisma` `@default` / safety-net-of-last-
-// resort value (§3.3's Edge Case). A set-membership check would therefore
-// reject this schema's own documented default — constructing an
-// `Intl.DateTimeFormat` with the candidate value and catching the
-// `RangeError` it throws for anything Intl can't resolve is the strictly
-// more permissive, and correctly inclusive, validation Intl itself performs
-// internally, with the identical "no hand-maintained list, always in sync
-// with the running Node/ICU version" property `supportedValuesOf` was chosen
-// for in the first place.
+// Validated with TWO checks ANDed together, not `Intl.DateTimeFormat`
+// construction alone (bug report:
+// timezone-schema-accepts-raw-utc-offsets.md — this file's own PRIOR
+// version of this function accepted raw UTC-offset strings like `"+05:00"`
+// and legacy aliases like `"PST"`/`"US/Pacific"`/`"EST5EDT"` as "valid,"
+// because `Intl.DateTimeFormat`'s constructor is deliberately more
+// permissive than "is this an IANA zone name" per ECMA-402 — it also
+// resolves raw fixed offsets and legacy compatibility aliases. Accepting a
+// raw offset directly contradicts customization.md's own reason for
+// choosing an IANA-name dropdown over an offset picker in the first place:
+// a fixed offset silently breaks twice a year in a DST-observing region):
+//
+//   1. `Intl.DateTimeFormat` construction succeeds for `value` (Intl can
+//      resolve it at all — kept from the original implementation, still the
+//      cheapest first-pass rejection of outright nonsense strings), AND
+//   2. `value` is a member of `Intl.supportedValuesOf("timeZone")` — the
+//      actual "is this a genuine, canonical IANA zone name" check — OR
+//      `value === "UTC"`.
+//
+// The `=== "UTC"` carve-out preserves this file's own earlier-fixed
+// finding, re-stated here so it is never accidentally reintroduced by a
+// future edit: confirmed by direct testing against this project's actual
+// Node/ICU build that `supportedValuesOf("timeZone")` does NOT include
+// `"UTC"`, even though `"UTC"` is a universally valid, ECMA-402-recognized
+// timezone identifier and is this exact column's own `prisma/schema.prisma`
+// `@default` / safety-net-of-last-resort value (§3.3's Edge Case). Requiring
+// set-membership WITHOUT this carve-out would reject the schema's own
+// documented default; requiring `Intl.DateTimeFormat` success ALONE (this
+// function's pre-fix behavior) accepts far more than genuine IANA names.
+// Combining both is what closes the raw-offset/legacy-alias hole while
+// keeping "UTC" valid and keeping the "always in sync with the running
+// Node/ICU version, never a hand-maintained list" property intact — a
+// future ICU update that adds/renames canonical zones is picked up
+// automatically by `supportedValuesOf` the same way it always was.
+// Computed once at module load, not per-call inside `isValidIanaTimezone` —
+// `Intl.supportedValuesOf("timeZone")` allocates a fresh array on every
+// call, and this module-level `Set` gives every validation an O(1)
+// membership check instead. Still "always in sync with the running Node/ICU
+// version" (the whole point of using `supportedValuesOf` at all): this is
+// computed once per process, from the same live Intl data, never a
+// hand-maintained/checked-in list.
+const SUPPORTED_IANA_TIMEZONES = new Set(Intl.supportedValuesOf("timeZone"))
+
 function isValidIanaTimezone(value: string): boolean {
   try {
     // The `resolvedOptions().timeZone` read (rather than a bare
@@ -99,10 +126,11 @@ function isValidIanaTimezone(value: string): boolean {
     // implementations — this also gives the function a real return value to
     // discard instead of an unused constructed instance.
     new Intl.DateTimeFormat(undefined, { timeZone: value }).resolvedOptions()
-    return true
   } catch {
     return false
   }
+
+  return value === "UTC" || SUPPORTED_IANA_TIMEZONES.has(value)
 }
 
 export const TimezoneSchema = z
