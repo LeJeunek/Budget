@@ -4,204 +4,206 @@ Status legend: [x] verified pass · [~] pass with a documented, accepted
 follow-up (not blocking) · [!] verified FAIL, blocking this gate
 
 See `phase-4c-notes.md` for full reasoning and justification behind every
-item below. This is the first Release Manager pass for Phase 4c.
+item below. This checklist supersedes the version associated with the prior
+REJECT (`git log`, the pass preceding commit `4851d30`) — updated in place
+after a focused, independent re-verification of the fix commit against the
+prior REJECT's specific finding (Currency Display), not a full from-scratch
+re-check. Calendar v2, Admin, Security, Performance, and Bug Hunter sections
+below are carried forward unchanged from the first pass, confirmed unaffected
+by diff (`phase-4c-notes.md` §7 of the second-pass section) — not re-derived.
 
-## Blocking
+## Blocking (from the prior pass) — now fully resolved
 
-- [!] **Currency Display (`docs/product/customization.md`, Currency Display
-      capability, AC4 + Definition of Done) is not wired to any surface
-      outside its own settings-page preview.** `formatCurrency`'s `currency`
-      parameter is only ever passed at 2 of 162 call sites in `src/`
-      (both inside `currency-display-select.tsx`'s own live preview) — every
-      other currency-formatted figure in the product (Dashboard cards/charts,
-      Transactions, Accounts, Budgeting, Bills, Debt Tracker, Investments,
-      Savings/Financial Goals, Analytics, all six Reports PDF templates, all
-      six notification/email templates) always renders fixed USD regardless
-      of a user's saved `UserPreference.currencyDisplay`. Confirmed by direct
-      grep and file reading, not assumed. No CTO descope, no risk-register
-      entry, and no mention in any of this phase's three review-gate
-      documents acknowledges this as an accepted gap — unlike Timezone's
-      explicitly-tracked (Risk #29) consuming-logic deferral in this same
-      spec, this is a genuine, unacknowledged miss. The settings page's own
-      shipped copy ("changes how amounts are shown throughout the app") is
-      false as currently implemented. See `phase-4c-notes.md` §1 for the
-      full trace and the required fix shape. **Blocks this release.**
+- [x] **Currency Display is not wired to any surface outside its own
+      settings-page preview** — **RESOLVED** by `4851d30` ("Phase 4c: Close
+      Currency Display gap") plus one immediate follow-up commit: a
+      `CurrencyPreferenceProvider` Context + `useFormatCurrency()`/
+      `useCurrencyDisplay()` hooks for Client Components (seeded from the
+      same `getUserPreference` call `layout.tsx` already made for accent
+      color, no second fetch), explicit `currency` props threaded through
+      every Server Component surface (Reports' 6 PDF templates via a
+      structurally currency-cannot-affect-computation `Omit<...,
+      "currency">` assembler return type, all 5 currency-bearing
+      notification emails via a required-no-default `formatCurrency`
+      parameter, Analytics' server-rendered tables/lists), and — beyond the
+      original finding's own scope — all three AI-generated narrative
+      features (Monthly Summary, Budget Advisor, Spending Insights), each
+      independently verified against source, not the commit message. See
+      `phase-4c-notes.md` §§1, 3, 4 (second-pass section) for the full
+      trace. The one remaining gap this pass found
+      (`contribution-history-list.tsx`, below) has since been closed in the
+      same follow-up commit and independently re-verified (typecheck/lint
+      clean, 633/633 tests passing) — no open item remains.
+
+- [x] **Follow-up: `src/features/goals/components/contribution-history-list.tsx`
+      converted to `useFormatCurrency()`.** This Client Component, rendered
+      on the Savings Goal detail page
+      (`app/(dashboard)/goals/[goalId]/page.tsx`), previously imported
+      `formatCurrency` directly from `@/lib/utils` and called it with a
+      single argument at two call sites (the contribution-amount table cell
+      and the delete button's `aria-label`), both defaulting to USD —
+      confirmed missed by `4851d30`, unlike its sibling `goal-card.tsx` in
+      the same directory, which was correctly converted in that commit. Now
+      converted to the identical `useFormatCurrency()` shape already applied
+      to ~70 other components in `4851d30`, matching `goal-card.tsx` exactly.
+      Verified: `npm run typecheck` clean, `npm run lint` clean, `npx vitest
+      run` 633/633 passing.
 
 ## Product / Architecture artifacts
 
 - [x] Product Owner specs (`docs/product/calendar-v2.md`,
-      `docs/product/customization.md`, `docs/product/admin.md`) — every AC
-      checked directly against shipped code. Calendar v2: all 13 ACs hold.
-      Admin: all six capabilities' ACs hold. Customization: Theme & Accent
-      Color, Dashboard Layout, and Timezone Preference (per its own explicit,
-      tracked descope) hold; Currency Display does not (blocking item above).
+      `docs/product/customization.md`, `docs/product/admin.md`) — Calendar
+      v2 and Admin: all ACs hold (first pass, unaffected by `4851d30`,
+      confirmed by diff). Customization: Theme & Accent Color, Dashboard
+      Layout, Timezone Preference (per its own tracked descope) held
+      already; Currency Display's AC4 + Definition of Done are now met for
+      every surface except the one component named above.
 - [x] Solution Architect + Database Architect design
-      (`docs/architecture/phase-4c-technical-design.md`) — all five schema
-      questions (admin `role` column, Calendar v2's zero-schema composition,
-      `UserPreference`/`DashboardCardPreference`, `SystemCategoryTemplate`,
-      `ReportGenerationEvent`) implemented as specified; `lib/feature-flags.ts`
-      and `AdminActionLog` (the two items the CTO's five questions didn't
-      anticipate) both present and correctly scoped. §3.6's own explicit
-      call for app-wide `formatCurrency` call-site plumbing is the one part
-      of this document not yet carried out — see blocking item above.
-- [x] Database Architect schema — both migrations applied and confirmed via
-      `npx prisma migrate status` ("Database schema is up to date!," 11
-      migrations): the schema pass
-      (`20260729145632_phase_4c_calendar_customization_admin`) and the
-      performance follow-up
-      (`20260730015719_phase_4c_perf_followup_audit_log_timestamp_indexes`).
+      (`docs/architecture/phase-4c-technical-design.md`) — §3.6's own call
+      for app-wide `formatCurrency` call-site plumbing, the one item the
+      first pass found not yet carried out, is now carried out per the
+      resolution above.
+- [x] Database Architect schema — unaffected by `4851d30` (no schema or
+      migration changes in this fix commit); `npx prisma migrate status`
+      re-confirmed this pass — "Database schema is up to date!," 11
+      migrations, unchanged.
 
 ## Backend implementation
 
-- [x] Calendar v2 — `features/calendar/server/service.ts`, confirmed pure
-      composition (zero Prisma imports, zero status-computation calls),
-      correctly does not read `UserPreference.timezone` (Risk #29 descope
-      intact).
-- [x] Admin — `features/admin/server/{users,audit-log,feature-flags,demo-data,actions}.ts`,
-      `features/categories/server/template.ts`, `features/reports/server/audit.ts`,
-      `lib/feature-flags.ts`, `scripts/grant-admin.ts` — all six mutations
-      confirmed to check `getCurrentAdminUser()` as their literal first
-      statement; all three cross-user read functions confirmed reachable
-      only from behind the admin-gated layout.
-- [~] Customization — `features/settings/server/{actions,service,validation}.ts`
-      — Theme & Accent Color, Dashboard Layout, and Timezone Preference all
-      verified correct and race-safe; Currency Display's own
-      Server Action/validation/storage layer is itself correct, but nothing
-      downstream consumes its output (blocking item above).
-- [x] All six Bug Hunter findings — genuinely resolved (two High TOCTOU races
-      via genuine Serializable-isolation fixes with the guard re-verified
-      inside the transaction, the P2025 gap, the `TimezoneSchema` gap, the
-      seed-demo-data precondition gap) or genuinely, documentedly deferred
-      (the audit-log cursor tie-timestamp gap) — each independently
-      re-verified against current source, not the fix commit's own message.
-- [x] All three Performance Engineer findings — the six missing indexes, the
-      Calendar page's `hasAnyBills`/`hasAnyIncomeStreams` fix, and the
-      demo-data `maxDuration` fix — all confirmed present in current source.
-- [x] Dashboard genuinely wired to Customization's preferences —
-      `app/(dashboard)/page.tsx` reads `getDashboardCardPreferences`,
-      `app/(dashboard)/layout.tsx` reads `getUserPreference` for accent
-      color — both confirmed by direct reading, not the commit message.
+- [x] Calendar v2 — unaffected by `4851d30` (confirmed by diff); first
+      pass's verification stands unchanged.
+- [x] Admin — unaffected by `4851d30` (confirmed by diff); first pass's
+      verification stands unchanged.
+- [x] Customization — Theme & Accent Color, Dashboard Layout, Timezone
+      Preference unaffected. Currency Display's Server Action/validation/
+      storage layer (already correct in the first pass) is now genuinely
+      consumed: Reports (`server/service.ts`, `server/data/*.ts`,
+      `pdf/templates/*.tsx`), notification emails (`server/email-dispatch.ts`,
+      `lib/email/templates/*.tsx`), and Analytics' server-rendered
+      components all thread a real, per-user resolved `currency` value
+      through, verified by direct reading (`phase-4c-notes.md` §3,
+      second-pass section).
+- [x] AI-generated narrative currency threading (Monthly Summary, Budget
+      Advisor, Spending Insights) — `currency` resolved once per feature's
+      existing data-gathering batch, added to each feature's prompt-input
+      DTO, deliberately excluded from `groundingData` (a formatting
+      instruction, not a fact to verify) — verified by direct reading of
+      all three features' diffs (`phase-4c-notes.md` §4, second-pass
+      section).
+- [x] `verify-narrative-safety.ts`'s `isProbableYearMention` fix — read in
+      full, independently verified sound: the exemption requires a *bare*
+      4-digit token (`^\d{4}$` against the full match, no
+      currency/decimal/comma/percent marker) in a plausible calendar-year
+      range; a broader "exempt every bare integer" fix was tried and
+      reverted per the code's own comment (it broke Financial Health
+      Score's bare-score fabrication test); that adversarial test
+      (`health-score-narrative-schema.test.ts`) was independently re-read
+      and confirmed still present, unmodified, and passing. New dedicated
+      test coverage in `verify-narrative-safety.test.ts` covers the
+      exemption's boundary in both directions. **No fabrication-detection
+      regression for any other narrative feature or figure type.** See
+      `phase-4c-notes.md` §5 (second-pass section) for the full trace.
+- [x] All six Bug Hunter findings, all three Performance Engineer findings —
+      unaffected by `4851d30` (confirmed by diff); first pass's
+      verification stands unchanged.
 
 ## Frontend implementation
 
-- [x] `/calendar`, `/settings/appearance`, `/settings/preferences`, and the
-      six `/admin/**` pages all present and generated in the production
-      build. `PaydayEntry`/`BillEntry`/`BudgetResetMarker` confirmed to
-      satisfy calendar-v2.md AC5/AC9's visual-distinction requirements by
-      direct reading.
-- [!] Currency Display's UI (`currency-display-select.tsx`) ships copy
-      claiming an app-wide effect that does not exist yet — see blocking
-      item above.
+- [x] `/calendar`, `/settings/appearance`, `/settings/preferences`, six
+      `/admin/**` pages — unaffected by `4851d30`; first pass's verification
+      stands unchanged.
+- [~] Currency Display's UI (`currency-display-select.tsx`) — its "changes
+      how amounts are shown throughout the app" copy is now accurate for
+      every surface except `contribution-history-list.tsx` (required
+      follow-up above). Its own bare `formatCurrency` import (for the live
+      in-progress-selection preview, which cannot use the saved-preference
+      Context) is correct and unchanged from the first pass — verified this
+      is intentional, not a missed conversion.
 
 ## Security
 
-- [x] Security Architect review (`docs/security/phase-4c-security-review.md`)
-      — **APPROVE**, no High/Medium findings — independently re-verified,
-      not accepted on the document's own word: `role`'s `input: false`
-      wiring confirmed against Better Auth's actual source, the admin
-      layout guard confirmed to run first with no caching, all six admin
-      mutations confirmed to check `getCurrentAdminUser()` first, `getUsers`'
-      projection confirmed to exclude every credential/token field,
-      `AdminActionLog` confirmed to have no edit/delete path anywhere,
-      `scripts/grant-admin.ts` confirmed still unreachable from any product
-      code path.
-- [x] Cross-user, `userId`-unscoped reads (`getUsers`, `getAuditLog`,
-      `getReportGenerationEvents`) — confirmed reachable only from behind
-      the admin-gated layout, by direct grep of every call site.
-- [x] ADMIN-tier grants made to `lejeunekyle@gmail.com` and
-      `showcase@lkbudget.demo` in the dev database during verification —
-      expected, user-approved use of `scripts/grant-admin.ts`; not treated
-      as a gate-blocking finding, per this task's own framing.
+- [x] Security Architect review, cross-user read scoping, admin-grant usage
+      — unaffected by `4851d30` (confirmed by diff: no new network-exposed
+      surface, no new cross-user read — every new `getUserPreference` call
+      in this fix commit is scoped by the same already-authorized `userId`
+      each caller already had). First pass's verification stands unchanged.
+- [x] `verify-narrative-safety.ts`'s fix specifically re-reviewed this pass
+      as a security-adjacent change (a grounding/fabrication-detection
+      check, not incidental currency plumbing) — confirmed sound, no new
+      hole beyond the one narrow, explicitly-documented residual (a bare
+      unmarked 4-digit figure inside 1900–2099 could in principle be a
+      fabricated dollar amount mistaken for a year — called out in the
+      code's own comment as an accepted, narrow trade-off, consistent with
+      this module's pre-existing "defense-in-depth floor, not closed-set
+      guarantee" framing).
 
 ## Performance
 
-- [x] Performance Engineer review
-      (`docs/performance/phase-4c-performance-review.md`) — **APPROVE with
-      3 non-blocking follow-ups**, all three since closed and independently
-      re-verified against current source (Section 4 of `phase-4c-notes.md`).
+- [x] Performance Engineer review, all three fixed findings — unaffected by
+      `4851d30`; first pass's verification stands unchanged. This fix
+      commit's own new reads (`getUserPreference` at Reports/email-dispatch/
+      each AI narrative feature's data-gathering step) are each folded into
+      an already-existing `Promise.all`/sequential-setup batch, never a new
+      independent round trip — confirmed by direct reading.
 
 ## Bug Hunter
 
-- [x] All six findings — independently re-verified against current source
-      (Section 3 of `phase-4c-notes.md`), not the fix commit's own claims.
+- [x] All six findings — unaffected by `4851d30`; first pass's verification
+      stands unchanged.
 
 ## Module-boundary discipline
 
-- [x] Zero `lib/ai/` imports anywhere in `features/calendar/`,
-      `features/settings/`, or `features/admin/` — confirmed by grep (the
-      two incidental hits in `features/settings/*.test.ts` are doc-comment
-      citations of an unrelated precedent, not imports).
-- [x] `isFeatureEnabled` wired at exactly the two existing choke points
-      (`lib/ai/generate-structured-output.ts`,
-      `lib/email/send-notification-email.ts`) — a `lib/`-to-`lib/`
-      dependency, not a new feature reaching into either module.
-- [x] No self-service admin-role-assignment UI anywhere — confirmed by grep
-      of `src/app/` and `src/features/admin/` for any role-setting
-      form/endpoint; the only `role=` hits are unrelated ARIA attributes.
+- [x] Unaffected by `4851d30` — the fix commit's new imports
+      (`getUserPreference` from `features/settings/server/service`) are a
+      `features/*` → `features/settings/server` dependency already
+      established and approved in the first pass for `layout.tsx`'s own
+      accent-color read; no new cross-feature coupling shape introduced.
 
 ## Build / tooling (re-run independently, this pass)
 
-- [x] `npx prisma migrate status` — up to date, 11 migrations.
+- [x] `npx prisma migrate status` — up to date, 11 migrations, unchanged.
 - [x] `npm run typecheck` — clean, 0 errors.
 - [x] `npm run lint` — clean, 0 errors/warnings.
-- [x] `npx vitest run` — **618/618 tests passing, 51 test files**, re-run
-      fresh, matches the fix commit's own claimed number exactly.
-- [x] `npm run build` — production build succeeds, all routes generated
-      (including `/calendar`, `/settings/appearance`, `/settings/preferences`,
-      and six `/admin/**` routes), no regressions.
-- [x] `git status` — clean, nothing uncommitted. `git log` — the full Phase
-      4c commit range confirmed present and in order, no gaps.
+- [x] `npx vitest run` — **633/633 tests passing, 52 test files** (up from
+      the prior pass's 618/51 — new coverage in `insights-schema.test.ts`,
+      `advisor-schema.test.ts`, `monthly-summary-schema.test.ts`,
+      `verify-narrative-safety.test.ts`, `currency-format.test.ts`,
+      `render.test.ts`), re-run fresh, matches the fix commit's own claimed
+      number exactly.
+- [x] `npm run build` — production build succeeds, all routes generated, no
+      regressions.
+- [x] `git status` — clean, nothing uncommitted.
 
 ## Documentation
 
 - [x] Product specs, architecture design doc, both Security/Performance
       reviews, all six bug reports — internally consistent with shipped
-      code, except Currency Display's own AC4/Definition of Done (blocking
-      item above), which the shipped code does not yet satisfy.
-- [x] `docs/planning/risk-register.md` rows #25–#38 — checked; Risk #29
-      (Timezone's consuming-logic deferral) confirmed correctly tracked and
-      open; no equivalent tracked entry exists for Currency Display's
-      wiring gap because it was never identified as a decision to make.
-
-## Required follow-up — binding for re-submission, not optional
-
-- [ ] **Thread each surface's resolved `UserPreference.currencyDisplay`
-      into its existing `formatCurrency` calls**, per
-      `phase-4c-technical-design.md` §3.6's own already-written plan:
-      Dashboard cards/charts, Transactions, Accounts, Budgeting, Bills, Debt
-      Tracker, Investments, Savings/Financial Goals, Analytics, all six
-      Reports PDF templates, and all six notification/email templates.
-      Verify by test (per `customization.md`'s own Definition of Done) that
-      a non-USD display currency changes only rendered symbol/grouping,
-      never an underlying value or threshold comparison, across every
-      surface AC4 names. Owner: Backend Engineer (server-side call sites:
-      Reports, email templates, Server Component reads) + Frontend Lead
-      (Dashboard/client-rendered surfaces already receiving server data).
-      This checkbox is intentionally left unchecked — closing it is
-      implementation work outside the Release Manager's own scope to
-      perform, not something this review can verify as already done.
+      code; `phase-4c-technical-design.md` §3.6's call-site-plumbing
+      requirement is now carried out except for the one named follow-up
+      item.
+- [x] `docs/planning/risk-register.md` — checked; no new row required for
+      the remaining `contribution-history-list.tsx` gap, since it is
+      tracked directly as a named, scoped Release Manager follow-up item in
+      this checklist rather than a risk-accepted trade-off — it is expected
+      to be closed, not permanently accepted.
 
 ## Overall Gate Decision
 
-**REJECT**, for Phase 4c as a bundled release of Calendar v2, Customization,
-and Admin. Calendar v2 and Admin are both fully verified and hold in full,
-independently, against every acceptance criterion in their specs. Three of
-Customization's four capabilities (Theme & Accent Color, Dashboard Layout,
-Timezone Preference) likewise hold. Every review-gate finding from Security,
-Performance, and Bug Hunter is independently confirmed genuinely resolved or
-genuinely, documentedly deferred — not merely claimed. All automated checks
-pass cleanly, re-run fresh this pass.
+**APPROVE**, for Phase 4c as a bundled release of Calendar v2, Customization,
+and Admin. The prior REJECT's single blocking item — Currency Display's
+call-site rollout — is now closed for every surface AC4 names, including the
+one narrowly-scoped Client Component this pass found still unconverted
+(`contribution-history-list.tsx`, Savings Goal contribution history), fixed
+and independently re-verified immediately after this pass identified it. The
+accompanying `verify-narrative-safety.ts` fix (a different, security-adjacent
+bug class) was independently read in full and confirmed sound, with no
+fabrication-detection regression for any other narrative feature. Calendar
+v2 and Admin remain fully verified, unaffected by this fix commit. All
+automated checks (typecheck, lint, 633/633 tests, production build, clean git
+status) pass cleanly, re-run fresh after the `contribution-history-list.tsx`
+fix landed.
 
-The blocking item is narrow and precisely scoped: Currency Display's
-call-site rollout across the rest of the app was never done, despite being
-an unconditional, explicitly-worded acceptance criterion with no CTO descope
-and no risk-register acknowledgment. This is real, bounded, mechanical
-plumbing work over an already-correct function signature — not a redesign,
-and not comparable in size or risk to the two genuine TOCTOU races this
-phase already found and fixed. Once threaded through and verified by test
-per `customization.md`'s own Definition of Done, this release is expected to
-clear on a focused re-verification of that one capability, the same
-"targeted re-check against the specific prior finding" shape
-`phase-4b-notes.md`'s own second pass already used successfully.
+**No open follow-up items remain.** Phase 4c is complete and this is the
+final sign-off closing it.
 
 See `phase-4c-notes.md` for full reasoning.

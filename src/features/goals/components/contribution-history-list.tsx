@@ -25,7 +25,8 @@ import { toast } from "sonner"
 
 import type { GoalContribution } from "@/features/goals/types"
 import { deleteContribution } from "@/features/goals/server/actions"
-import { formatCurrency, formatDate } from "@/lib/utils"
+import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
+import { formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -38,6 +39,7 @@ import {
 
 function ContributionRow({ contribution }: { contribution: GoalContribution }) {
   const router = useRouter()
+  const formatCurrency = useFormatCurrency()
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
 
