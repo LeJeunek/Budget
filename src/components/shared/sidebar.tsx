@@ -35,6 +35,7 @@ import {
   BarChart3,
   Banknote,
   CalendarClock,
+  CalendarDays,
   ChevronsLeft,
   ChevronsRight,
   CreditCard,
@@ -99,6 +100,25 @@ export const NAV_SECTIONS: NavSection[] = [
       // to Bills keeps that mirrored relationship visible in the nav, not
       // just in the code.
       { label: "Income", href: "/income", icon: Banknote },
+      // (Phase 4c) Calendar v2 placement decision, made by the Frontend
+      // Lead — calendar-v2.md AC13 only requires this stay "reachable from
+      // primary navigation, not effectively hidden as a sub-toggle a user
+      // would only discover while already inside Bills," leaving the exact
+      // section to frontend composition (phase-4c-technical-design.md §2.5).
+      // Considered "Wealth," Analytics'/Reports'/Health Score's own
+      // precedent for "a whole-picture read over other domains' data" — not
+      // chosen here, because Calendar v2's own three composed sources
+      // (features/calendar/server/service.ts: Bills, Recurring Income, and
+      // Budgeting's month-boundary) are themselves all three already members
+      // of *this* "Planning" section, not Wealth's balance-sheet/net-worth
+      // domains (Debt, Investments) the way Analytics/Reports/Health Score
+      // aggregate. Placed here, last in Planning, as the composed
+      // whole-month view *over* Budgeting/Bills/Income immediately above it
+      // — the same "the aggregate view sits at the end of the section whose
+      // members it composes" structure Wealth's own Reports/Health Score
+      // placement already establishes, just applied within the section that
+      // actually matches Calendar v2's own sources.
+      { label: "Calendar", href: "/calendar", icon: CalendarDays },
     ],
   },
   {
