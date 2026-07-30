@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/shared/sidebar"
 import { TopNav } from "@/components/shared/top-nav"
 import { NotificationBell } from "@/features/notifications/components/notification-bell"
 import { TimezoneAutoCapture } from "@/features/settings/components/timezone-auto-capture"
+import { getUserPreference } from "@/features/settings/server/service"
 
 /**
  * Authenticated app shell (see docs/architecture/folder-tree.md:
@@ -25,6 +26,26 @@ import { TimezoneAutoCapture } from "@/features/settings/components/timezone-aut
  * e.g. via `getCurrentUser`) is the composition point instead, per AC3's
  * "reachable from anywhere" requirement being satisfied at the one shell
  * every authenticated page renders through.
+ *
+ * **Phase 4c addition (docs/product/customization.md, "Theme & Accent
+ * Color" capability):** this layout also resolves the caller's saved accent
+ * color (`getUserPreference`, Settings' own Server-Component-direct-call
+ * read — same "no client-refetchable endpoint" contract
+ * `TimezoneAutoCapture` already relies on) and applies it via a
+ * `data-accent="<value>"` attribute on the shell's outer wrapper below. This
+ * is the mounting point for the *effect* of Settings' Accent Color picker
+ * (`/settings/appearance`) — the picker itself only writes the preference;
+ * every authenticated route rendered through this layout is what actually
+ * shows it, satisfying AC4's "applies consistently everywhere the product
+ * uses [the] primary/accent color token," not just the Dashboard page.
+ * `src/app/globals.css`'s own `[data-accent="..."]` block is what the
+ * attribute set here composes with — see that file's comment for exactly
+ * which CSS custom properties each preset overrides and why. A user who
+ * never sets an accent color (`accentColor` is `null`) gets no `data-accent`
+ * attribute at all (React omits an attribute whose value is `undefined`),
+ * so none of those overrides apply and the product's current default look
+ * is unchanged, per that capability's own "never sets an accent color" Edge
+ * Case.
  */
 export default async function DashboardLayout({
   children,
@@ -37,8 +58,13 @@ export default async function DashboardLayout({
     redirect("/login")
   }
 
+  const preference = await getUserPreference(user.id)
+
   return (
-    <div className="flex h-svh overflow-hidden">
+    <div
+      className="flex h-svh overflow-hidden"
+      data-accent={preference.accentColor ?? undefined}
+    >
       {/* Phase 4c (phase-4c-technical-design.md §3.3): renders no visible UI
           of its own — see its own JSDoc. Mounted here, alongside where
           `ThemeProvider` is mounted (root layout), per that section's

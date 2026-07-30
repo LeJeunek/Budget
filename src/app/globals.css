@@ -128,3 +128,138 @@
     @apply font-sans;
   }
 }
+
+/*
+ * Accent color overrides — Customization (Phase 4c),
+ * docs/product/customization.md's "Theme & Accent Color" capability.
+ *
+ * Applied by `src/app/(dashboard)/layout.tsx` via a `data-accent="<value>"`
+ * attribute on the authenticated shell's outer wrapper, sourced from
+ * `getUserPreference(...).accentColor`
+ * (`features/settings/server/service.ts`). A user who never sets an accent
+ * color gets no `data-accent` attribute at all, so none of the selectors
+ * below match and the `:root`/`.dark` tokens above render unchanged — the
+ * capability's own "never sets an accent color" Edge Case.
+ *
+ * Deliberately overrides only `--primary` / `--primary-foreground` /
+ * `--ring` / `--chart-1` — the tokens that actually drive "buttons, active
+ * nav states [focus rings], chart highlight colors, progress bars"
+ * (customization.md AC4) in this codebase today: `components/ui/button.tsx`'s
+ * `default` variant (`bg-primary`), `components/ui/progress.tsx`'s
+ * indicator (`bg-primary`), focus-visible rings across `components/ui/*`
+ * (`ring-ring`), and every Dashboard chart's "primary series" (`--chart-1`
+ * in `spending-by-category-chart.tsx`, `income-vs-expense-chart.tsx`,
+ * `monthly-trends-chart.tsx`, `net-worth-history-chart.tsx`).
+ *
+ * Deliberately does NOT override `--accent` / `--accent-foreground` or
+ * `--sidebar-accent` / `--sidebar-primary` — despite the name collision,
+ * those are shadcn's own *hover/active-surface* tokens (dropdown item
+ * hover, active sidebar link background), an unrelated concept from "the
+ * user's chosen brand accent color." Recoloring them to a saturated preset
+ * would degrade hover-state legibility across the app for no product
+ * requirement that asks for it — AC4 lists concrete surfaces (buttons, nav,
+ * charts, progress) and none of them is "hover background," so this is a
+ * deliberate scope boundary, not an oversight.
+ *
+ * The six preset keys below must stay in sync with `ACCENT_COLOR_OPTIONS`
+ * (`features/settings/server/validation.ts`) — that array remains the one
+ * source of truth for *which accent values exist and are selectable* (and
+ * what the Settings picker's swatches look like); this block only supplies
+ * the actual color each already-validated value resolves to when applied.
+ * A future preset added there with no matching block here would degrade
+ * safely (the attribute is set, no selector matches, default tokens
+ * render) rather than error, but should still get a matching entry added
+ * here in the same change.
+ *
+ * Each preset defines both a light-mode (`[data-accent="..."]`) and
+ * dark-mode (`.dark [data-accent="..."]`) value — mirroring the `:root`/
+ * `.dark` split above — using a darker/saturated shade in light mode and a
+ * lighter shade with a dark foreground in dark mode (the same
+ * light-primary/dark-foreground pattern `.dark`'s own default tokens
+ * already use above), so the accent composes correctly with every
+ * light/dark/system combination (AC2) rather than picking one shade that
+ * only reads well in one mode. `.dark [data-accent="..."]` is a compound
+ * selector (higher specificity than the plain `[data-accent="..."]` light
+ * rule), so it always wins when both the `.dark` class and a `data-accent`
+ * attribute are present, regardless of each rule's source order below.
+ */
+[data-accent="blue"] {
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --ring: #3b82f6;
+  --chart-1: #3b82f6;
+}
+.dark [data-accent="blue"] {
+  --primary: #60a5fa;
+  --primary-foreground: oklch(0.205 0 0);
+  --ring: #60a5fa;
+  --chart-1: #60a5fa;
+}
+
+[data-accent="violet"] {
+  --primary: #8b5cf6;
+  --primary-foreground: #ffffff;
+  --ring: #8b5cf6;
+  --chart-1: #8b5cf6;
+}
+.dark [data-accent="violet"] {
+  --primary: #a78bfa;
+  --primary-foreground: oklch(0.205 0 0);
+  --ring: #a78bfa;
+  --chart-1: #a78bfa;
+}
+
+[data-accent="emerald"] {
+  --primary: #10b981;
+  --primary-foreground: #ffffff;
+  --ring: #10b981;
+  --chart-1: #10b981;
+}
+.dark [data-accent="emerald"] {
+  --primary: #34d399;
+  --primary-foreground: oklch(0.205 0 0);
+  --ring: #34d399;
+  --chart-1: #34d399;
+}
+
+/* Amber's 500/400 shades are both bright enough that a white/light
+   foreground fails contrast in either mode, unlike the other five presets
+   — a dark foreground is used in both light and dark mode here. */
+[data-accent="amber"] {
+  --primary: #f59e0b;
+  --primary-foreground: oklch(0.205 0 0);
+  --ring: #f59e0b;
+  --chart-1: #f59e0b;
+}
+.dark [data-accent="amber"] {
+  --primary: #fbbf24;
+  --primary-foreground: oklch(0.205 0 0);
+  --ring: #fbbf24;
+  --chart-1: #fbbf24;
+}
+
+[data-accent="rose"] {
+  --primary: #f43f5e;
+  --primary-foreground: #ffffff;
+  --ring: #f43f5e;
+  --chart-1: #f43f5e;
+}
+.dark [data-accent="rose"] {
+  --primary: #fb7185;
+  --primary-foreground: oklch(0.205 0 0);
+  --ring: #fb7185;
+  --chart-1: #fb7185;
+}
+
+[data-accent="teal"] {
+  --primary: #14b8a6;
+  --primary-foreground: #ffffff;
+  --ring: #14b8a6;
+  --chart-1: #14b8a6;
+}
+.dark [data-accent="teal"] {
+  --primary: #2dd4bf;
+  --primary-foreground: oklch(0.205 0 0);
+  --ring: #2dd4bf;
+  --chart-1: #2dd4bf;
+}

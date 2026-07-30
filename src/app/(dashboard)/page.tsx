@@ -1,17 +1,8 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
-import {
-  ArrowLeftRight,
-  PiggyBank,
-  Target,
-  TrendingDown,
-  TrendingUp,
-  Wallet,
-} from "lucide-react"
+import { Wallet } from "lucide-react"
 
 import { getCurrentUser } from "@/lib/auth"
-import { formatCurrency } from "@/lib/utils"
-import { StatCard } from "@/components/shared/stat-card"
 import { currentMonthString } from "@/components/shared/month-utils"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -29,18 +20,13 @@ import {
   getBudgetHealthScore,
   getBudgetMonthSummary,
 } from "@/features/budgeting/server/service"
-import { BudgetHealthScoreBadge } from "@/features/budgeting/components/budget-health-score-badge"
-import { IncomeVsExpenseChart } from "@/features/dashboard/components/income-vs-expense-chart"
-import { MonthlyTrendsChart } from "@/features/dashboard/components/monthly-trends-chart"
-import { NetWorthHistoryChart } from "@/features/dashboard/components/net-worth-history-chart"
-import { SpendingByCategoryChart } from "@/features/dashboard/components/spending-by-category-chart"
-import { MonthlySummaryCard } from "@/features/dashboard/components/monthly-summary-card"
 import {
   getMostRecentSummary,
   getSummaryHistory,
 } from "@/features/dashboard/server/monthly-summary"
 import { getFinancialHealthScore } from "@/features/financial-health-score/server/service"
-import { FinancialHealthScoreBadge } from "@/features/financial-health-score/components/financial-health-score-badge"
+import { getDashboardCardPreferences } from "@/features/settings/server/service"
+import { buildDashboardCardGroups } from "./_lib/dashboard-card-groups"
 
 /**
  * Dashboard Overview — Phase 1 (docs/product/dashboard-overview.md).
@@ -90,6 +76,17 @@ import { FinancialHealthScoreBadge } from "@/features/financial-health-score/com
  * client-side by `NetWorthHistoryChart` itself (TanStack Query, via
  * `features/dashboard/hooks/use-net-worth-history.ts`) — this page never
  * re-renders for a range switch.
+ *
+ * **Phase 4c addition (docs/product/customization.md, "Dashboard Layout"
+ * capability):** which of the cards below actually render, and in what
+ * order, is no longer this file's own fixed decision — it is resolved per
+ * user via Settings' `getDashboardCardPreferences` (a plain, database-free
+ * read, so it joins the same independent `Promise.all` batch as everything
+ * else above) and applied by the render step at the bottom of this
+ * function. Every card's own data-fetching/computation above is completely
+ * unaffected by this — hiding a card only ever changes whether its already-
+ * computed JSX gets mounted, never what was computed (customization.md's
+ * "hiding is a display preference, never a deletion" AC1).
  */
 export default async function DashboardPage() {
   const user = await getCurrentUser()
@@ -116,6 +113,7 @@ export default async function DashboardPage() {
     mostRecentMonthlyRecap,
     monthlyRecapHistory,
     financialHealthScore,
+    cardPreferences,
   ] = await Promise.all([
     getNetWorth(user.id),
     getMonthlySummary(user.id, new Date()),
@@ -157,6 +155,11 @@ export default async function DashboardPage() {
     // metric degrades independently... one failing metric never blanks out
     // the others."
     getFinancialHealthScore(user.id, new Date()),
+    // (Phase 4c) Settings' fully-resolved show/hide/order state for every
+    // canonical Dashboard card (`DASHBOARD_CARD_KEYS`) — see this page's
+    // module doc above. A Server-Component-direct-call read, same contract
+    // as every other entry in this batch.
+    getDashboardCardPreferences(user.id),
   ])
 
   // Dependent on `defaultRangeResolution` above, so it can't join the
@@ -172,8 +175,43 @@ export default async function DashboardPage() {
   // number below (income, expenses, cash flow, savings rate, all three
   // charts) is meaningless with zero accounts, so this renders a single
   // encouraging prompt instead of a grid of zeroes that could be mistaken
-  // for real data.
+  // for real data. Deliberately rendered before any card-visibility
+  // resolution below — this empty state isn't itself a customizable card,
+  // it's what replaces the entire customizable set when there's nothing yet
+  // for any of them to show.
   const hasAccounts = netWorth.byAccount.length > 0
+
+  // Phase 4c: resolves which cards render, in what order, and how the
+  // visible ones lay out (grid tiles vs. full-width rows) — see
+  // `./_lib/dashboard-card-groups.tsx` for the key -> JSX registry and
+  // grouping algorithm this delegates to. Every card's own data above is
+  // completely unaffected by this call; it only ever decides which
+  // already-computed JSX gets mounted, and in what arrangement
+  // (customization.md's "hiding is a display preference, never a deletion"
+  // AC1). Trusted precondition, not re-validated here: `cardGroups` is
+  // guaranteed non-empty whenever `hasAccounts` is true, since
+  // `updateDashboardCardVisibility` (`features/settings/server/actions.ts`)
+  // already enforces "at least one card must remain visible at all times"
+  // (AC3) server-side before a hide can ever persist — this page has no
+  // defensive "what if zero cards are visible" branch, since that would
+  // reproduce a guarantee the backend already owns rather than add real
+  // safety.
+  const cardGroups = buildDashboardCardGroups(
+    {
+      netWorth,
+      monthlySummary,
+      spendingByCategory,
+      monthlyTrends,
+      budgetSummary,
+      budgetHealthScore,
+      financialHealthScore,
+      netWorthHistoryRange: defaultRangeResolution.defaultRange,
+      netWorthHistory,
+      mostRecentMonthlyRecap,
+      monthlyRecapHistory,
+    },
+    cardPreferences,
+  )
 
   return (
     <div className="flex flex-col gap-6">
@@ -206,98 +244,22 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       ) : (
-        <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-            <StatCard
-              label="Net Worth"
-              value={formatCurrency(netWorth.total)}
-              icon={Wallet}
-            />
-            <StatCard
-              label="Monthly Income"
-              value={formatCurrency(monthlySummary.income)}
-              icon={TrendingUp}
-            />
-            <StatCard
-              label="Monthly Expenses"
-              value={formatCurrency(monthlySummary.expenses)}
-              icon={TrendingDown}
-            />
-            {/* Budgeting (Phase 2) is now live — AC11: shows Total
-                Remaining for the current month once the user has at least
-                one category allocation set; `getBudgetMonthSummary` returns
-                `null` under the exact same "zero allocations set" condition
-                the Phase 1 placeholder covered, so that empty state is
-                preserved rather than replaced with a misleading $0. */}
-            <StatCard
-              label="Remaining Budget"
-              value={
-                budgetSummary === null
-                  ? "No budget set yet"
-                  : formatCurrency(budgetSummary.totalRemaining)
-              }
-              icon={Target}
-            />
-            <StatCard
-              label="Cash Flow"
-              value={formatCurrency(monthlySummary.cashFlow)}
-              icon={ArrowLeftRight}
-            />
-            <StatCard
-              label="Savings Rate"
-              // `savingsRate` is `null` (not `0`) when income was $0 for the
-              // period — dashboard-overview.md AC6 requires an explicit
-              // "not enough data" state here rather than a misleading "0%",
-              // a NaN, or a thrown divide-by-zero. See
-              // features/dashboard/types.ts's `MonthlySummary.savingsRate`
-              // JSDoc for why the service returns `null` for this case.
-              value={
-                monthlySummary.savingsRate === null
-                  ? "Not enough data"
-                  : `${(monthlySummary.savingsRate * 100).toFixed(1)}%`
-              }
-              icon={PiggyBank}
-            />
-            {/* AC12: Budget Health Score goes live alongside Remaining
-                Budget — `BudgetHealthScoreBadge` already renders its own
-                "Not enough data yet" state for the `null` case (same
-                "zero allocations set" condition as the card above), so no
-                extra branching is needed here. */}
-            <BudgetHealthScoreBadge score={budgetHealthScore} />
-            {/* (Phase 4a) Feature 5 AC8: "surfaced on the Dashboard (a
-                summary card)" — `FinancialHealthScoreBadge` already renders
-                its own "Not enough data yet" state for the null-score case
-                (same zero-computable-components condition as the Budget
-                Health Score card above), so no extra branching is needed
-                here. */}
-            <FinancialHealthScoreBadge breakdown={financialHealthScore} />
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <SpendingByCategoryChart data={spendingByCategory} />
-            <IncomeVsExpenseChart
-              income={monthlySummary.income}
-              expenses={monthlySummary.expenses}
-            />
-          </div>
-
-          <MonthlyTrendsChart data={monthlyTrends} />
-
-          {/* Phase 3b: net-worth-history.md's companion chart to the Net
-              Worth stat card above — see this page's module doc for how its
-              initial range/data are resolved. */}
-          <NetWorthHistoryChart
-            initialRange={defaultRangeResolution.defaultRange}
-            initialData={netWorthHistory}
-          />
-
-          {/* (Phase 4a) Feature 3 AC4: "the most recently completed month's
-              summary is surfaced on the Dashboard as its own card." */}
-          <MonthlySummaryCard
-            summary={mostRecentMonthlyRecap}
-            history={monthlyRecapHistory}
-          />
-        </>
+        cardGroups.map((group, index) =>
+          group.kind === "stat" ? (
+            <div
+              key={`stat-group-${index}`}
+              className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6"
+            >
+              {group.entries.map((entry) => (
+                <div key={entry.key}>{entry.render()}</div>
+              ))}
+            </div>
+          ) : (
+            group.entries.map((entry) => (
+              <div key={entry.key}>{entry.render()}</div>
+            ))
+          ),
+        )
       )}
     </div>
   )
