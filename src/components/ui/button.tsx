@@ -16,8 +16,31 @@ const buttonVariants = cva(
           "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
+        // Accessibility fix (docs/testing/e2e/accessibility-run-report.md
+        // finding #2, axe `color-contrast`, serious): `text-destructive`
+        // (light-mode `--destructive` = Tailwind red-600, #dc2626) on
+        // `bg-destructive/10` (a ~10%-alpha red-600 tint over the card/page
+        // background) measured 4.0:1 in light mode — below the 4.5:1 WCAG
+        // 2.1 AA floor. The background tint itself is left unchanged (it
+        // carries no text, and re-tuning it would either weaken the "soft
+        // destructive surface" look for no gain or, moving the wrong
+        // direction, blend the tint even closer to the text color and make
+        // contrast worse — verified by computing luminance both ways) — only
+        // the text color is darkened, from red-600 to red-700
+        // (`text-red-700`), computed at ~5.5:1 against the same light-mode
+        // background (and ~4.7:1 on the `hover:bg-destructive/20` state).
+        // Dark mode is untouched (`dark:text-red-400`): `--destructive`
+        // dark is already Tailwind red-400, and `text-destructive` on
+        // `dark:bg-destructive/20` already measured ~4.76:1 against the
+        // dark `--card` background — already passing, so `dark:text-red-400`
+        // is the same literal color dark mode already rendered via the
+        // `--destructive` token, just pinned explicitly rather than
+        // token-derived (the token itself is left alone — `--destructive` is
+        // a shared value also driving `aria-invalid` borders/rings across
+        // every form control, and this finding is scoped to the text/bg
+        // pairing on this variant, not to that broader token).
         destructive:
-          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
+          "bg-destructive/10 text-red-700 dark:text-red-400 hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {

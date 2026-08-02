@@ -12,8 +12,17 @@ const badgeVariants = cva(
         default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
         secondary:
           "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
+        // Accessibility fix (docs/testing/e2e/accessibility-run-report.md
+        // finding #2, axe `color-contrast`, serious) — identical fix and
+        // reasoning as `buttonVariants`' `destructive` variant in
+        // `button.tsx` (see that file's comment for the full contrast math):
+        // `text-destructive` (red-600) on `bg-destructive/10` measured
+        // 4.0:1 in light mode, below the 4.5:1 floor. `text-red-700`
+        // resolves to ~5.5:1 against the same background; dark mode
+        // (`dark:text-red-400`) is unchanged from what `text-destructive`
+        // already rendered there (already passing at ~4.76:1).
         destructive:
-          "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
+          "bg-destructive/10 text-red-700 dark:text-red-400 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
         outline:
           "border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
         ghost:

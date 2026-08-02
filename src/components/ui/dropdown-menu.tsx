@@ -72,8 +72,23 @@ function DropdownMenuItem({
       data-slot="dropdown-menu-item"
       data-inset={inset}
       data-variant={variant}
+      // Accessibility fix (docs/testing/e2e/accessibility-run-report.md
+      // finding #2, axe `color-contrast`, serious — this is the concrete
+      // "Financial Goal detail's archive button" instance the report names:
+      // `financial-goal-card.tsx`'s Archive action is a
+      // `DropdownMenuItem variant="destructive"`, not a `Button`). Same
+      // root cause and fix as `buttonVariants`'/`badgeVariants`'
+      // `destructive` variant (see `button.tsx`'s comment for the full
+      // contrast math): the focused/hovered state's `text-destructive`
+      // (red-600) on `bg-destructive/10` measured 4.0:1 in light mode.
+      // `text-red-700`/`dark:text-red-400` replaces both the rest-state and
+      // focus-state text color — the icon glyph
+      // (`*:[svg]:text-destructive`) is left on the semantic token
+      // deliberately: axe's `color-contrast` rule only evaluates rendered
+      // text, not icon fills, so re-coloring the icon isn't required by
+      // this finding and is out of this fix's scope.
       className={cn(
-        "group/dropdown-menu-item relative flex cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-inset:pl-7 data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive dark:data-[variant=destructive]:focus:bg-destructive/20 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 data-[variant=destructive]:*:[svg]:text-destructive",
+        "group/dropdown-menu-item relative flex cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-inset:pl-7 data-[variant=destructive]:text-red-700 data-[variant=destructive]:dark:text-red-400 data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-red-700 data-[variant=destructive]:focus:dark:text-red-400 dark:data-[variant=destructive]:focus:bg-destructive/20 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 data-[variant=destructive]:*:[svg]:text-destructive",
         className
       )}
       {...props}

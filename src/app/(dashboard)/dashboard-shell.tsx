@@ -63,7 +63,15 @@ export function DashboardShell({
           mobileNavOpen={mobileNavOpen}
           onMobileNavOpenChange={setMobileNavOpen}
         />
-        <main className="flex-1 overflow-y-auto p-4 pb-16 sm:pb-0 md:p-6">
+        {/* Phase 5a accessibility fix (docs/testing/e2e/accessibility-run-report.md
+            finding #4, scrollable-region-focusable): this `overflow-y-auto` region
+            is the actual scrollable container on tall routes (e.g. Financial Health
+            Score detail) — `tabIndex={0}` makes it keyboard-focusable/scrollable via
+            arrow keys on those routes. `<main>` is already a landmark with its own
+            accessible name via the browser's implicit role, so no `role`/`aria-label`
+            addition is needed here (unlike `ScrollAffordanceContainer`, a
+            non-landmark `<div>` that does need one). */}
+        <main className="flex-1 overflow-y-auto p-4 pb-16 sm:pb-0 md:p-6" tabIndex={0}>
           {children}
         </main>
       </div>

@@ -64,7 +64,7 @@ export function ReportingPeriodSelector({ period }: ReportingPeriodSelectorProps
     <Tabs value={period} onValueChange={(value) => handlePeriodChange(value as ReportingPeriod)}>
       <TabsList>
         {PERIOD_OPTIONS.map((option) => (
-          <TabsTrigger key={option.value} value={option.value}>
+          <TabsTrigger key={option.value} value={option.value} hasAssociatedPanel={false}>
             {option.label}
           </TabsTrigger>
         ))}

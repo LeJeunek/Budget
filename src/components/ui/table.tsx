@@ -8,6 +8,33 @@ function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
     <div
       data-slot="table-container"
+      // Accessibility fix (docs/testing/e2e/accessibility-run-report.md
+      // finding #4, axe `scrollable-region-focusable`, serious): this
+      // `overflow-x-auto` wrapper is the actual "scrollable table
+      // container" the report's Analytics-suite finding traces to
+      // (`features/analytics/components/budget-vs-actual-table.tsx` renders
+      // through this exact `Table` primitive, per that file's own JSDoc —
+      // "Wrapped in Table's own overflow-x-auto container"). A div with
+      // `overflow-x-auto` and no `tabIndex` is not natively reachable by
+      // keyboard, so a keyboard-only user has no way to scroll a table
+      // wider than its container. `tabIndex={0}` fixes it at this one
+      // shared primitive rather than at each of `Table`'s many feature
+      // consumers (`DataTable`'s own table markup renders through this same
+      // `Table` component, so this fix also covers every `DataTable`/
+      // `ResponsiveDataTable` consumer's wide-table case for free) — the
+      // identical mechanism `components/shared/scroll-affordance-container.tsx`
+      // already established for Analytics' charts, mirrored here.
+      //
+      // Deliberately `tabIndex={0}` only, not also `role="group"` +
+      // `aria-label` (unlike `ScrollAffordanceContainer`): a `<table>`
+      // already carries its own semantics and, where a consumer supplies
+      // one, its own accessible name via `<TableCaption>` or an adjacent
+      // heading — wrapping it in an unnamed `role="group"` would add a
+      // second, redundant, unlabeled landmark rather than improve on it.
+      // The failing axe rule here (`scrollable-region-focusable`) only
+      // requires focusability, not a name, so this stays the minimal fix
+      // for the actual finding.
+      tabIndex={0}
       className="relative w-full overflow-x-auto"
     >
       <table
