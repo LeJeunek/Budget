@@ -17,7 +17,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { DataTable } from "@/components/shared/data-table"
+import { ResponsiveDataTable } from "@/components/shared/data-table"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -322,6 +322,10 @@ export function TransactionTable({
           />
         ),
         cell: ({ row }) => <span className="font-medium">{row.original.merchant}</span>,
+        // Phase 5a (phase-5a-technical-design.md §3.1): merchant + amount
+        // are this table's card-list "primary" columns — the two figures a
+        // user scanning their transactions on mobile needs at a glance.
+        meta: { cardDisplay: "primary" },
       },
       {
         id: "category",
@@ -383,6 +387,7 @@ export function TransactionTable({
             </div>
           )
         },
+        meta: { cardDisplay: "primary" },
       },
       {
         id: "account",
@@ -529,7 +534,7 @@ export function TransactionTable({
 
   return (
     <>
-      <DataTable
+      <ResponsiveDataTable
         columns={columns}
         data={data?.items ?? []}
         isLoading={isLoading}

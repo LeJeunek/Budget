@@ -36,7 +36,7 @@ import {
 import { formatDate } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { DataTable, DataTableColumnHeader } from "@/components/shared/data-table"
+import { ResponsiveDataTable, DataTableColumnHeader } from "@/components/shared/data-table"
 import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 
 export interface OccurrenceHistoryTableProps {
@@ -80,12 +80,17 @@ export function OccurrenceHistoryTable({
       accessorKey: "status",
       header: "Status",
       cell: ({ row }) => <IncomeOccurrenceStatusBadge status={row.original.status} />,
+      // Phase 5a (phase-5a-technical-design.md §3.1): status + received
+      // amount are this table's card-list "primary" columns — the dispatch's
+      // own named choice for both occurrence-history tables.
+      meta: { cardDisplay: "primary" },
     },
     {
       id: "receivedAmount",
       header: "Received amount",
       cell: ({ row }) =>
         row.original.receivedAmount !== null ? formatCurrency(row.original.receivedAmount) : "—",
+      meta: { cardDisplay: "primary" },
     },
     {
       id: "receivedDate",
@@ -166,7 +171,7 @@ export function OccurrenceHistoryTable({
 
   return (
     <>
-      <DataTable columns={columns} data={occurrences} emptyMessage="No occurrences yet." />
+      <ResponsiveDataTable columns={columns} data={occurrences} emptyMessage="No occurrences yet." />
 
       <MarkReceivedDialog
         open={markReceivedTarget !== null}

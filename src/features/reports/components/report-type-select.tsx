@@ -185,62 +185,71 @@ export function ReportTypeSelect({ value, onChange }: ReportTypeSelectProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="report-type">Report type</Label>
-        <Select
-          value={value.type}
-          onValueChange={(nextType) => onChange({ ...value, type: nextType as ReportType })}
-        >
-          <SelectTrigger id="report-type" className="w-full sm:w-64">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {REPORT_TYPE_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {value.type === "MONTHLY" && (
+      {/* Phase 5a (docs/architecture/phase-5a-technical-design.md §3.2):
+          Reports' "type/period" control row uses ordinary Tailwind
+          responsive-grid reflow (`grid-cols-1 sm:grid-cols-2`) rather than
+          the card-list/ResponsiveDataTable treatment — this is a short
+          generation form, not a data table, per the architecture doc's own
+          scoping. Single column below `sm` (640px, avoiding any horizontal
+          crowding on a narrow viewport), two columns at `sm`+ pairing the
+          report-type select with whichever single period control ("Month" /
+          "Year" / "Period" preset) that type currently shows. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="report-month">Month</Label>
-          <Input
-            id="report-month"
-            type="month"
-            className="w-full sm:w-64"
-            max={currentMonthString()}
-            value={value.month}
-            onChange={(event) => onChange({ ...value, month: event.target.value })}
-          />
+          <Label htmlFor="report-type">Report type</Label>
+          <Select
+            value={value.type}
+            onValueChange={(nextType) => onChange({ ...value, type: nextType as ReportType })}
+          >
+            <SelectTrigger id="report-type" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {REPORT_TYPE_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-      )}
 
-      {(value.type === "YEARLY" || value.type === "TAX_SUMMARY") && (
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="report-year">Year</Label>
-          <Input
-            id="report-year"
-            type="number"
-            className="w-full sm:w-64"
-            min={1970}
-            max={currentYear()}
-            value={value.year}
-            onChange={(event) => {
-              const raw = event.target.value
-              const parsed = Number(raw)
-              if (raw !== "" && Number.isFinite(parsed)) {
-                onChange({ ...value, year: parsed })
-              }
-            }}
-          />
-        </div>
-      )}
+        {value.type === "MONTHLY" && (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="report-month">Month</Label>
+            <Input
+              id="report-month"
+              type="month"
+              className="w-full"
+              max={currentMonthString()}
+              value={value.month}
+              onChange={(event) => onChange({ ...value, month: event.target.value })}
+            />
+          </div>
+        )}
 
-      {isFlexible && (
-        <div className="flex flex-col gap-3">
+        {(value.type === "YEARLY" || value.type === "TAX_SUMMARY") && (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="report-year">Year</Label>
+            <Input
+              id="report-year"
+              type="number"
+              className="w-full"
+              min={1970}
+              max={currentYear()}
+              value={value.year}
+              onChange={(event) => {
+                const raw = event.target.value
+                const parsed = Number(raw)
+                if (raw !== "" && Number.isFinite(parsed)) {
+                  onChange({ ...value, year: parsed })
+                }
+              }}
+            />
+          </div>
+        )}
+
+        {isFlexible && (
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="report-period">Period</Label>
             <Select
@@ -257,7 +266,7 @@ export function ReportTypeSelect({ value, onChange }: ReportTypeSelectProps) {
                 })
               }}
             >
-              <SelectTrigger id="report-period" className="w-full sm:w-64">
+              <SelectTrigger id="report-period" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -270,7 +279,11 @@ export function ReportTypeSelect({ value, onChange }: ReportTypeSelectProps) {
               </SelectContent>
             </Select>
           </div>
+        )}
+      </div>
 
+      {isFlexible && (
+        <div className="flex flex-col gap-3">
           {value.periodMode === "CUSTOM" && (
             <div className="flex flex-wrap items-end gap-3">
               <div className="flex flex-col gap-1.5">

@@ -27,7 +27,7 @@ import { MarkPaidDialog, type MarkPaidOccurrenceSummary } from "@/features/bills
 import { formatDate } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { DataTable, DataTableColumnHeader } from "@/components/shared/data-table"
+import { ResponsiveDataTable, DataTableColumnHeader } from "@/components/shared/data-table"
 import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 
 export interface OccurrenceHistoryTableProps {
@@ -72,12 +72,17 @@ export function OccurrenceHistoryTable({
       accessorKey: "status",
       header: "Status",
       cell: ({ row }) => <OccurrenceStatusBadge status={row.original.status} />,
+      // Phase 5a (phase-5a-technical-design.md §3.1): status + paid amount
+      // are this table's card-list "primary" columns — the dispatch's own
+      // named choice for both occurrence-history tables.
+      meta: { cardDisplay: "primary" },
     },
     {
       id: "paidAmount",
       header: "Paid amount",
       cell: ({ row }) =>
         row.original.paidAmount !== null ? formatCurrency(row.original.paidAmount) : "—",
+      meta: { cardDisplay: "primary" },
     },
     {
       id: "paidDate",
@@ -154,7 +159,7 @@ export function OccurrenceHistoryTable({
 
   return (
     <>
-      <DataTable
+      <ResponsiveDataTable
         columns={columns}
         data={occurrences}
         emptyMessage="No occurrences yet."

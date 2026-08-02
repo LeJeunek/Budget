@@ -18,6 +18,7 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ScrollAffordanceContainer } from "@/components/shared/scroll-affordance-container"
 import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 
 import type { IncomeSourceEntry } from "../types"
@@ -49,37 +50,47 @@ export function IncomeSourcesChart({ data }: IncomeSourcesChartProps) {
           </div>
         ) : (
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-            <div className="h-64 w-full sm:w-1/2">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={data}
-                    dataKey="amount"
-                    nameKey="type"
-                    innerRadius="55%"
-                    outerRadius="85%"
-                    paddingAngle={data.length > 1 ? 2 : 0}
-                    stroke="var(--card)"
-                  >
-                    {data.map((row, index) => (
-                      <Cell key={row.type} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value, name) => [
-                      formatCurrency(Number(value)),
-                      INCOME_SOURCE_TYPE_LABELS[String(name) as IncomeSourceEntry["type"]],
-                    ]}
-                    contentStyle={{
-                      backgroundColor: "var(--popover)",
-                      borderColor: "var(--border)",
-                      borderRadius: "var(--radius-lg)",
-                      color: "var(--popover-foreground)",
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
+            {/* Phase 5a (docs/architecture/phase-5a-technical-design.md
+                §3.2): horizontal-scroll-with-affordance, for consistency
+                with this feature's other Recharts-rendered charts — see
+                `expense-distribution-chart.tsx`'s identical comment for why
+                no artificial min-width is forced here. */}
+            <ScrollAffordanceContainer
+              className="w-full sm:w-1/2"
+              aria-label="Income sources pie chart — share of income by source for the selected period, scrollable horizontally"
+            >
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={data}
+                      dataKey="amount"
+                      nameKey="type"
+                      innerRadius="55%"
+                      outerRadius="85%"
+                      paddingAngle={data.length > 1 ? 2 : 0}
+                      stroke="var(--card)"
+                    >
+                      {data.map((row, index) => (
+                        <Cell key={row.type} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value, name) => [
+                        formatCurrency(Number(value)),
+                        INCOME_SOURCE_TYPE_LABELS[String(name) as IncomeSourceEntry["type"]],
+                      ]}
+                      contentStyle={{
+                        backgroundColor: "var(--popover)",
+                        borderColor: "var(--border)",
+                        borderRadius: "var(--radius-lg)",
+                        color: "var(--popover-foreground)",
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </ScrollAffordanceContainer>
             <ul className="flex w-full flex-col gap-2 sm:w-1/2">
               {data.map((row, index) => (
                 <li key={row.type} className="flex items-center justify-between gap-2 text-sm">

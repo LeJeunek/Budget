@@ -2,12 +2,11 @@ import type { ReactNode } from "react"
 import { redirect } from "next/navigation"
 
 import { getCurrentUser } from "@/lib/auth"
-import { Sidebar } from "@/components/shared/sidebar"
-import { TopNav } from "@/components/shared/top-nav"
 import { NotificationBell } from "@/features/notifications/components/notification-bell"
 import { TimezoneAutoCapture } from "@/features/settings/components/timezone-auto-capture"
 import { getUserPreference } from "@/features/settings/server/service"
 import { CurrencyPreferenceProvider } from "./currency-preference-provider"
+import { DashboardShell } from "./dashboard-shell"
 
 /**
  * Authenticated app shell (see docs/architecture/folder-tree.md:
@@ -48,6 +47,15 @@ import { CurrencyPreferenceProvider } from "./currency-preference-provider"
  * is unchanged, per that capability's own "never sets an accent color" Edge
  * Case.
  *
+ * **Phase 5a addition (docs/architecture/phase-5a-technical-design.md §2):**
+ * `Sidebar`/`TopNav`/`BottomNav`/`children` composition now lives in
+ * `./dashboard-shell.tsx`, a thin Client Component — `BottomNav`'s "More"
+ * button and `TopNav`'s hamburger `Sheet` need to share one lifted
+ * `mobileNavOpen` boolean (see that file's own JSDoc for the full reasoning),
+ * which requires `useState`, unavailable in this Server Component. This
+ * layout still resolves the user/preferences and stays a Server Component —
+ * only the boolean-sharing chrome composition moved out.
+ *
  * **Phase 4c release-gate fix (docs/release/phase-4c-notes.md Section 1,
  * "Currency Display is not wired to any surface outside its own settings-page
  * preview"):** this layout also threads the same `preference.currencyDisplay`
@@ -84,14 +92,12 @@ export default async function DashboardLayout({
             "component built by the feature owner, mounted by the Frontend Lead
             in the authenticated layout" split. */}
         <TimezoneAutoCapture />
-        <Sidebar />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <TopNav
-            user={{ name: user.name, email: user.email }}
-            notificationBell={<NotificationBell />}
-          />
-          <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
-        </div>
+        <DashboardShell
+          user={{ name: user.name, email: user.email }}
+          notificationBell={<NotificationBell />}
+        >
+          {children}
+        </DashboardShell>
       </CurrencyPreferenceProvider>
     </div>
   )

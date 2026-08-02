@@ -15,7 +15,7 @@
 
 import type { ColumnDef } from "@tanstack/react-table"
 
-import { DataTable } from "@/components/shared/data-table"
+import { ResponsiveDataTable } from "@/components/shared/data-table"
 import { Badge } from "@/components/ui/badge"
 import {
   AUDIT_LOG_EVENT_TYPE_LABELS,
@@ -41,6 +41,10 @@ export function AuditLogTable({ entries }: AuditLogTableProps) {
           {AUDIT_LOG_EVENT_TYPE_LABELS[row.original.type] ?? row.original.type}
         </Badge>
       ),
+      // Phase 5a (phase-5a-technical-design.md §3.1): event type + timestamp
+      // are this table's card-list "primary" columns — the two facts an
+      // admin scanning the audit log on mobile needs at a glance.
+      meta: { cardDisplay: "primary" },
     },
     {
       id: "summary",
@@ -65,6 +69,7 @@ export function AuditLogTable({ entries }: AuditLogTableProps) {
       cell: ({ row }) => (
         <span className="whitespace-nowrap">{formatDateTime(row.original.occurredAt)}</span>
       ),
+      meta: { cardDisplay: "primary" },
     },
     {
       id: "outcome",
@@ -78,7 +83,7 @@ export function AuditLogTable({ entries }: AuditLogTableProps) {
   ]
 
   return (
-    <DataTable
+    <ResponsiveDataTable
       columns={columns}
       data={entries}
       enablePagination={false}

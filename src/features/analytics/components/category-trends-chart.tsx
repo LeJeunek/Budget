@@ -26,6 +26,7 @@ import {
 } from "recharts"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ScrollAffordanceContainer } from "@/components/shared/scroll-affordance-container"
 import {
   useCurrencyDisplay,
   useFormatCurrency,
@@ -105,49 +106,57 @@ export function CategoryTrendsChart({ data }: CategoryTrendsChartProps) {
             ({hiddenCount} more not shown).
           </p>
         )}
-        <div className="h-80 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis
-                dataKey="month"
-                tickLine={false}
-                axisLine={false}
-                stroke="var(--muted-foreground)"
-                fontSize={12}
-              />
-              <YAxis
-                tickLine={false}
-                axisLine={false}
-                stroke="var(--muted-foreground)"
-                fontSize={12}
-                width={56}
-                tickFormatter={(value) => formatCompactCurrency(value, currency)}
-              />
-              <Tooltip
-                formatter={(value) => formatCurrency(Number(value))}
-                contentStyle={{
-                  backgroundColor: "var(--popover)",
-                  borderColor: "var(--border)",
-                  borderRadius: "var(--radius-lg)",
-                  color: "var(--popover-foreground)",
-                }}
-              />
-              <Legend wrapperStyle={{ fontSize: 12, color: "var(--muted-foreground)" }} />
-              {renderedCategories.map((category, index) => (
-                <Line
-                  key={category.categoryId}
-                  type="monotone"
-                  dataKey={category.categoryId}
-                  name={category.categoryName}
-                  stroke={CHART_PALETTE[index % CHART_PALETTE.length]}
-                  strokeWidth={2}
-                  dot={monthKeys.length === 1}
+        {/* Phase 5a (docs/architecture/phase-5a-technical-design.md §3.2):
+            horizontal-scroll-with-affordance — a month-per-tick line chart
+            with up to MAX_RENDERED_CATEGORIES series would otherwise
+            compress illegibly on a narrow viewport as the period spans more
+            months, so this chart keeps a legible minimum width and scrolls
+            instead. */}
+        <ScrollAffordanceContainer aria-label="Category trends line chart — monthly spending per category, scrollable horizontally">
+          <div className="h-80 w-full min-w-[36rem]">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis
+                  dataKey="month"
+                  tickLine={false}
+                  axisLine={false}
+                  stroke="var(--muted-foreground)"
+                  fontSize={12}
                 />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  stroke="var(--muted-foreground)"
+                  fontSize={12}
+                  width={56}
+                  tickFormatter={(value) => formatCompactCurrency(value, currency)}
+                />
+                <Tooltip
+                  formatter={(value) => formatCurrency(Number(value))}
+                  contentStyle={{
+                    backgroundColor: "var(--popover)",
+                    borderColor: "var(--border)",
+                    borderRadius: "var(--radius-lg)",
+                    color: "var(--popover-foreground)",
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: 12, color: "var(--muted-foreground)" }} />
+                {renderedCategories.map((category, index) => (
+                  <Line
+                    key={category.categoryId}
+                    type="monotone"
+                    dataKey={category.categoryId}
+                    name={category.categoryName}
+                    stroke={CHART_PALETTE[index % CHART_PALETTE.length]}
+                    strokeWidth={2}
+                    dot={monthKeys.length === 1}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </ScrollAffordanceContainer>
       </CardContent>
     </Card>
   )

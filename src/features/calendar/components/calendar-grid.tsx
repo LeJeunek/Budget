@@ -39,8 +39,19 @@
  * tone — this is a different case from "this particular month has nothing
  * due," which still renders the ordinary grid (with only the always-present
  * budget-reset marker to show, per AC10).
+ *
+ * **Phase 5a addition (docs/architecture/phase-5a-technical-design.md §4):**
+ * below `sm` (640px), each day cell renders a condensed, tap-to-expand
+ * variant (date number + `DayEntryIndicators`) instead of the full
+ * `BillEntry`/`PaydayEntry`/`BudgetResetMarker` list — both variants exist
+ * in the DOM simultaneously, CSS-toggled (`sm:hidden` / `hidden sm:flex`),
+ * the same dual-render-then-hide discipline `BottomNav`/`ResponsiveDataTable`
+ * already use, never a JS media-query check. This component owns the one
+ * `useState<string | null>` tracking which day (`CalendarMonthDay.day` key)
+ * is currently expanded, and renders `DayDetailSheet` controlled by it.
  */
 
+import { useState } from "react"
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { CalendarDays } from "lucide-react"
@@ -49,11 +60,14 @@ import { MonthNavigator } from "@/components/shared/month-navigator"
 import type { CalendarMonthDay } from "@/features/calendar/types"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { formatDate } from "@/lib/utils"
 import { useCurrencyDisplay } from "@/app/(dashboard)/currency-preference-provider"
 
 import { BillEntry } from "./bill-entry"
 import { PaydayEntry } from "./payday-entry"
 import { BudgetResetMarker } from "./budget-reset-marker"
+import { DayEntryIndicators } from "./day-entry-indicators"
+import { DayDetailSheet } from "./day-detail-sheet"
 
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
@@ -70,6 +84,24 @@ function weekdayOf(day: string): number {
 
 function dayNumber(day: string): number {
   return Number(day.split("-")[2])
+}
+
+/** Accessible-name summary for the condensed mobile day-cell's tap target
+ * (§4's `DayEntryIndicators` row is itself `aria-hidden`, so the `<button>`
+ * wrapping it needs its own full, non-visual summary of what that day
+ * holds — never left to be inferred from the glyphs alone). */
+function describeDayEntries(day: CalendarMonthDay): string {
+  const parts: string[] = []
+  if (day.bills.length > 0) {
+    parts.push(`${day.bills.length} bill${day.bills.length === 1 ? "" : "s"}`)
+  }
+  if (day.paydays.length > 0) {
+    parts.push(`${day.paydays.length} payday${day.paydays.length === 1 ? "" : "s"}`)
+  }
+  if (day.isBudgetResetDay) {
+    parts.push("budget reset")
+  }
+  return parts.length > 0 ? `, ${parts.join(", ")}` : ", nothing scheduled"
 }
 
 export interface CalendarGridProps {
@@ -93,6 +125,10 @@ export function CalendarGrid({
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
+  // §4's "State ownership" — the currently-expanded day's key (or `null`),
+  // driving DayDetailSheet's controlled open state below `sm`.
+  const [expandedDayKey, setExpandedDayKey] = useState<string | null>(null)
+  const expandedDay = days.find((day) => day.day === expandedDayKey) ?? null
 
   function handleMonthChange(nextMonth: string) {
     const params = new URLSearchParams(searchParams.toString())
@@ -129,31 +165,53 @@ export function CalendarGrid({
           ))}
 
           {days.map((day) => (
-            <div
-              key={day.day}
-              className="flex min-h-28 flex-col gap-1 border-r border-b p-1.5 last:border-r-0"
-            >
-              {day.isBudgetResetDay && (
-                <BudgetResetMarker budgetResetMonth={budgetResetMonth} />
-              )}
-              <span className="text-xs font-medium text-muted-foreground">
-                {dayNumber(day.day)}
-              </span>
-              <div className="flex flex-col gap-1">
-                {day.bills.map((occurrence) => (
-                  <BillEntry
-                    key={occurrence.billOccurrenceId}
-                    occurrence={occurrence}
-                    currency={currency}
-                  />
-                ))}
-                {day.paydays.map((payday, index) => (
-                  <PaydayEntry
-                    key={`${payday.streamId}-${index}`}
-                    payday={payday}
-                    currency={currency}
-                  />
-                ))}
+            <div key={day.day} className="min-h-28 border-r border-b last:border-r-0">
+              {/* Mobile (< 640px): condensed cell, tap-to-expand
+                  DayDetailSheet (§4). A different shape than every other
+                  mobile-only split in this pass (this variant is
+                  interactive, the sm+ one below is static), so — rather than
+                  toggling classes on one shared markup block — each variant
+                  is its own full-size child of this shared cell box,
+                  CSS-toggled the identical `sm:hidden` / `hidden sm:flex`
+                  way, both mounted simultaneously to avoid a JS media-query
+                  hydration mismatch. */}
+              <button
+                type="button"
+                onClick={() => setExpandedDayKey(day.day)}
+                aria-label={`${formatDate(day.day)}${describeDayEntries(day)}`}
+                className="flex h-full w-full flex-col items-start gap-1 p-1.5 text-left outline-none sm:hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+              >
+                <span className="text-xs font-medium text-muted-foreground">
+                  {dayNumber(day.day)}
+                </span>
+                <DayEntryIndicators day={day} />
+              </button>
+
+              {/* Tablet/desktop (>= 640px): ordinary, full multi-entry-per-
+                  cell rendering — unchanged from before this pass. */}
+              <div className="hidden h-full flex-col gap-1 p-1.5 sm:flex">
+                {day.isBudgetResetDay && (
+                  <BudgetResetMarker budgetResetMonth={budgetResetMonth} />
+                )}
+                <span className="text-xs font-medium text-muted-foreground">
+                  {dayNumber(day.day)}
+                </span>
+                <div className="flex flex-col gap-1">
+                  {day.bills.map((occurrence) => (
+                    <BillEntry
+                      key={occurrence.billOccurrenceId}
+                      occurrence={occurrence}
+                      currency={currency}
+                    />
+                  ))}
+                  {day.paydays.map((payday, index) => (
+                    <PaydayEntry
+                      key={`${payday.streamId}-${index}`}
+                      payday={payday}
+                      currency={currency}
+                    />
+                  ))}
+                </div>
               </div>
             </div>
           ))}
@@ -166,6 +224,14 @@ export function CalendarGrid({
           ))}
         </div>
       </div>
+
+      <DayDetailSheet
+        day={expandedDay}
+        budgetResetMonth={budgetResetMonth}
+        currency={currency}
+        open={expandedDayKey !== null}
+        onOpenChange={(open) => !open && setExpandedDayKey(null)}
+      />
     </div>
   )
 }

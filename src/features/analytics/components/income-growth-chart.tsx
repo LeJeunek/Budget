@@ -30,6 +30,7 @@ import {
 } from "recharts"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ScrollAffordanceContainer } from "@/components/shared/scroll-affordance-container"
 import {
   useCurrencyDisplay,
   useFormatCurrency,
@@ -90,48 +91,55 @@ export function IncomeGrowthChart({ data }: IncomeGrowthChartProps) {
         <CardTitle>Income Growth</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="h-80 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis
-                dataKey="month"
-                tickLine={false}
-                axisLine={false}
-                stroke="var(--muted-foreground)"
-                fontSize={12}
-              />
-              <YAxis
-                tickLine={false}
-                axisLine={false}
-                stroke="var(--muted-foreground)"
-                fontSize={12}
-                width={56}
-                tickFormatter={(value) => formatCompactCurrency(value, currency)}
-              />
-              <Tooltip
-                formatter={(value, name) => [formatCurrency(Number(value)), name]}
-                contentStyle={{
-                  backgroundColor: "var(--popover)",
-                  borderColor: "var(--border)",
-                  borderRadius: "var(--radius-lg)",
-                  color: "var(--popover-foreground)",
-                }}
-              />
-              <Legend wrapperStyle={{ fontSize: 12, color: "var(--muted-foreground)" }} />
-              {presentTypes.map((type, index) => (
-                <Bar
-                  key={type}
-                  dataKey={type}
-                  name={INCOME_SOURCE_TYPE_LABELS[type]}
-                  stackId="income"
-                  fill={CHART_PALETTE[index % CHART_PALETTE.length]}
-                  maxBarSize={64}
+        {/* Phase 5a (docs/architecture/phase-5a-technical-design.md §3.2):
+            horizontal-scroll-with-affordance — a stacked bar per month with
+            a per-source legend would otherwise compress illegibly on a
+            narrow viewport as the period spans more months, so this chart
+            keeps a legible minimum width and scrolls instead. */}
+        <ScrollAffordanceContainer aria-label="Income growth stacked bar chart — monthly income by source, scrollable horizontally">
+          <div className="h-80 w-full min-w-[36rem]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis
+                  dataKey="month"
+                  tickLine={false}
+                  axisLine={false}
+                  stroke="var(--muted-foreground)"
+                  fontSize={12}
                 />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  stroke="var(--muted-foreground)"
+                  fontSize={12}
+                  width={56}
+                  tickFormatter={(value) => formatCompactCurrency(value, currency)}
+                />
+                <Tooltip
+                  formatter={(value, name) => [formatCurrency(Number(value)), name]}
+                  contentStyle={{
+                    backgroundColor: "var(--popover)",
+                    borderColor: "var(--border)",
+                    borderRadius: "var(--radius-lg)",
+                    color: "var(--popover-foreground)",
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: 12, color: "var(--muted-foreground)" }} />
+                {presentTypes.map((type, index) => (
+                  <Bar
+                    key={type}
+                    dataKey={type}
+                    name={INCOME_SOURCE_TYPE_LABELS[type]}
+                    stackId="income"
+                    fill={CHART_PALETTE[index % CHART_PALETTE.length]}
+                    maxBarSize={64}
+                  />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </ScrollAffordanceContainer>
       </CardContent>
     </Card>
   )

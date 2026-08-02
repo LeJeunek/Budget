@@ -76,6 +76,19 @@ export interface TopNavProps {
    * `<NotificationBell />` (`features/notifications/components/notification-bell.tsx`)
    * from a page/layout that has access to that feature module. */
   notificationBell?: React.ReactNode
+  /**
+   * Phase 5a addition (`docs/architecture/phase-5a-technical-design.md`
+   * §2.2): controlled-mode override for the mobile-nav `Sheet`'s open state,
+   * so a parent can share this one boolean with `BottomNav`'s own "More"
+   * button rather than each owning an independent, competing `Sheet`. Both
+   * `mobileNavOpen` and `onMobileNavOpenChange` must be supplied together to
+   * take effect — when either is omitted, `TopNav` falls back to its own
+   * internal `useState` exactly as before, so every existing consumer that
+   * doesn't pass these is completely unaffected.
+   */
+  mobileNavOpen?: boolean
+  /** Paired with `mobileNavOpen` — see that prop's doc above. */
+  onMobileNavOpenChange?: (open: boolean) => void
 }
 
 function getInitials(name: string): string {
@@ -96,8 +109,22 @@ export function TopNav({
   onSearchChange,
   themeToggle,
   notificationBell,
+  mobileNavOpen: controlledMobileNavOpen,
+  onMobileNavOpenChange,
 }: TopNavProps) {
-  const [mobileNavOpen, setMobileNavOpen] = React.useState(false)
+  const [internalMobileNavOpen, setInternalMobileNavOpen] =
+    React.useState(false)
+  // Controlled/uncontrolled split, the ordinary React pattern (and the same
+  // shape Sheet's own underlying Radix `open`/`onOpenChange` API already
+  // uses) — see `mobileNavOpen`'s own doc comment above for why this exists.
+  const isControlled =
+    controlledMobileNavOpen !== undefined && onMobileNavOpenChange !== undefined
+  const mobileNavOpen = isControlled
+    ? controlledMobileNavOpen
+    : internalMobileNavOpen
+  const setMobileNavOpen = isControlled
+    ? onMobileNavOpenChange
+    : setInternalMobileNavOpen
 
   return (
     <header

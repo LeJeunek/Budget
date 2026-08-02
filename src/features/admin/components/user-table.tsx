@@ -18,7 +18,7 @@
 
 import type { ColumnDef } from "@tanstack/react-table"
 
-import { DataTable } from "@/components/shared/data-table"
+import { ResponsiveDataTable } from "@/components/shared/data-table"
 import { Badge } from "@/components/ui/badge"
 import type { AdminUserSummary } from "@/features/admin/types"
 
@@ -36,6 +36,10 @@ export function UserTable({ users }: UserTableProps) {
       id: "email",
       header: "Email",
       cell: ({ row }) => <span className="font-medium">{row.original.email}</span>,
+      // Phase 5a (phase-5a-technical-design.md §3.1): email + verification
+      // status are this table's card-list "primary" columns — the two facts
+      // an admin scanning the user list on mobile needs at a glance.
+      meta: { cardDisplay: "primary" },
     },
     {
       id: "name",
@@ -59,6 +63,7 @@ export function UserTable({ users }: UserTableProps) {
         ) : (
           <Badge variant="outline">Unverified</Badge>
         ),
+      meta: { cardDisplay: "primary" },
     },
     {
       id: "lastActive",
@@ -75,7 +80,7 @@ export function UserTable({ users }: UserTableProps) {
   ]
 
   return (
-    <DataTable
+    <ResponsiveDataTable
       columns={columns}
       data={users}
       enablePagination={false}

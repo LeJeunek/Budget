@@ -14,6 +14,7 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { ScrollAffordanceContainer } from "@/components/shared/scroll-affordance-container"
 import {
   useCurrencyDisplay,
   useFormatCurrency,
@@ -61,44 +62,51 @@ export function YearlySpendingChart({ data }: YearlySpendingChartProps) {
                 will appear once a second year of data exists.
               </p>
             )}
-            <div className="h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data} barCategoryGap="35%">
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                  <XAxis
-                    dataKey="year"
-                    tickLine={false}
-                    axisLine={false}
-                    stroke="var(--muted-foreground)"
-                    fontSize={12}
-                  />
-                  <YAxis
-                    tickLine={false}
-                    axisLine={false}
-                    stroke="var(--muted-foreground)"
-                    fontSize={12}
-                    width={56}
-                    tickFormatter={(value) => formatCompactCurrency(value, currency)}
-                  />
-                  <Tooltip
-                    formatter={(value) => formatCurrency(Number(value))}
-                    contentStyle={{
-                      backgroundColor: "var(--popover)",
-                      borderColor: "var(--border)",
-                      borderRadius: "var(--radius-lg)",
-                      color: "var(--popover-foreground)",
-                    }}
-                  />
-                  <Bar
-                    dataKey="totalExpenses"
-                    name="Total Expenses"
-                    fill="var(--chart-2)"
-                    radius={[6, 6, 0, 0]}
-                    maxBarSize={96}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            {/* Phase 5a (docs/architecture/phase-5a-technical-design.md
+                §3.2): horizontal-scroll-with-affordance, not a card-list —
+                a bar per year would otherwise squish illegibly as more
+                years of history accumulate on a narrow viewport, so this
+                chart keeps a legible minimum width and scrolls instead. */}
+            <ScrollAffordanceContainer aria-label="Yearly spending bar chart — total expenses per calendar year, scrollable horizontally">
+              <div className="h-72 w-full min-w-[32rem]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={data} barCategoryGap="35%">
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis
+                      dataKey="year"
+                      tickLine={false}
+                      axisLine={false}
+                      stroke="var(--muted-foreground)"
+                      fontSize={12}
+                    />
+                    <YAxis
+                      tickLine={false}
+                      axisLine={false}
+                      stroke="var(--muted-foreground)"
+                      fontSize={12}
+                      width={56}
+                      tickFormatter={(value) => formatCompactCurrency(value, currency)}
+                    />
+                    <Tooltip
+                      formatter={(value) => formatCurrency(Number(value))}
+                      contentStyle={{
+                        backgroundColor: "var(--popover)",
+                        borderColor: "var(--border)",
+                        borderRadius: "var(--radius-lg)",
+                        color: "var(--popover-foreground)",
+                      }}
+                    />
+                    <Bar
+                      dataKey="totalExpenses"
+                      name="Total Expenses"
+                      fill="var(--chart-2)"
+                      radius={[6, 6, 0, 0]}
+                      maxBarSize={96}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </ScrollAffordanceContainer>
           </div>
         )}
       </CardContent>

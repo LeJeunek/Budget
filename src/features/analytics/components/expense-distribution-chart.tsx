@@ -19,6 +19,7 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ScrollAffordanceContainer } from "@/components/shared/scroll-affordance-container"
 import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 
 import type { ExpenseDistributionEntry } from "../types"
@@ -49,37 +50,49 @@ export function ExpenseDistributionChart({ data }: ExpenseDistributionChartProps
           </div>
         ) : (
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-            <div className="h-64 w-full sm:w-1/2">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={data}
-                    dataKey="amount"
-                    nameKey="categoryName"
-                    innerRadius="55%"
-                    outerRadius="85%"
-                    paddingAngle={data.length > 1 ? 2 : 0}
-                    stroke="var(--card)"
-                  >
-                    {data.map((row, index) => (
-                      <Cell
-                        key={row.categoryId}
-                        fill={CHART_PALETTE[index % CHART_PALETTE.length]}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value) => formatCurrency(Number(value))}
-                    contentStyle={{
-                      backgroundColor: "var(--popover)",
-                      borderColor: "var(--border)",
-                      borderRadius: "var(--radius-lg)",
-                      color: "var(--popover-foreground)",
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
+            {/* Phase 5a (docs/architecture/phase-5a-technical-design.md
+                §3.2): horizontal-scroll-with-affordance, for consistency
+                with this feature's other Recharts-rendered charts — the
+                donut itself already scales fluidly within its own flex
+                column (no artificial min-width forced here, unlike the
+                bar/line charts above, since a pie chart has no per-tick
+                axis that squishes as data grows). */}
+            <ScrollAffordanceContainer
+              className="w-full sm:w-1/2"
+              aria-label="Expense distribution pie chart — spending by category for the selected period, scrollable horizontally"
+            >
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={data}
+                      dataKey="amount"
+                      nameKey="categoryName"
+                      innerRadius="55%"
+                      outerRadius="85%"
+                      paddingAngle={data.length > 1 ? 2 : 0}
+                      stroke="var(--card)"
+                    >
+                      {data.map((row, index) => (
+                        <Cell
+                          key={row.categoryId}
+                          fill={CHART_PALETTE[index % CHART_PALETTE.length]}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value) => formatCurrency(Number(value))}
+                      contentStyle={{
+                        backgroundColor: "var(--popover)",
+                        borderColor: "var(--border)",
+                        borderRadius: "var(--radius-lg)",
+                        color: "var(--popover-foreground)",
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </ScrollAffordanceContainer>
             <ul className="flex w-full flex-col gap-2 sm:w-1/2">
               {data.map((row, index) => (
                 <li

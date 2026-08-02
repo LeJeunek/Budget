@@ -31,6 +31,7 @@ import {
 } from "recharts"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ScrollAffordanceContainer } from "@/components/shared/scroll-affordance-container"
 import {
   useCurrencyDisplay,
   useFormatCurrency,
@@ -80,50 +81,57 @@ export function SavingsGrowthChart({ data }: SavingsGrowthChartProps) {
         <CardTitle>Savings Growth</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="h-72 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis
-                dataKey="month"
-                tickLine={false}
-                axisLine={false}
-                stroke="var(--muted-foreground)"
-                fontSize={12}
-              />
-              <YAxis
-                tickLine={false}
-                axisLine={false}
-                stroke="var(--muted-foreground)"
-                fontSize={12}
-                width={56}
-                tickFormatter={(value) => formatCompactCurrency(value, currency)}
-              />
-              <Tooltip
-                formatter={(value) =>
-                  value === null
-                    ? ["Excluded (no income that month)", "Actual Savings"]
-                    : [formatCurrency(Number(value)), "Actual Savings"]
-                }
-                contentStyle={{
-                  backgroundColor: "var(--popover)",
-                  borderColor: "var(--border)",
-                  borderRadius: "var(--radius-lg)",
-                  color: "var(--popover-foreground)",
-                }}
-              />
-              <Line
-                type="monotone"
-                dataKey="actualSavings"
-                name="Actual Savings"
-                stroke="var(--chart-1)"
-                strokeWidth={2}
-                dot={chartData.length === 1}
-                connectNulls={false}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+        {/* Phase 5a (docs/architecture/phase-5a-technical-design.md §3.2):
+            horizontal-scroll-with-affordance — a month-per-tick line chart
+            would otherwise compress illegibly on a narrow viewport as the
+            period spans more months, so this chart keeps a legible minimum
+            width and scrolls instead. */}
+        <ScrollAffordanceContainer aria-label="Savings growth line chart — monthly actual savings trend, scrollable horizontally">
+          <div className="h-72 w-full min-w-[32rem]">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis
+                  dataKey="month"
+                  tickLine={false}
+                  axisLine={false}
+                  stroke="var(--muted-foreground)"
+                  fontSize={12}
+                />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  stroke="var(--muted-foreground)"
+                  fontSize={12}
+                  width={56}
+                  tickFormatter={(value) => formatCompactCurrency(value, currency)}
+                />
+                <Tooltip
+                  formatter={(value) =>
+                    value === null
+                      ? ["Excluded (no income that month)", "Actual Savings"]
+                      : [formatCurrency(Number(value)), "Actual Savings"]
+                  }
+                  contentStyle={{
+                    backgroundColor: "var(--popover)",
+                    borderColor: "var(--border)",
+                    borderRadius: "var(--radius-lg)",
+                    color: "var(--popover-foreground)",
+                  }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="actualSavings"
+                  name="Actual Savings"
+                  stroke="var(--chart-1)"
+                  strokeWidth={2}
+                  dot={chartData.length === 1}
+                  connectNulls={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </ScrollAffordanceContainer>
       </CardContent>
     </Card>
   )
