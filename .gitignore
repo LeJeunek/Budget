@@ -13,6 +13,14 @@
 # testing
 /coverage
 
+# Playwright (tests/e2e/) — generated run artifacts, and the storageState
+# files auth.setup.ts writes (real, live session cookies for the two
+# e2e-test@/e2e-test-admin@lkbudget.dev accounts — never committed, mirrors
+# .env* being ignored for the same "never commit a live credential" reason).
+/playwright-report/
+/test-results/
+/tests/e2e/support/.auth/
+
 # next.js
 /.next/
 /out/

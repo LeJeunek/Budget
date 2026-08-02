@@ -1,0 +1,9 @@
+{
+  "_comment": "Checked-in PLACEHOLDER only, so a cold checkout and `npm run typecheck` never break on this import. These are NOT real database ids -- run `npm run seed:e2e` before running the Playwright suite for real; that script overwrites this file with actual fixture ids from your local/CI database.",
+  "transactionId": "placeholder-transaction-id",
+  "goalId": "placeholder-goal-id",
+  "billId": "placeholder-bill-id",
+  "incomeStreamId": "placeholder-income-stream-id",
+  "holdingId": "placeholder-holding-id",
+  "financialGoalId": "placeholder-financial-goal-id"
+}

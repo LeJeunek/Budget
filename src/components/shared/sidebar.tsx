@@ -221,7 +221,13 @@ export interface SidebarProps {
   onNavigate?: () => void
 }
 
-function isActivePath(pathname: string, href: string): boolean {
+/**
+ * Exported (Phase 5a) so `BottomNav` (`components/shared/bottom-nav.tsx`)
+ * can reuse the identical "is this the active route" logic for its own
+ * `aria-current="page"` treatment instead of reimplementing it — see
+ * `docs/architecture/phase-5a-technical-design.md` §2.3. No behavior change.
+ */
+export function isActivePath(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/"
   return pathname === href || pathname.startsWith(`${href}/`)
 }

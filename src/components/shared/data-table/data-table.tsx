@@ -116,6 +116,21 @@ export interface DataTableProps<TData, TValue> {
    * DataTable needing any domain knowledge.
    */
   toolbar?: (table: TanstackTable<TData>) => React.ReactNode
+
+  /**
+   * Phase 5a addition (`docs/architecture/phase-5a-technical-design.md`
+   * §3.1): use a caller-supplied TanStack table instance instead of the one
+   * DataTable would otherwise construct internally. Exists solely so
+   * `ResponsiveDataTable` (`responsive-data-table.tsx`) can share exactly
+   * one `useReactTable` instance between this component's table markup and
+   * `DataTableCardList`'s card markup — the two views can never drift out
+   * of sync (same sort/filter/pagination state) because they render the
+   * same live instance, not two independently managed ones. Omit this prop
+   * for ordinary standalone use: DataTable falls back to its existing
+   * internal construction exactly as before, so no existing consumer is
+   * affected by this addition.
+   */
+  table?: TanstackTable<TData>
 }
 
 export function DataTable<TData, TValue>({
@@ -134,12 +149,12 @@ export function DataTable<TData, TValue>({
   pageIndex,
   onPaginationChange,
   toolbar,
+  table: suppliedTable,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
     []
   )
-  const [globalFilter, setGlobalFilter] = React.useState("")
   const [pagination, setPagination] = React.useState<PaginationState>({
     pageIndex: pageIndex ?? 0,
     pageSize,
@@ -155,13 +170,24 @@ export function DataTable<TData, TValue>({
     }
   }, [manualPagination, pageIndex])
 
-  const table = useReactTable({
+  // Always constructed, even when `suppliedTable` is given, so this hook
+  // call stays unconditional (Rules of Hooks) — the instance is simply
+  // discarded in favor of `suppliedTable` below when one is provided.
+  // Note: `globalFilter` is deliberately left out of `state` here (and has
+  // no `onGlobalFilterChange` handler) so TanStack manages it internally by
+  // default — the search input below now reads/writes it via
+  // `table.getState().globalFilter` / `table.setGlobalFilter()` directly on
+  // the *resolved* table (internal or caller-supplied) instead of a second,
+  // parallel piece of local React state that only the internal instance
+  // would ever see. This is what makes the built-in search input keep
+  // working correctly when `suppliedTable` (ResponsiveDataTable's shared
+  // instance) is used.
+  const internalTable = useReactTable({
     data,
     columns,
-    state: { sorting, columnFilters, globalFilter, pagination },
+    state: { sorting, columnFilters, pagination },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
-    onGlobalFilterChange: setGlobalFilter,
     onPaginationChange: (updater) => {
       setPagination((prev) => {
         const next = typeof updater === "function" ? updater(prev) : updater
@@ -177,6 +203,7 @@ export function DataTable<TData, TValue>({
     pageCount: manualPagination ? pageCount ?? -1 : undefined,
   })
 
+  const table = suppliedTable ?? internalTable
   const rows = table.getRowModel().rows
 
   return (
@@ -190,8 +217,8 @@ export function DataTable<TData, TValue>({
                 aria-hidden="true"
               />
               <Input
-                value={globalFilter}
-                onChange={(event) => setGlobalFilter(event.target.value)}
+                value={(table.getState().globalFilter as string | undefined) ?? ""}
+                onChange={(event) => table.setGlobalFilter(event.target.value)}
                 placeholder={globalFilterPlaceholder}
                 aria-label="Filter table"
                 className="pl-8"
