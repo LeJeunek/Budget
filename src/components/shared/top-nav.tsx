@@ -89,6 +89,23 @@ export interface TopNavProps {
   mobileNavOpen?: boolean
   /** Paired with `mobileNavOpen` — see that prop's doc above. */
   onMobileNavOpenChange?: (open: boolean) => void
+  /**
+   * Bug fix (Bug Hunter, Phase 5a review gate,
+   * phase-5a-sheet-focus-return-broken-for-externally-triggered-sheets.md):
+   * Radix's `Sheet` restores focus, on close, to whatever DOM node it has
+   * internally tracked as its own `SheetTrigger` — the hamburger button
+   * below, always. That is correct when the Sheet was opened via the
+   * hamburger itself, but wrong when it was opened via `BottomNav`'s "More"
+   * button (an external control with no `SheetTrigger` of its own driving
+   * this same `mobileNavOpen` boolean) — closing then always returns focus
+   * to the hamburger, not to "More." Passed straight through to
+   * `SheetContent`'s own `onCloseAutoFocus` prop; when the caller (only
+   * `dashboard-shell.tsx`, which knows whether "More" was the actual
+   * trigger) has nothing to override, it should leave the event
+   * un-prevented so Radix's own correct default (the hamburger case) still
+   * applies. Omitted entirely for every consumer that doesn't need it.
+   */
+  onSheetCloseAutoFocus?: (event: Event) => void
 }
 
 function getInitials(name: string): string {
@@ -111,6 +128,7 @@ export function TopNav({
   notificationBell,
   mobileNavOpen: controlledMobileNavOpen,
   onMobileNavOpenChange,
+  onSheetCloseAutoFocus,
 }: TopNavProps) {
   const [internalMobileNavOpen, setInternalMobileNavOpen] =
     React.useState(false)
@@ -145,7 +163,11 @@ export function TopNav({
             <Menu className="size-5" aria-hidden="true" />
           </Button>
         </SheetTrigger>
-        <SheetContent side="left" className="p-0">
+        <SheetContent
+          side="left"
+          className="p-0"
+          onCloseAutoFocus={onSheetCloseAutoFocus}
+        >
           <SheetTitle className="sr-only">Navigation menu</SheetTitle>
           <Sidebar
             mobile

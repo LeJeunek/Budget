@@ -53,6 +53,18 @@ export interface DayDetailSheetProps {
   currency: string
   open: boolean
   onOpenChange: (open: boolean) => void
+  /**
+   * Bug fix (Bug Hunter, Phase 5a review gate,
+   * phase-5a-sheet-focus-return-broken-for-externally-triggered-sheets.md):
+   * this `Sheet` is fully controlled with no `SheetTrigger` anywhere in its
+   * tree (each day-cell button in `calendar-grid.tsx` opens it directly via
+   * `open`/`onOpenChange`), so Radix has no trigger ref to restore focus to
+   * on close — it fell back to `<body>`. Passed straight through to
+   * `SheetContent`'s own `onCloseAutoFocus`; `calendar-grid.tsx` uses it to
+   * manually restore focus to whichever day-cell button was actually
+   * clicked.
+   */
+  onCloseAutoFocus?: (event: Event) => void
 }
 
 export function DayDetailSheet({
@@ -61,6 +73,7 @@ export function DayDetailSheet({
   currency,
   open,
   onOpenChange,
+  onCloseAutoFocus,
 }: DayDetailSheetProps) {
   const hasEntries = day
     ? day.isBudgetResetDay || day.bills.length > 0 || day.paydays.length > 0
@@ -68,7 +81,11 @@ export function DayDetailSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="max-h-[80svh] overflow-y-auto">
+      <SheetContent
+        side="bottom"
+        className="max-h-[80svh] overflow-y-auto"
+        onCloseAutoFocus={onCloseAutoFocus}
+      >
         <SheetHeader>
           <SheetTitle>{day ? formatDate(day.day) : "Day details"}</SheetTitle>
         </SheetHeader>

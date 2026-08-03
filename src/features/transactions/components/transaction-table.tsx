@@ -458,6 +458,18 @@ export function TransactionTable({
                   <Button
                     variant="ghost"
                     size="icon-sm"
+                    // Accessibility fix (Bug Hunter, Phase 5a review gate,
+                    // data-table-row-action-buttons-below-44px-touch-target.md):
+                    // `icon-sm` alone is 28x28px, below Responsive AC5's
+                    // binding 44x44px minimum. This cell renders unchanged
+                    // in both DataTable's table view and DataTableCardList's
+                    // mobile card view (by design -- see
+                    // phase-5a-technical-design.md §3.1), so the override
+                    // must apply everywhere the cell renders, not just one
+                    // breakpoint -- a `size-11` override widens the desktop
+                    // table's action column slightly too, an accepted
+                    // tradeoff over a more fragile invisible-hit-area trick.
+                    className="size-11"
                     aria-label={`Actions for ${transaction.merchant}`}
                   >
                     <MoreHorizontal className="size-4" aria-hidden="true" />

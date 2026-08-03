@@ -51,7 +51,7 @@
  * is currently expanded, and renders `DayDetailSheet` controlled by it.
  */
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { CalendarDays } from "lucide-react"
@@ -129,6 +129,23 @@ export function CalendarGrid({
   // driving DayDetailSheet's controlled open state below `sm`.
   const [expandedDayKey, setExpandedDayKey] = useState<string | null>(null)
   const expandedDay = days.find((day) => day.day === expandedDayKey) ?? null
+  // Bug fix (Bug Hunter, Phase 5a review gate,
+  // phase-5a-sheet-focus-return-broken-for-externally-triggered-sheets.md):
+  // DayDetailSheet has no SheetTrigger of its own (each day-cell button
+  // opens it directly via `open`/`onOpenChange`), so Radix has no trigger
+  // ref to restore focus to on close -- it fell back to `<body>`. Tracks
+  // whichever day-cell button was actually clicked so it can be manually
+  // refocused when the Sheet closes.
+  const lastExpandedDayTriggerRef = useRef<HTMLButtonElement | null>(null)
+
+  function handleDayDetailCloseAutoFocus(event: Event) {
+    const trigger = lastExpandedDayTriggerRef.current
+    if (trigger) {
+      event.preventDefault()
+      trigger.focus()
+    }
+    lastExpandedDayTriggerRef.current = null
+  }
 
   function handleMonthChange(nextMonth: string) {
     const params = new URLSearchParams(searchParams.toString())
@@ -177,7 +194,10 @@ export function CalendarGrid({
                   hydration mismatch. */}
               <button
                 type="button"
-                onClick={() => setExpandedDayKey(day.day)}
+                onClick={(event) => {
+                  lastExpandedDayTriggerRef.current = event.currentTarget
+                  setExpandedDayKey(day.day)
+                }}
                 aria-label={`${formatDate(day.day)}${describeDayEntries(day)}`}
                 className="flex h-full w-full flex-col items-start gap-1 p-1.5 text-left outline-none sm:hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
               >
@@ -231,6 +251,7 @@ export function CalendarGrid({
         currency={currency}
         open={expandedDayKey !== null}
         onOpenChange={(open) => !open && setExpandedDayKey(null)}
+        onCloseAutoFocus={handleDayDetailCloseAutoFocus}
       />
     </div>
   )

@@ -135,12 +135,17 @@ export function OccurrenceHistoryTable({
       header: "",
       cell: ({ row }) => {
         const occurrence = row.original
+        // Accessibility fix (Bug Hunter, Phase 5a review gate,
+        // data-table-row-action-buttons-below-44px-touch-target.md) — see
+        // bills/components/occurrence-history-table.tsx's identical
+        // fix/comment.
         if (occurrence.status === "RECEIVED") {
           return (
             <Button
               type="button"
               variant="outline"
               size="sm"
+              className="h-11"
               disabled={unmarkingId === occurrence.id}
               onClick={() => handleUnmark(occurrence.id)}
             >
@@ -153,6 +158,7 @@ export function OccurrenceHistoryTable({
             type="button"
             variant="outline"
             size="sm"
+            className="h-11"
             onClick={() =>
               setMarkReceivedTarget({
                 id: occurrence.id,

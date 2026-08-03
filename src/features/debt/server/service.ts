@@ -35,10 +35,35 @@ type DebtRowWithLinkedAccountBalance = PrismaDebtRow & {
  * `Debt` shape defined in `../types.ts`, mirroring
  * `features/accounts/server/service.ts`'s `toAccount()` and
  * `features/investments/server/service.ts`'s `toHolding()` pattern exactly.
+ *
+ * Bug fix (Bug Hunter, Phase 5a review gate,
+ * debt-toDebt-leaks-raw-decimal-account-to-client.md): this used to be
+ * `{ ...row, balance: row.balance.toNumber(), ... }` — a `...row` spread
+ * copies every enumerable property of the *actual runtime object*, not just
+ * the fields `PrismaDebtRow` declares. `toDebtWithProjection` below calls
+ * this with a `DebtRowWithLinkedAccountBalance` (a structural supertype
+ * carrying an extra, joined `account: { balance: Decimal }` property Prisma
+ * attaches at runtime) — TypeScript's excess-property check never catches
+ * this, since it only applies to object *literals*, not to a variable
+ * spread into an explicitly-typed return value. The leaked raw `Decimal`
+ * then reached every Client Component consumer of a linked debt
+ * (`DebtCard`, `StrategyComparison`, `AddDebtPayoffGoalButton`), triggering
+ * React's "Only plain objects can be passed to Client Components... Decimal
+ * objects are not supported" warning on every render of `/debt` and
+ * `/financial-goals`. Fixed by naming every field explicitly instead of
+ * spreading the row -- this can never again leak a future joined relation
+ * the same way, since only fields listed here are ever included.
  */
 function toDebt(row: PrismaDebtRow): Debt {
   return {
-    ...row,
+    id: row.id,
+    userId: row.userId,
+    name: row.name,
+    type: row.type,
+    accountId: row.accountId,
+    archivedAt: row.archivedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
     balance: row.balance.toNumber(),
     interestRate: row.interestRate.toNumber(),
     minimumPayment: row.minimumPayment.toNumber(),

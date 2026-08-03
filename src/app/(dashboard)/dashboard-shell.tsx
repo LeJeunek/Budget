@@ -28,6 +28,23 @@
  * below `sm` (640px), per the architecture doc §2.4's "required companion
  * change, not optional."
  *
+ * **Bug fix (Bug Hunter, Phase 5a review gate,
+ * phase-5a-sheet-focus-return-broken-for-externally-triggered-sheets.md):**
+ * Radix's `Sheet` restores focus, on close, to whatever DOM node it has
+ * internally tracked as its own `SheetTrigger` (the hamburger button,
+ * always) — so closing a Sheet opened via `BottomNav`'s "More" button
+ * incorrectly returned focus to the unrelated hamburger button instead.
+ * `lastMobileNavOpenTriggerRef` records `document.activeElement` (the
+ * "More" button itself, since a clicked element is focused before its own
+ * `onClick` fires) at the moment `onMoreClick` opens the Sheet via this
+ * *external* path; `handleMobileNavCloseAutoFocus`, wired to `TopNav`'s new
+ * `onSheetCloseAutoFocus` prop, manually restores focus there and
+ * `preventDefault()`s Radix's own (in this one case, wrong) default —
+ * clearing the ref afterward so the next hamburger-triggered open/close
+ * cycle is untouched and keeps using Radix's own already-correct default
+ * (the ref stays `null` whenever the hamburger's real `SheetTrigger` is
+ * what opened it).
+ *
  * Everything server-resolved (the signed-in user, notification bell JSX,
  * `children`) is passed in as props from `layout.tsx` — this file fetches
  * nothing itself.
@@ -52,6 +69,25 @@ export function DashboardShell({
   children,
 }: DashboardShellProps) {
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false)
+  // See this file's own top JSDoc "Bug fix" note for the full reasoning.
+  const lastMobileNavOpenTriggerRef = React.useRef<HTMLElement | null>(null)
+
+  const handleMoreClick = React.useCallback(() => {
+    lastMobileNavOpenTriggerRef.current = document.activeElement as HTMLElement | null
+    setMobileNavOpen(true)
+  }, [])
+
+  const handleMobileNavCloseAutoFocus = React.useCallback((event: Event) => {
+    const trigger = lastMobileNavOpenTriggerRef.current
+    if (trigger) {
+      event.preventDefault()
+      trigger.focus()
+      lastMobileNavOpenTriggerRef.current = null
+    }
+    // else: leave the event un-prevented — this Sheet was opened via its
+    // own real SheetTrigger (the hamburger button), so Radix's own default
+    // restore-focus-to-trigger behavior is already correct.
+  }, [])
 
   return (
     <>
@@ -62,6 +98,7 @@ export function DashboardShell({
           notificationBell={notificationBell}
           mobileNavOpen={mobileNavOpen}
           onMobileNavOpenChange={setMobileNavOpen}
+          onSheetCloseAutoFocus={handleMobileNavCloseAutoFocus}
         />
         {/* Phase 5a accessibility fix (docs/testing/e2e/accessibility-run-report.md
             finding #4, scrollable-region-focusable): this `overflow-y-auto` region
@@ -75,7 +112,7 @@ export function DashboardShell({
           {children}
         </main>
       </div>
-      <BottomNav onMoreClick={() => setMobileNavOpen(true)} />
+      <BottomNav onMoreClick={handleMoreClick} />
     </>
   )
 }

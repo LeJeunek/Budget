@@ -123,12 +123,19 @@ export function OccurrenceHistoryTable({
       header: "",
       cell: ({ row }) => {
         const occurrence = row.original
+        // Accessibility fix (Bug Hunter, Phase 5a review gate,
+        // data-table-row-action-buttons-below-44px-touch-target.md): `sm`
+        // alone is 28px tall, below Responsive AC5's binding 44px minimum
+        // (width is already comfortably >44px for both labels, so only
+        // height needs the override). Renders unchanged in both DataTable's
+        // table view and DataTableCardList's mobile card view by design.
         if (occurrence.status === "PAID") {
           return (
             <Button
               type="button"
               variant="outline"
               size="sm"
+              className="h-11"
               disabled={unmarkingId === occurrence.id}
               onClick={() => handleUnmark(occurrence.id)}
             >
@@ -141,6 +148,7 @@ export function OccurrenceHistoryTable({
             type="button"
             variant="outline"
             size="sm"
+            className="h-11"
             onClick={() =>
               setMarkPaidTarget({
                 id: occurrence.id,
