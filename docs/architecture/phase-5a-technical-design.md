@@ -184,7 +184,7 @@ The spec's own illustrative 4–5-item example includes a "More" entry opening t
 
 ### 3.1 Card-list fallback — the one pattern earning a genuinely reusable primitive
 
-Six consumers (Transactions, Admin's `UserTable`/`AuditLogTable`, Bills'/Recurring Income's `OccurrenceHistoryTable` — confirmed the full, correct count directly via the resolution pass's own grep of every `components/shared/data-table` import) is enough volume to justify a shared primitive, per the dispatch's own framing. **Decision: lives in `components/shared/data-table/`, as a responsive companion to the existing `DataTable`, not a wholly separate primitive.**
+Five consumers (Transactions, Admin's `UserTable`/`AuditLogTable`, Bills'/Recurring Income's `OccurrenceHistoryTable` — confirmed the full, correct count directly via a grep of every `components/shared/data-table` import, correcting an earlier "six" miscount caught by the Phase 5a Release Manager's own second-pass review) is enough volume to justify a shared primitive, per the dispatch's own framing. **Decision: lives in `components/shared/data-table/`, as a responsive companion to the existing `DataTable`, not a wholly separate primitive.**
 
 **Mechanism: each consumer's existing `ColumnDef<TData>[]` array is the single source of truth for both layouts — no second, parallel "card config" per consumer.** TanStack Table's `ColumnDef` already supports an arbitrary, per-column `meta` object (an existing extension point of the library already in use, not a new mechanism this codebase invents). Each column gains an optional `meta: { cardDisplay?: "primary" | "secondary" | "hidden" }`:
 
