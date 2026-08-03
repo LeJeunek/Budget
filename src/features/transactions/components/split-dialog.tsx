@@ -188,7 +188,12 @@ export function SplitDialog({ transaction, open, onOpenChange, categories }: Spl
             )}
           >
             {remainderCents === 0 ? (
-              <span className="text-emerald-600 dark:text-emerald-400">
+              // Accessibility fix (docs/testing/e2e/accessibility-run-report.md's
+              // 2026-08-02 re-run, finding #1, axe `color-contrast`) — see
+              // transaction-detail-client.tsx's identical fix/comment; the
+              // `bg-emerald-500/10` tint here is close enough to white that
+              // the identical contrast problem applies.
+              <span className="text-emerald-700 dark:text-emerald-400">
                 Splits sum to {formatCurrency(sumCents / 100)} — ready to submit.
               </span>
             ) : (

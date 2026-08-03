@@ -95,7 +95,10 @@ export function CategoryTrendsChart({ data }: CategoryTrendsChartProps) {
             category), captioned rather than blocked, mirroring
             `yearly-spending-chart.tsx`'s single-year treatment. */}
         {monthKeys.length <= 1 && (
-          <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+          // Accessibility fix (docs/testing/e2e/accessibility-run-report.md's
+          // 2026-08-02 re-run, finding #2, axe `color-contrast`) — see
+          // yearly-spending-chart.tsx's identical fix/comment.
+          <p className="rounded-md bg-muted px-3 py-2 text-xs text-foreground">
             Only one month of data in the selected period so far — trends
             will appear once at least two months have activity.
           </p>

@@ -4,7 +4,28 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+interface TableProps extends React.ComponentProps<"table"> {
+  /**
+   * Controls the wrapper `<div>`'s own `tabIndex` — see the wrapper's own
+   * comment below for the accessibility fix this defaults to. Set to `-1`
+   * when this `Table` is rendered purely decoratively inside an
+   * `aria-hidden="true"` ancestor (e.g. `TableSkeleton`, which wraps a real
+   * `Table` for visual-shape fidelity while loading) — axe's own
+   * `aria-hidden-focus` rule requires focusable content inside an
+   * `aria-hidden` subtree to carry `tabIndex={-1}` (its own prescribed
+   * remedy), never `0`. Regression found and closed during Phase 5a's
+   * accessibility re-verification pass (docs/testing/e2e/
+   * accessibility-run-report.md's 2026-08-02 re-run, finding #3): the
+   * original `scrollable-region-focusable` fix below applied `tabIndex={0}`
+   * unconditionally, which is correct for every *visible, interactive*
+   * `Table` consumer but broke `TableSkeleton`, whose entire subtree — this
+   * `Table` included — is intentionally hidden from assistive tech while
+   * loading.
+   */
+  wrapperTabIndex?: number
+}
+
+function Table({ className, wrapperTabIndex = 0, ...props }: TableProps) {
   return (
     <div
       data-slot="table-container"
@@ -17,15 +38,18 @@ function Table({ className, ...props }: React.ComponentProps<"table">) {
       // "Wrapped in Table's own overflow-x-auto container"). A div with
       // `overflow-x-auto` and no `tabIndex` is not natively reachable by
       // keyboard, so a keyboard-only user has no way to scroll a table
-      // wider than its container. `tabIndex={0}` fixes it at this one
-      // shared primitive rather than at each of `Table`'s many feature
-      // consumers (`DataTable`'s own table markup renders through this same
-      // `Table` component, so this fix also covers every `DataTable`/
-      // `ResponsiveDataTable` consumer's wide-table case for free) — the
-      // identical mechanism `components/shared/scroll-affordance-container.tsx`
-      // already established for Analytics' charts, mirrored here.
+      // wider than its container. `tabIndex={0}` (the default) fixes it at
+      // this one shared primitive rather than at each of `Table`'s many
+      // feature consumers (`DataTable`'s own table markup renders through
+      // this same `Table` component, so this fix also covers every
+      // `DataTable`/`ResponsiveDataTable` consumer's wide-table case for
+      // free) — the identical mechanism
+      // `components/shared/scroll-affordance-container.tsx` already
+      // established for Analytics' charts, mirrored here. See
+      // `TableProps.wrapperTabIndex`'s own doc above for the one case
+      // (`TableSkeleton`) that must override this default to `-1`.
       //
-      // Deliberately `tabIndex={0}` only, not also `role="group"` +
+      // Deliberately `tabIndex`-only, not also `role="group"` +
       // `aria-label` (unlike `ScrollAffordanceContainer`): a `<table>`
       // already carries its own semantics and, where a consumer supplies
       // one, its own accessible name via `<TableCaption>` or an adjacent
@@ -34,7 +58,7 @@ function Table({ className, ...props }: React.ComponentProps<"table">) {
       // The failing axe rule here (`scrollable-region-focusable`) only
       // requires focusability, not a name, so this stays the minimal fix
       // for the actual finding.
-      tabIndex={0}
+      tabIndex={wrapperTabIndex}
       className="relative w-full overflow-x-auto"
     >
       <table

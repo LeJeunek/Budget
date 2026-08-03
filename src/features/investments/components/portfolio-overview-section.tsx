@@ -38,9 +38,14 @@ function GainLossText({ amount, currency }: { amount: number; currency: string }
   return (
     <span
       className={cn(
+        // Accessibility fix (docs/testing/e2e/accessibility-run-report.md's
+        // 2026-08-02 re-run, finding #1, axe `color-contrast`) — see
+        // holding-row.tsx's identical fix/comment for the full reasoning;
+        // this is the same GainLossText-shaped pairing on Investments
+        // portfolio's own summary row.
         isNegative
-          ? "text-red-600 dark:text-red-400"
-          : "text-emerald-600 dark:text-emerald-400",
+          ? "text-red-700 dark:text-red-400"
+          : "text-emerald-700 dark:text-emerald-400",
       )}
     >
       {isNegative ? "" : "+"}

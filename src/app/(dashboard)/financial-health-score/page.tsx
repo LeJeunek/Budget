@@ -37,9 +37,17 @@ import type { FinancialHealthScoreComponentKey } from "@/features/financial-heal
  */
 
 const LABEL_STYLES: Record<string, string> = {
-  Good: "text-emerald-600 dark:text-emerald-400",
+  // Accessibility fix (docs/testing/e2e/accessibility-run-report.md's
+  // 2026-08-02 re-run, finding #1, axe `color-contrast`): emerald-600 on
+  // white measured 3.65:1, below the 4.5:1 floor — emerald-700 clears it.
+  // A third, separate copy of this same LABEL_STYLES pattern (this page's
+  // own, distinct from FinancialHealthScoreBadge's and
+  // BudgetHealthScoreBadge's) needed the identical fix.
+  Good: "text-emerald-700 dark:text-emerald-400",
   Fair: "text-amber-600 dark:text-amber-400",
-  "Needs attention": "text-destructive",
+  // Accessibility fix — see features/financial-health-score/components/
+  // financial-health-score-badge.tsx's identical fix/comment.
+  "Needs attention": "text-red-700 dark:text-red-400",
 }
 
 /** AC4's "clearly annotated ... why" requirement — a short, plain-language

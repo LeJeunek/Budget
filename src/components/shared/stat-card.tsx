@@ -84,9 +84,15 @@ export function StatCard({
               <span
                 className={cn(
                   "flex items-center gap-1 text-xs font-medium",
+                  // Accessibility fix (docs/testing/e2e/accessibility-run-report.md's
+                  // 2026-08-02 re-run, finding #1, axe `color-contrast`) —
+                  // the -600 shade of both colors measured below 4.5:1 on
+                  // white at this same size/weight elsewhere in the app;
+                  // fixed here at the shared primitive so every StatCard
+                  // consumer is covered at once.
                   trend.direction === "up"
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : "text-red-600 dark:text-red-400"
+                    ? "text-emerald-700 dark:text-emerald-400"
+                    : "text-red-700 dark:text-red-400"
                 )}
               >
                 {trend.direction === "up" ? (

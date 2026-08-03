@@ -67,8 +67,22 @@ export function ReceiptUploader({ transactionId }: ReceiptUploaderProps) {
       endpoint="receiptUploader"
       input={{ transactionId }}
       appearance={{
+        // Accessibility fix (docs/testing/e2e/accessibility-run-report.md's
+        // 2026-08-02 re-run, finding #4, axe `color-contrast`): the
+        // "readying" state's background stayed UploadThing's own
+        // `bg-blue-400`/white-text (2.54:1, below 4.5:1) despite this
+        // override, because `data-[state=readying]:bg-blue-400` (see
+        // `@uploadthing/react`'s own source) is itself a data-state-scoped
+        // utility, which wins the cascade over this string's plain,
+        // unconditional `bg-primary` regardless of which stylesheet loads
+        // second. `ut-uploading:` below was ALSO never a real, registered
+        // Tailwind variant in this codebase (confirmed: no
+        // `@custom-variant`/plugin defines it anywhere) — it silently did
+        // nothing. Both replaced with real `data-[state=...]` attribute
+        // variants, `!`-forced so they win regardless of import/cascade
+        // order rather than depending on it.
         button:
-          "h-8 gap-1.5 rounded-lg bg-primary px-2.5 text-sm font-medium text-primary-foreground after:bg-primary/40 hover:bg-primary/80 ut-uploading:cursor-not-allowed ut-uploading:bg-primary/70 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+          "h-8 gap-1.5 rounded-lg bg-primary px-2.5 text-sm font-medium text-primary-foreground after:bg-primary/40 hover:bg-primary/80 data-[state=readying]:cursor-not-allowed data-[state=readying]:!bg-primary data-[state=readying]:!text-primary-foreground data-[state=uploading]:cursor-not-allowed data-[state=uploading]:!bg-primary/70 data-[state=uploading]:!text-primary-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
         container: "w-fit flex-row items-center gap-2",
         allowedContent: "text-xs text-muted-foreground",
       }}

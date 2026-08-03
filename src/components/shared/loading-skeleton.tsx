@@ -73,7 +73,15 @@ export function TableSkeleton({
       className={cn("overflow-hidden rounded-lg border", className)}
       aria-hidden="true"
     >
-      <Table>
+      {/* Accessibility fix (docs/testing/e2e/accessibility-run-report.md's
+          2026-08-02 re-run, finding #3, axe `aria-hidden-focus`): this whole
+          skeleton is `aria-hidden` decoration, but `Table`'s own wrapper
+          div defaults to `tabIndex={0}` (a separate, correct fix for real,
+          visible tables) — a focusable descendant of an `aria-hidden`
+          ancestor is itself an axe violation. `wrapperTabIndex={-1}` is
+          axe's own prescribed remedy; see `Table`'s own `wrapperTabIndex`
+          doc comment in `components/ui/table.tsx`. */}
+      <Table wrapperTabIndex={-1}>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             {Array.from({ length: columns }).map((_, index) => (

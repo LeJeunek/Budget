@@ -379,7 +379,10 @@ export function TransactionTable({
             <div
               className={cn(
                 "text-right font-medium tabular-nums",
-                amount < 0 ? "text-destructive" : "text-emerald-600 dark:text-emerald-400",
+                // Accessibility fix (docs/testing/e2e/accessibility-run-report.md's
+                // 2026-08-02 re-run, finding #1, axe `color-contrast`) —
+                // see transaction-detail-client.tsx's identical fix/comment.
+                amount < 0 ? "text-red-700 dark:text-red-400" : "text-emerald-700 dark:text-emerald-400",
               )}
             >
               {amount < 0 ? "-" : "+"}

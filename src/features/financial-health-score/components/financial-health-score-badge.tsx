@@ -40,9 +40,19 @@ const LABEL_STYLES: Record<
   NonNullable<FinancialHealthScoreBreakdown["label"]>,
   string
 > = {
-  Good: "text-emerald-600 dark:text-emerald-400",
+  // Accessibility fix (docs/testing/e2e/accessibility-run-report.md's
+  // 2026-08-02 re-run, finding #1, axe `color-contrast`): emerald-600 on
+  // white measured 3.65:1, below the 4.5:1 floor — emerald-700 clears it
+  // (dark mode's emerald-400 was already passing, left unchanged).
+  Good: "text-emerald-700 dark:text-emerald-400",
   Fair: "text-amber-600 dark:text-amber-400",
-  "Needs attention": "text-destructive",
+  // Accessibility fix: raw `text-destructive` (not routed through
+  // Button/Badge/DropdownMenuItem's own already-fixed variants) shares the
+  // identical below-4.5:1-on-white problem those fixes closed — same
+  // replacement used directly here, not yet exercised by axe's crawl (no
+  // current fixture data reaches a "Needs attention" health score) but a
+  // near-certain latent instance of the same finding.
+  "Needs attention": "text-red-700 dark:text-red-400",
 }
 
 export function FinancialHealthScoreBadge({

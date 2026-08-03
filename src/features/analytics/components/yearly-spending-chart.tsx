@@ -57,7 +57,12 @@ export function YearlySpendingChart({ data }: YearlySpendingChartProps) {
                 real data, just caption it" precedent as
                 `net-worth-history-chart.tsx`'s sparse-history banner. */}
             {data.length === 1 && (
-              <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+              // Accessibility fix (docs/testing/e2e/accessibility-run-report.md's
+              // 2026-08-02 re-run, finding #2, axe `color-contrast`):
+              // text-muted-foreground on bg-muted at text-xs measured 4.34:1,
+              // below the 4.5:1 floor — text-foreground clears it (same fix
+              // already verified working for Avatar's identical token pair).
+              <p className="rounded-md bg-muted px-3 py-2 text-xs text-foreground">
                 Only one year of history so far — year-over-year comparisons
                 will appear once a second year of data exists.
               </p>

@@ -104,9 +104,21 @@ export function HoldingRow({ holding, containers }: HoldingRowProps) {
             <span
               className={cn(
                 "text-xs",
+                // Accessibility fix (docs/testing/e2e/
+                // accessibility-run-report.md's 2026-08-02 re-run, finding
+                // #1, axe `color-contrast`): the -600 shade of both colors
+                // measured below the 4.5:1 floor on white in this exact
+                // usage (emerald-600 confirmed failing at 3.65:1 by axe;
+                // red-600 shares the identical -600-shade-on-white contrast
+                // problem the destructive-token fix already closed for
+                // Button/Badge/DropdownMenuItem elsewhere, so darkened here
+                // too rather than leaving a near-identical latent failure
+                // for whenever a losing holding is the one axe's crawl
+                // happens to hit). Dark mode's -400 shades were already
+                // passing, left unchanged.
                 isGainNegative
-                  ? "text-red-600 dark:text-red-400"
-                  : "text-emerald-600 dark:text-emerald-400",
+                  ? "text-red-700 dark:text-red-400"
+                  : "text-emerald-700 dark:text-emerald-400",
               )}
             >
               {isGainNegative ? "" : "+"}

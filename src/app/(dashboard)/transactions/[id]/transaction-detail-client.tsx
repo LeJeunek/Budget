@@ -73,7 +73,13 @@ export function TransactionDetailClient({
           <div
             className={cn(
               "text-right text-lg font-semibold tabular-nums",
-              isExpense ? "text-destructive" : "text-emerald-600 dark:text-emerald-400",
+              // Accessibility fix (docs/testing/e2e/accessibility-run-report.md's
+              // 2026-08-02 re-run, finding #1, axe `color-contrast`): raw
+              // `text-destructive`/`text-emerald-600` (not routed through
+              // Button/Badge/DropdownMenuItem's own already-fixed variants)
+              // share the identical below-4.5:1-on-white problem — fixed
+              // the same way, at this direct usage.
+              isExpense ? "text-red-700 dark:text-red-400" : "text-emerald-700 dark:text-emerald-400",
             )}
           >
             {isExpense ? "-" : "+"}

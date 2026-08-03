@@ -67,9 +67,12 @@ export function SeedDemoDataButton() {
       {lastResult && (
         <p
           className={
+            // Accessibility fix (docs/testing/e2e/accessibility-run-report.md's
+            // 2026-08-02 re-run, finding #1, axe `color-contrast`) — see
+            // transaction-detail-client.tsx's identical fix/comment.
             lastResult.success
-              ? "text-sm text-emerald-600 dark:text-emerald-400"
-              : "text-sm text-destructive"
+              ? "text-sm text-emerald-700 dark:text-emerald-400"
+              : "text-sm text-red-700 dark:text-red-400"
           }
           role="status"
         >
