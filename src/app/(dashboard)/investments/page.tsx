@@ -56,10 +56,13 @@ export default async function InvestmentsPage() {
     getAllocation(user.id, { by: "sector" }),
     getGrowthHistory(user.id),
     // (Phase 4c release-gate fix, docs/release/phase-4c-notes.md Section 1):
-    // `PortfolioOverviewSection` below is a Server Component and can't read
-    // the `CurrencyPreferenceProvider` Context `app/(dashboard)/layout.tsx`
-    // mounts for Client Components — resolved here and threaded through as a
-    // plain prop.
+    // `PortfolioOverviewSection` below can't read the
+    // `CurrencyPreferenceProvider` Context `app/(dashboard)/layout.tsx` mounts
+    // — this Server Component page sits outside that Context's tree
+    // regardless of `PortfolioOverviewSection`'s own directive (Phase 5b gave
+    // it "use client" for an unrelated reason — see its own JSDoc) — so
+    // `currency` is resolved here and threaded through as a plain prop
+    // instead.
     getUserPreference(user.id),
   ])
 

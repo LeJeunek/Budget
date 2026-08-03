@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { MotionConfig } from "framer-motion"
 
 /**
  * Mounts a TanStack Query `QueryClientProvider` above the app tree.
@@ -20,11 +21,31 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
  * module-level singleton) per TanStack Query's official Next.js App Router
  * guidance: a module-level client would be shared across requests on the
  * server, leaking cached data between users during SSR.
+ *
+ * **Phase 5b addition (docs/architecture/phase-5b-technical-design.md
+ * §1.1):** also mounts `<MotionConfig reducedMotion="user">`, the app-wide,
+ * zero-code-change default that makes every bare, declarative `motion.*`
+ * component's `transition` (e.g. `components/shared/progress-ring.tsx`'s
+ * existing `motion.circle` stroke animation) honor the OS-level
+ * `prefers-reduced-motion` preference for free — Reduced-Motion Foundation
+ * AC3, satisfied with zero edits to that file's own animation code. This is
+ * root-layout plumbing in the identical sense `QueryClientProvider` already
+ * is here (mounted once, above the whole app, rendering no visible output
+ * of its own), so it belongs in this same file rather than a second,
+ * motion-specific provider for one JSX element with no state of its own.
+ * `MotionConfig` wraps `QueryClientProvider`'s own `{children}` rather than
+ * the other way around — the two providers have no dependency on each
+ * other's order, so this is simply "outermost plumbing wraps the query
+ * boundary," not a meaningful nesting decision.
  */
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient())
 
   return (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <MotionConfig reducedMotion="user">
+      <QueryClientProvider client={queryClient}>
+        {children}
+      </QueryClientProvider>
+    </MotionConfig>
   )
 }

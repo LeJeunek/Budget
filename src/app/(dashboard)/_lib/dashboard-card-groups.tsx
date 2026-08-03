@@ -1,7 +1,10 @@
 import type { ReactNode } from "react"
 
-import { formatCurrency } from "@/lib/utils"
 import { StatCard } from "@/components/shared/stat-card"
+import {
+  AnimatedCurrencyStatValue,
+  AnimatedPercentStatValue,
+} from "./dashboard-animated-stat-value"
 import {
   ArrowLeftRight,
   PiggyBank,
@@ -131,7 +134,12 @@ function buildCardRenderers(data: DashboardCardData): DashboardCardRenderEntry[]
       render: () => (
         <StatCard
           label="Net Worth"
-          value={formatCurrency(data.netWorth.total, data.currency)}
+          value={
+            <AnimatedCurrencyStatValue
+              value={data.netWorth.total}
+              currency={data.currency}
+            />
+          }
           icon={Wallet}
         />
       ),
@@ -142,7 +150,12 @@ function buildCardRenderers(data: DashboardCardData): DashboardCardRenderEntry[]
       render: () => (
         <StatCard
           label="Monthly Income"
-          value={formatCurrency(data.monthlySummary.income, data.currency)}
+          value={
+            <AnimatedCurrencyStatValue
+              value={data.monthlySummary.income}
+              currency={data.currency}
+            />
+          }
           icon={TrendingUp}
         />
       ),
@@ -153,7 +166,12 @@ function buildCardRenderers(data: DashboardCardData): DashboardCardRenderEntry[]
       render: () => (
         <StatCard
           label="Monthly Expenses"
-          value={formatCurrency(data.monthlySummary.expenses, data.currency)}
+          value={
+            <AnimatedCurrencyStatValue
+              value={data.monthlySummary.expenses}
+              currency={data.currency}
+            />
+          }
           icon={TrendingDown}
         />
       ),
@@ -170,9 +188,14 @@ function buildCardRenderers(data: DashboardCardData): DashboardCardRenderEntry[]
         <StatCard
           label="Remaining Budget"
           value={
-            data.budgetSummary === null
-              ? "No budget set yet"
-              : formatCurrency(data.budgetSummary.totalRemaining, data.currency)
+            data.budgetSummary === null ? (
+              "No budget set yet"
+            ) : (
+              <AnimatedCurrencyStatValue
+                value={data.budgetSummary.totalRemaining}
+                currency={data.currency}
+              />
+            )
           }
           icon={Target}
         />
@@ -184,7 +207,12 @@ function buildCardRenderers(data: DashboardCardData): DashboardCardRenderEntry[]
       render: () => (
         <StatCard
           label="Cash Flow"
-          value={formatCurrency(data.monthlySummary.cashFlow, data.currency)}
+          value={
+            <AnimatedCurrencyStatValue
+              value={data.monthlySummary.cashFlow}
+              currency={data.currency}
+            />
+          }
           icon={ArrowLeftRight}
         />
       ),
@@ -202,9 +230,13 @@ function buildCardRenderers(data: DashboardCardData): DashboardCardRenderEntry[]
           // features/dashboard/types.ts's `MonthlySummary.savingsRate`
           // JSDoc for why the service returns `null` for this case.
           value={
-            data.monthlySummary.savingsRate === null
-              ? "Not enough data"
-              : `${(data.monthlySummary.savingsRate * 100).toFixed(1)}%`
+            data.monthlySummary.savingsRate === null ? (
+              "Not enough data"
+            ) : (
+              <AnimatedPercentStatValue
+                value={data.monthlySummary.savingsRate * 100}
+              />
+            )
           }
           icon={PiggyBank}
         />

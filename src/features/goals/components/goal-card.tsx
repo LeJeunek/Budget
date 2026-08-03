@@ -30,6 +30,7 @@ import type { GoalWithProgress } from "@/features/goals/types"
 import { archiveGoal, unarchiveGoal } from "@/features/goals/server/actions"
 import { GoalFormDialog } from "@/features/goals/components/goal-form"
 import { ProgressRing } from "@/components/shared/progress-ring"
+import { AnimatedNumber } from "@/components/shared/motion"
 import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -168,19 +169,27 @@ export function GoalCard({ goal }: GoalCardProps) {
             value={goal.percentComplete}
             size={72}
             strokeWidth={6}
+            // A custom `label` overrides ProgressRing's own default (already
+            // counting, per Number Counters §2.4) purely to show the true,
+            // uncapped percentage for an overshot goal (AC7's "overshoot is
+            // shown plainly" edge case) — this card's own AnimatedNumber
+            // reproduces the same counting treatment directly so this
+            // headline percentage still animates, custom label or not.
             label={
-              <span className="text-xs font-medium">
-                {Math.round(goal.percentComplete)}%
-              </span>
+              <AnimatedNumber
+                value={goal.percentComplete}
+                format={(n) => `${Math.round(n)}%`}
+                className="text-xs font-medium"
+              />
             }
             aria-label={`${goal.name} progress`}
           />
 
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <span className="font-heading text-lg font-semibold text-foreground">
-              {formatCurrency(goal.currentProgress)}{" "}
+              <AnimatedNumber value={goal.currentProgress} format={formatCurrency} />{" "}
               <span className="text-sm font-normal text-muted-foreground">
-                of {formatCurrency(goal.targetAmount)}
+                of <AnimatedNumber value={goal.targetAmount} format={formatCurrency} />
               </span>
             </span>
             {goal.overageAmount > 0 ? (

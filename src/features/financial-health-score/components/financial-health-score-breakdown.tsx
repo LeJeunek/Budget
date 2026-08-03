@@ -1,3 +1,5 @@
+"use client"
+
 /**
  * FinancialHealthScoreBreakdownGrid — the four labeled component values
  * behind the Financial Health Score (docs/product/ai-features.md Feature 5
@@ -15,11 +17,21 @@
  * `gatherBudgetAdherenceComponent` already reuses that value verbatim
  * server-side; this component only needs to *label* it correctly.
  *
- * A Server Component (purely presentational, no interactivity) — reused by
+ * Purely presentational, no data-fetching of its own — reused by
  * `app/(dashboard)/financial-health-score/page.tsx`.
+ *
+ * **Phase 5b addition (Number Counters):** gained its own "use client"
+ * directive here — it was a Server Component before this phase. Wiring
+ * `AnimatedNumber` (`@/components/shared/motion`, a Client Component) in
+ * requires it, for the identical reason `financial-health-score-badge.tsx`'s
+ * own JSDoc explains in full: a Server Component's JSX cannot pass a
+ * function prop directly to a Client Component. Costs nothing
+ * architecturally — `breakdown` still arrives as an already-resolved prop
+ * from its Server Component page, unchanged.
  */
 
 import { cn } from "@/lib/utils"
+import { AnimatedNumber } from "@/components/shared/motion"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import type {
   FinancialHealthScoreBreakdown,
@@ -73,7 +85,14 @@ export function FinancialHealthScoreBreakdownGrid({
                   isUndefined ? "text-muted-foreground" : "text-foreground",
                 )}
               >
-                {value === null ? "Not enough data" : value}
+                {value === null ? (
+                  "Not enough data"
+                ) : (
+                  <AnimatedNumber
+                    value={value}
+                    format={(n) => Math.round(n).toString()}
+                  />
+                )}
               </span>
             </div>
           )

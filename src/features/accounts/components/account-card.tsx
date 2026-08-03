@@ -28,6 +28,7 @@ import { ACCOUNT_TYPE_LABELS } from "@/features/accounts/components/account-form
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
+import { AnimatedNumber } from "@/components/shared/motion"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -130,14 +131,14 @@ export function AccountCard({ account }: AccountCardProps) {
         </CardHeader>
 
         <CardContent className="flex flex-col gap-1">
-          <span
+          <AnimatedNumber
+            value={account.balance}
+            format={formatCurrency}
             className={cn(
               "font-heading text-2xl font-semibold",
               isNegative ? "text-red-600 dark:text-red-400" : "text-foreground"
             )}
-          >
-            {formatCurrency(account.balance)}
-          </span>
+          />
           {USER_REPORTED_BALANCE_TYPES.has(account.type) && (
             <span className="text-xs text-muted-foreground">
               Manually updated balance

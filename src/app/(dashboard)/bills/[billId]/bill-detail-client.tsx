@@ -19,6 +19,7 @@ import { OccurrenceHistoryTable } from "@/features/bills/components/occurrence-h
 import type { Category } from "@/features/categories/types"
 import { cn, formatDate } from "@/lib/utils"
 import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
+import { AnimatedNumber } from "@/components/shared/motion"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -104,9 +105,11 @@ export function BillDetailClient({ bill, categories }: BillDetailClientProps) {
         <CardContent className="flex flex-wrap gap-6">
           <div className="flex flex-col gap-1">
             <span className="text-xs text-muted-foreground">Expected amount</span>
-            <span className="font-heading text-lg font-semibold text-foreground">
-              {formatCurrency(bill.expectedAmount)}
-            </span>
+            <AnimatedNumber
+              value={bill.expectedAmount}
+              format={formatCurrency}
+              className="font-heading text-lg font-semibold text-foreground"
+            />
           </div>
           <div className="flex flex-col gap-1">
             <span className="text-xs text-muted-foreground">First due date</span>

@@ -1,3 +1,5 @@
+"use client"
+
 /**
  * BudgetSummaryCards — month-level Total Allocated/Spent/Remaining
  * (docs/product/budgeting.md AC10), plus a visually separate informational
@@ -15,10 +17,27 @@
  * exactly that misread, so it's deliberately rendered as a separate, more
  * muted note below the stat grid instead — distinct in both layout and
  * styling, not just in the number itself.
+ *
+ * **Phase 5b addition (Number Counters):** this file gains its own "use
+ * client" directive here — it was a Server Component before this phase (its
+ * own JSDoc previously read that way; `app/(dashboard)/budgeting/page.tsx`'s
+ * own comment on this component predates this change too). Wiring
+ * `AnimatedNumber` (`@/components/shared/motion`, a Client Component) in
+ * requires it: a Server Component's JSX cannot pass a function prop (the
+ * `format` callback closing over `currency`) directly to a Client Component
+ * — React Server Components can only serialize plain data across that
+ * boundary, never a closure — confirmed empirically (a 500 "Functions
+ * cannot be passed directly to Client Components" error) before this
+ * directive was added. This component has no data-fetching of its own
+ * (`totals`/`uncategorizedSpent`/`currency` all arrive as already-resolved
+ * props from its Server Component parent), so converting it costs nothing
+ * architecturally — only the `format` closures below now execute inside
+ * this file's own client boundary instead of crossing into one.
  */
 
 import { formatCurrency } from "@/lib/utils"
 import { StatCard } from "@/components/shared/stat-card"
+import { AnimatedNumber } from "@/components/shared/motion"
 import type { BudgetMonthTotals } from "@/features/budgeting/types"
 
 export interface BudgetSummaryCardsProps {
@@ -42,15 +61,30 @@ export function BudgetSummaryCards({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard
           label="Total Allocated"
-          value={formatCurrency(totals.totalAllocated, currency)}
+          value={
+            <AnimatedNumber
+              value={totals.totalAllocated}
+              format={(n) => formatCurrency(n, currency)}
+            />
+          }
         />
         <StatCard
           label="Total Spent"
-          value={formatCurrency(totals.totalSpent, currency)}
+          value={
+            <AnimatedNumber
+              value={totals.totalSpent}
+              format={(n) => formatCurrency(n, currency)}
+            />
+          }
         />
         <StatCard
           label="Total Remaining"
-          value={formatCurrency(totals.totalRemaining, currency)}
+          value={
+            <AnimatedNumber
+              value={totals.totalRemaining}
+              format={(n) => formatCurrency(n, currency)}
+            />
+          }
         />
       </div>
 

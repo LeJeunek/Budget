@@ -24,6 +24,7 @@ import { Banknote } from "lucide-react"
 
 import type { ExpectedUpcomingIncome } from "@/features/recurring-income/types"
 import { StatCard } from "@/components/shared/stat-card"
+import { AnimatedNumber } from "@/components/shared/motion"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { formatCurrency } from "@/lib/utils"
 
@@ -42,7 +43,12 @@ export function ExpectedUpcomingIncomeCard({ data, currency }: ExpectedUpcomingI
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
       <StatCard
         label="Expected upcoming income (this month)"
-        value={formatCurrency(data.total, currency)}
+        value={
+          <AnimatedNumber
+            value={data.total}
+            format={(n) => formatCurrency(n, currency)}
+          />
+        }
         icon={Banknote}
         className="sm:max-w-xs"
       />

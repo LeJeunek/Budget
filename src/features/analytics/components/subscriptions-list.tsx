@@ -40,6 +40,7 @@ import {
   undismissSubscriptionMerchant,
 } from "@/features/analytics/server/actions"
 import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
+import { AnimatedNumber } from "@/components/shared/motion"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -161,9 +162,11 @@ export function SubscriptionsList({
               <span className="text-sm text-muted-foreground">
                 Estimated annual cost of active subscriptions
               </span>
-              <span className="font-heading text-lg font-semibold text-foreground">
-                {formatCurrency(activeAnnualizedTotal)}
-              </span>
+              <AnimatedNumber
+                value={activeAnnualizedTotal}
+                format={formatCurrency}
+                className="font-heading text-lg font-semibold text-foreground"
+              />
             </div>
 
             <Table>

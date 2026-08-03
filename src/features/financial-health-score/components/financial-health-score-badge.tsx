@@ -1,3 +1,5 @@
+"use client"
+
 /**
  * FinancialHealthScoreBadge — the Dashboard summary card for the Financial
  * Health Score (docs/product/ai-features.md Feature 5 AC8: "surfaced on the
@@ -13,16 +15,30 @@
  * never `AiFeatureResult`-wrapped, so its correctness/availability can never
  * be affected by the AI provider.
  *
- * A Server Component (no "use client" needed — nothing here is interactive
- * beyond a plain `<Link>`), reused by the Dashboard page. Links to the
- * dedicated detail view (AC8's "a dedicated detail view showing the full
- * four-component breakdown, the historical trend, and the narrative").
+ * Reused by the Dashboard page (`app/(dashboard)/_lib/dashboard-card-groups.tsx`,
+ * itself rendered from a Server Component page). Links to the dedicated
+ * detail view (AC8's "a dedicated detail view showing the full four-component
+ * breakdown, the historical trend, and the narrative").
+ *
+ * **Phase 5b addition (Number Counters):** gained its own "use client"
+ * directive here — it was a Server Component before this phase (previously
+ * "no 'use client' needed — nothing here is interactive beyond a plain
+ * `<Link>`"). Wiring `AnimatedNumber` (`@/components/shared/motion`, a
+ * Client Component) in requires it: this component is reached from the
+ * Dashboard's own Server Component page via `dashboard-card-groups.tsx`'s
+ * render registry, so its JSX previously executed inside a genuine Server
+ * Component render pass — a Server Component's JSX cannot pass a function
+ * prop directly to a Client Component (confirmed empirically: a 500
+ * "Functions cannot be passed directly to Client Components" error before
+ * this directive was added). Costs nothing architecturally — `breakdown`
+ * still arrives as an already-resolved prop either way.
  */
 
 import Link from "next/link"
 import { HeartPulse } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { AnimatedNumber } from "@/components/shared/motion"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import type { FinancialHealthScoreBreakdown } from "@/features/financial-health-score/types"
 
@@ -81,9 +97,11 @@ export function FinancialHealthScoreBadge({
           ) : (
             <>
               <span className="flex items-baseline gap-2">
-                <span className="font-heading text-2xl font-semibold text-foreground">
-                  {breakdown.score}
-                </span>
+                <AnimatedNumber
+                  value={breakdown.score}
+                  format={(n) => Math.round(n).toString()}
+                  className="font-heading text-2xl font-semibold text-foreground"
+                />
                 <span
                   className={cn(
                     "text-sm font-medium",

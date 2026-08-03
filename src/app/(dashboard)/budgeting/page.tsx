@@ -74,11 +74,18 @@ export default async function BudgetingPage({
     getBudgetHealthScore(user.id, month),
     getCategories(user.id),
     // (Phase 4c release-gate fix, docs/release/phase-4c-notes.md Section 1):
-    // `BudgetSummaryCards` below is a Server Component and can't read the
-    // `CurrencyPreferenceProvider` Context `app/(dashboard)/layout.tsx` mounts
-    // for Client Components — resolved here, alongside every other
-    // independent fetch this page already batches, and passed straight
-    // through as a plain prop.
+    // `BudgetSummaryCards` below can't read the `CurrencyPreferenceProvider`
+    // Context this page's own ancestor (`app/(dashboard)/layout.tsx`) mounts
+    // — that Context is only reachable from a component already inside the
+    // Client Component tree it wraps, and this Server Component page itself
+    // sits above/outside that tree — so `currency` is resolved here,
+    // alongside every other independent fetch this page already batches, and
+    // passed straight through as a plain prop instead. (Phase 5b: this
+    // component gained its own "use client" directive for an unrelated
+    // reason — see its own JSDoc — but still can't read this page's Context,
+    // since Context only flows to components already rendered inside the
+    // `<CurrencyPreferenceProvider>` tree, not to this Server Component
+    // itself.)
     getUserPreference(user.id),
   ])
 

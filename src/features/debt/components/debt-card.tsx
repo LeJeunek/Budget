@@ -32,6 +32,7 @@ import { DebtFormDialog } from "@/features/debt/components/debt-form"
 import { LinkAccountDialog } from "@/features/debt/components/link-account-dialog"
 import { cn } from "@/lib/utils"
 import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
+import { AnimatedNumber } from "@/components/shared/motion"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -160,9 +161,11 @@ export function DebtCard({ debt, eligibleAccounts }: DebtCardProps) {
 
         <CardContent className="flex flex-col gap-3">
           <div className="flex flex-col gap-1">
-            <span className="font-heading text-2xl font-semibold text-foreground">
-              {formatCurrency(debt.effectiveBalance)}
-            </span>
+            <AnimatedNumber
+              value={debt.effectiveBalance}
+              format={formatCurrency}
+              className="font-heading text-2xl font-semibold text-foreground"
+            />
             <span className="text-xs text-muted-foreground">
               {debt.interestRate}% APR &middot; {formatCurrency(debt.minimumPayment)}
               /mo minimum

@@ -59,6 +59,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Progress } from "@/components/ui/progress"
 import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
+import { AnimatedNumber } from "@/components/shared/motion"
 
 export interface FinancialGoalCardProps {
   goal: FinancialGoalWithProgress
@@ -214,8 +215,10 @@ function DebtPayoffProgress({ goal }: { goal: FinancialGoalWithProgress }) {
       <Progress value={clampPercent(percentPaidOff)} />
       <div className="flex flex-col gap-0.5">
         <span className="text-sm text-foreground">
-          {formatCurrency(currentEffectiveBalance)} remaining of{" "}
-          {formatCurrency(startingBalance)} starting balance
+          <AnimatedNumber value={currentEffectiveBalance} format={formatCurrency} />{" "}
+          remaining of{" "}
+          <AnimatedNumber value={startingBalance} format={formatCurrency} />{" "}
+          starting balance
         </span>
         <span className="text-xs text-muted-foreground">
           {Math.round(percentPaidOff)}% paid off
@@ -248,9 +251,9 @@ function NetWorthSavingsProgress({ goal }: { goal: FinancialGoalWithProgress }) 
       <Progress value={displayPercent} />
       <div className="flex flex-col gap-0.5">
         <span className="text-sm text-foreground">
-          {formatCurrency(currentMeasuredValue)}{" "}
+          <AnimatedNumber value={currentMeasuredValue} format={formatCurrency} />{" "}
           <span className="text-muted-foreground">
-            of {formatCurrency(targetAmount)} target
+            of <AnimatedNumber value={targetAmount} format={formatCurrency} /> target
           </span>
         </span>
         <span className="text-xs text-muted-foreground">
@@ -283,7 +286,10 @@ function SavingsRateProgress({ goal }: { goal: FinancialGoalWithProgress }) {
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-lg font-semibold text-foreground">
-        {goal.currentRollingAverageRate.toFixed(1)}%{" "}
+        <AnimatedNumber
+          value={goal.currentRollingAverageRate}
+          format={(n) => `${n.toFixed(1)}%`}
+        />{" "}
         <span className="text-sm font-normal text-muted-foreground">
           &rarr; target {targetPercent}%
         </span>
