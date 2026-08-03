@@ -184,10 +184,16 @@
  * attribute are present, regardless of each rule's source order below.
  */
 [data-accent="blue"] {
-  --primary: #3b82f6;
+  /* blue-600, not the 500 this preset originally shipped with: #3b82f6
+     measured 3.68:1 against white, below the 4.5:1 text floor. #2563eb
+     clears it at ~5.17:1 (and, since --ring shares this value and its
+     contrast partner is the same white page background, also clears the
+     3:1 non-text floor with room to spare) — Release Manager Phase 5a
+     first-pass REJECT, Section 1. */
+  --primary: #2563eb;
   --primary-foreground: #ffffff;
-  --ring: #3b82f6;
-  --chart-1: #3b82f6;
+  --ring: #2563eb;
+  --chart-1: #2563eb;
 }
 .dark [data-accent="blue"] {
   --primary: #60a5fa;
@@ -197,10 +203,14 @@
 }
 
 [data-accent="violet"] {
-  --primary: #8b5cf6;
+  /* violet-600, darkened from the 500 this preset originally shipped with:
+     #8b5cf6 measured 4.23:1 against white, just short of the 4.5:1 text
+     floor. #7c3aed clears it at ~5.70:1 — Release Manager Phase 5a
+     first-pass REJECT, Section 1. */
+  --primary: #7c3aed;
   --primary-foreground: #ffffff;
-  --ring: #8b5cf6;
-  --chart-1: #8b5cf6;
+  --ring: #7c3aed;
+  --chart-1: #7c3aed;
 }
 .dark [data-accent="violet"] {
   --primary: #a78bfa;
@@ -210,10 +220,15 @@
 }
 
 [data-accent="emerald"] {
-  --primary: #10b981;
+  /* emerald-700, darkened from the 500 this preset originally shipped with:
+     #10b981 measured 2.54:1 against white, badly failing the 4.5:1 text
+     floor — emerald-600 (#059669) still only reaches ~3.77:1, so this
+     preset needs the deeper 700 shade to clear it at ~5.49:1 — Release
+     Manager Phase 5a first-pass REJECT, Section 1. */
+  --primary: #047857;
   --primary-foreground: #ffffff;
-  --ring: #10b981;
-  --chart-1: #10b981;
+  --ring: #047857;
+  --chart-1: #047857;
 }
 .dark [data-accent="emerald"] {
   --primary: #34d399;
@@ -224,11 +239,20 @@
 
 /* Amber's 500/400 shades are both bright enough that a white/light
    foreground fails contrast in either mode, unlike the other five presets
-   — a dark foreground is used in both light and dark mode here. */
+   — a dark foreground is used in both light and dark mode here. That
+   dark-foreground text pairing already clears 4.5:1 comfortably
+   (~8.35:1) — the failure the Release Manager's Phase 5a first-pass
+   REJECT (Section 1) found was a different contrast pair entirely:
+   --ring's 3:1 non-text floor is checked against the page *background*
+   (white in light mode), not against --primary-foreground, and #f59e0b
+   only reaches ~2.15:1 there. --primary stays at 500 (it's the pairing
+   that already passes); only --ring drops to amber-700 (#b45309, ~5.02:1
+   against white) to clear the floor its own contrast pair is actually
+   judged against. */
 [data-accent="amber"] {
   --primary: #f59e0b;
   --primary-foreground: oklch(0.205 0 0);
-  --ring: #f59e0b;
+  --ring: #b45309;
   --chart-1: #f59e0b;
 }
 .dark [data-accent="amber"] {
@@ -239,10 +263,16 @@
 }
 
 [data-accent="rose"] {
-  --primary: #f43f5e;
+  /* rose-700, darkened from the 500 this preset originally shipped with:
+     #f43f5e measured 3.67:1 against white, below the 4.5:1 text floor.
+     rose-600 (#e11d48) only reaches ~4.70:1 — too close to the floor for
+     comfort given real anti-aliasing/rendering variance — so this preset
+     uses the deeper 700 shade at ~6.28:1 — Release Manager Phase 5a
+     first-pass REJECT, Section 1. */
+  --primary: #be123c;
   --primary-foreground: #ffffff;
-  --ring: #f43f5e;
-  --chart-1: #f43f5e;
+  --ring: #be123c;
+  --chart-1: #be123c;
 }
 .dark [data-accent="rose"] {
   --primary: #fb7185;
@@ -252,10 +282,15 @@
 }
 
 [data-accent="teal"] {
-  --primary: #14b8a6;
+  /* teal-700, darkened from the 500 this preset originally shipped with:
+     #14b8a6 measured 2.49:1 against white, badly failing the 4.5:1 text
+     floor — teal-600 (#0d9488) still only reaches ~3.75:1, so this preset
+     needs the deeper 700 shade to clear it at ~5.48:1 — Release Manager
+     Phase 5a first-pass REJECT, Section 1. */
+  --primary: #0f766e;
   --primary-foreground: #ffffff;
-  --ring: #14b8a6;
-  --chart-1: #14b8a6;
+  --ring: #0f766e;
+  --chart-1: #0f766e;
 }
 .dark [data-accent="teal"] {
   --primary: #2dd4bf;

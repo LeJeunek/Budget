@@ -43,12 +43,18 @@ import type {
  */
 export function toGoal(row: PrismaGoalRow): Goal {
   return {
-    ...row,
+    id: row.id,
+    userId: row.userId,
+    name: row.name,
     targetAmount: row.targetAmount.toNumber(),
+    targetDate: row.targetDate,
     plannedMonthlyContribution:
       row.plannedMonthlyContribution === null
         ? null
         : row.plannedMonthlyContribution.toNumber(),
+    archivedAt: row.archivedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   }
 }
 
