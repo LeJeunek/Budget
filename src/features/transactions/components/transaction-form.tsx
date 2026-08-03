@@ -172,14 +172,51 @@ export function TransactionForm({
 
   // react-hook-form only applies `defaultValues` on first mount — this
   // dialog is a single long-lived instance reused for every add/edit, so it
-  // must be explicitly reset whenever it opens (or the transaction being
-  // edited changes) to avoid showing stale values from the previous open.
+  // must be explicitly reset on the closed->open transition to avoid
+  // showing stale values from the previous open.
+  //
+  // Bug fix (found by tests/e2e/flows/transaction-entry.spec.ts during
+  // Phase 5a's E2E flow-test build): `defaultValues` is itself recomputed
+  // (`useMemo(..., [transaction, accounts])`) whenever `accounts` resolves
+  // to a new reference -- e.g. `useAccounts()`'s query resolving *after*
+  // this dialog is already open. The previous effect depended on
+  // `defaultValues` directly, so it re-fired on that later resolution too,
+  // silently calling `form.reset(defaultValues)` a second time and wiping
+  // out anything the user had already typed in the interim. `wasOpenRef`
+  // makes this effect fire only on the actual false->true transition,
+  // never merely because `defaultValues`'s reference changed while already
+  // open.
+  const wasOpenRef = React.useRef(false)
   React.useEffect(() => {
-    if (open) {
+    if (open && !wasOpenRef.current) {
       form.reset(defaultValues)
       setFormError(null)
     }
+    wasOpenRef.current = open
   }, [open, defaultValues, form])
+
+  // Narrow companion fix, for the one field a full reset above used to
+  // (incidentally, buggily) also backfill: in create mode, `accountId`
+  // defaults to `accounts[0]?.id ?? ""` (see `buildDefaultValues`), which is
+  // `""` on the very first render if `useAccounts()`'s query hasn't
+  // resolved yet when the dialog opens. Once it does resolve, the account
+  // field must still pick up that first real account -- but via a single
+  // targeted `setValue`, never a full `form.reset`, so it can never
+  // overwrite whatever the user has already typed elsewhere. Only fires
+  // while the field is still at its untouched default ("") and only in
+  // create mode (edit mode's `accountId` always comes from the transaction
+  // itself, never from `accounts` timing, per `buildDefaultValues` above).
+  React.useEffect(() => {
+    if (
+      open &&
+      !isEditMode &&
+      accounts.length > 0 &&
+      !form.getValues("accountId") &&
+      !form.getFieldState("accountId").isDirty
+    ) {
+      form.setValue("accountId", accounts[0].id)
+    }
+  }, [open, isEditMode, accounts, form])
 
   async function onSubmit(values: TransactionFormValues) {
     setFormError(null)

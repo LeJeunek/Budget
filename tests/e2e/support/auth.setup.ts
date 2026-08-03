@@ -18,19 +18,8 @@
 import { expect, test as setup } from "@playwright/test"
 
 import { E2E_TEST_ADMIN_EMAIL, E2E_TEST_EMAIL } from "../../../prisma/e2e-test-accounts"
+import { requireE2ePassword } from "./env"
 import { ADMIN_STORAGE_STATE, ORDINARY_STORAGE_STATE } from "./storage-state"
-
-function requirePassword(): string {
-  const password = process.env.E2E_TEST_USER_PASSWORD
-  if (!password) {
-    throw new Error(
-      "E2E_TEST_USER_PASSWORD is not set — required to log in as the seeded " +
-        "e2e-test@/e2e-test-admin@lkbudget.dev accounts (see .env.example). " +
-        "Run `npm run seed:e2e` first if these accounts don't exist yet.",
-    )
-  }
-  return password
-}
 
 async function login(
   page: import("@playwright/test").Page,
@@ -52,13 +41,13 @@ async function login(
 }
 
 setup("authenticate as the ordinary e2e test user", async ({ page }) => {
-  const password = requirePassword()
+  const password = requireE2ePassword()
   await login(page, E2E_TEST_EMAIL, password)
   await page.context().storageState({ path: ORDINARY_STORAGE_STATE })
 })
 
 setup("authenticate as the admin e2e test user", async ({ page }) => {
-  const password = requirePassword()
+  const password = requireE2ePassword()
   await login(page, E2E_TEST_ADMIN_EMAIL, password)
   await page.context().storageState({ path: ADMIN_STORAGE_STATE })
 })
