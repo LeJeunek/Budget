@@ -5,6 +5,17 @@
  * completion percentages. No chart library dependency — plain SVG animated
  * with Framer Motion.
  *
+ * Number Counters (Phase 5b, `docs/architecture/phase-5b-technical-design.md`
+ * §2.4): the default percentage label (rendered when no custom `label` is
+ * passed) now counts up/down via `AnimatedNumber` instead of a static text
+ * node, and the ring's own stroke-animation duration reads from the shared
+ * `NUMBER_COUNTER_DURATION_MS` constant instead of a hardcoded `0.6`/`600`
+ * literal — the two are now tied to one source, so the label's count and
+ * the ring's own sweep always finish at the same instant by construction,
+ * with no per-call tuning needed. A caller-supplied `label` is unaffected
+ * and never passes through `AnimatedNumber` (unchanged from before this
+ * phase) — this file has no opinion on a custom label's own content.
+ *
  * Usage:
  * ```tsx
  * <ProgressRing value={72} />
@@ -24,6 +35,8 @@ import * as React from "react"
 import { motion } from "framer-motion"
 
 import { cn } from "@/lib/utils"
+import { AnimatedNumber } from "@/components/shared/motion/animated-number"
+import { NUMBER_COUNTER_DURATION_MS } from "@/components/shared/motion/constants"
 
 export interface ProgressRingProps {
   /** Completion percentage, clamped to 0-100. */
@@ -95,12 +108,20 @@ export function ProgressRing({
           animate={{
             strokeDashoffset: circumference - (clamped / 100) * circumference,
           }}
-          transition={{ duration: 0.6, ease: "easeOut" }}
+          transition={{
+            duration: NUMBER_COUNTER_DURATION_MS / 1000,
+            ease: "easeOut",
+          }}
         />
       </svg>
       {(label ?? showDefaultLabel) && (
         <span className="absolute inset-0 flex items-center justify-center text-sm font-medium text-foreground">
-          {label ?? `${Math.round(clamped)}%`}
+          {label ?? (
+            <AnimatedNumber
+              value={clamped}
+              format={(current) => `${Math.round(current)}%`}
+            />
+          )}
         </span>
       )}
     </div>

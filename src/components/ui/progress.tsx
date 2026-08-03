@@ -40,12 +40,22 @@
  * // Caller-supplied, more specific name
  * <Progress value={62} aria-label="Emergency Fund goal, 62% funded" />
  * ```
+ *
+ * Reduced-Motion Foundation (Phase 5b, `docs/architecture/phase-5b-technical-design.md`
+ * §1.2): the fill's `transition-all` Tailwind class is a plain CSS
+ * transition, not Framer Motion — the root `<MotionConfig reducedMotion="user">`
+ * mount has no reach into it at all, so this is the one pre-existing motion
+ * instance in the app that needs an actual (one-line) edit rather than a
+ * free retrofit. `useReducedMotion()` (the same shared hook every other 5b
+ * primitive branches on) conditionally drops that class so the fill jumps
+ * straight to its final position with no interpolation when active.
  */
 
 import * as React from "react"
 import { Progress as ProgressPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { useReducedMotion } from "@/components/shared/motion/use-reduced-motion"
 
 function Progress({
   className,
@@ -54,6 +64,7 @@ function Progress({
   ...props
 }: React.ComponentProps<typeof ProgressPrimitive.Root>) {
   const clamped = Math.min(100, Math.max(0, value ?? 0))
+  const prefersReducedMotion = useReducedMotion()
 
   return (
     <ProgressPrimitive.Root
@@ -67,7 +78,10 @@ function Progress({
     >
       <ProgressPrimitive.Indicator
         data-slot="progress-indicator"
-        className="size-full flex-1 bg-primary transition-all"
+        className={cn(
+          "size-full flex-1 bg-primary",
+          !prefersReducedMotion && "transition-all"
+        )}
         style={{ transform: `translateX(-${100 - clamped}%)` }}
       />
     </ProgressPrimitive.Root>

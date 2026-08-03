@@ -14,6 +14,16 @@
  *   trend={{ direction: "up", value: "+4.2%", label: "vs last month" }}
  * />
  *
+ * // Number Counters (Phase 5b) — an AnimatedNumber in place of a plain
+ * // already-formatted string, for a headline figure that should count
+ * // up/down on change. StatCard performs no formatting or animation logic
+ * // either way — this is a drop-in `value`, not a new prop/mode.
+ * <StatCard
+ *   label="Net Worth"
+ *   value={<AnimatedNumber value={netWorth} format={(n) => formatCurrency(n, currency)} />}
+ *   icon={Wallet}
+ * />
+ *
  * // Loading state (e.g. while a Server Component's data is being fetched
  * // by the caller — this component never fetches data itself)
  * <StatCard label="Net Worth" value="" loading />
@@ -37,8 +47,16 @@ export interface StatCardTrend {
 
 export interface StatCardProps {
   label: string
-  /** Already-formatted value (this component performs no number formatting). */
-  value: string | number
+  /**
+   * Already-formatted value, or an `AnimatedNumber` (Phase 5b, Number
+   * Counters — `@/components/shared/motion`) for a headline figure that
+   * should count up/down on change — this component performs no
+   * formatting or animation logic of its own either way. Widened from
+   * `string | number` to `React.ReactNode` (Phase 5b): a non-breaking
+   * change, since every existing caller's `string`/`number` value remains a
+   * valid `ReactNode` unmodified.
+   */
+  value: React.ReactNode
   /** Optional content rendered immediately before the value, e.g. a currency symbol. */
   prefix?: React.ReactNode
   icon?: LucideIcon

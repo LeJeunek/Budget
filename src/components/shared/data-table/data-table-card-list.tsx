@@ -20,6 +20,21 @@
  *     unannotated column degrades to this default rather than silently
  *     vanishing from the mobile view.
  *   - `"hidden"`    — omitted from the card entirely.
+ *   - `"expandable"` (Phase 5b, Expandable Cards —
+ *     `docs/architecture/phase-5b-technical-design.md` §3.2) — omitted from
+ *     the always-visible card body and instead rendered inside a per-row
+ *     `ExpandableCard` disclosure region appended to the bottom of the
+ *     card, behind its own dedicated trigger. Purely additive to the three
+ *     values above, never a reinterpretation of `"secondary"` — an
+ *     unannotated column's behavior is completely unaffected, and
+ *     `"secondary"`'s own "visible by default" guarantee (Risk #51) is
+ *     untouched. This region is visually and spatially distinct from the
+ *     card's `"primary"`/`"secondary"` content above it and from the row's
+ *     own per-row action control (a `"secondary"`/`"primary"` cell in the
+ *     same row), per the product spec's own touch-target-adjacency edge
+ *     case — see Risk #59 for the one implementation-time review this new
+ *     value still needs per consumer (confirm it discloses genuinely new
+ *     detail, not a relabeled `"secondary"` column).
  *
  * Every cell is rendered via the identical
  * `flexRender(cell.column.columnDef.cell, cell.getContext())` call
@@ -62,13 +77,15 @@ import {
   type Table as TanstackTable,
   flexRender,
 } from "@tanstack/react-table"
-import { Search } from "lucide-react"
+import { ChevronDown, Search } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { CardSkeleton } from "@/components/shared/loading-skeleton"
 import { DataTablePagination } from "@/components/shared/data-table/data-table-pagination"
+import { ExpandableCard } from "@/components/shared/motion"
 
 /**
  * The one sanctioned convention for per-column row-prominence in the
@@ -76,7 +93,11 @@ import { DataTablePagination } from "@/components/shared/data-table/data-table-p
  * records this as the canonical reference) — declared once here, imported
  * wherever a consumer's `ColumnDef.meta` needs to annotate it.
  */
-export type CardDisplayPriority = "primary" | "secondary" | "hidden"
+export type CardDisplayPriority =
+  | "primary"
+  | "secondary"
+  | "hidden"
+  | "expandable"
 
 // TanStack Table's own documented extension mechanism for adding
 // codebase-specific fields to `ColumnDef.meta` — see
@@ -185,6 +206,9 @@ export function DataTableCardList<TData>({
             const secondaryCells = cells.filter(
               (cell) => resolveCardDisplay(cell) === "secondary"
             )
+            const expandableCells = cells.filter(
+              (cell) => resolveCardDisplay(cell) === "expandable"
+            )
 
             return (
               <li key={row.id}>
@@ -222,6 +246,48 @@ export function DataTableCardList<TData>({
                           </span>
                         </div>
                       ))}
+                    </CardContent>
+                  )}
+                  {expandableCells.length > 0 && (
+                    <CardContent className="border-t pt-3">
+                      <ExpandableCard
+                        trigger={
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="group w-full justify-between px-2 text-muted-foreground"
+                          >
+                            <span>Show more</span>
+                            <ChevronDown
+                              className="size-4 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180"
+                              aria-hidden="true"
+                            />
+                          </Button>
+                        }
+                      >
+                        <div className="flex flex-col gap-1.5 pt-2 text-sm">
+                          {expandableCells.map((cell) => (
+                            <div
+                              key={cell.id}
+                              className="flex items-center justify-between gap-3"
+                            >
+                              <span className="shrink-0 text-muted-foreground">
+                                {resolveColumnLabel(
+                                  cell.column.columnDef.header,
+                                  cell.column.id
+                                )}
+                              </span>
+                              <span className="truncate text-right">
+                                {flexRender(
+                                  cell.column.columnDef.cell,
+                                  cell.getContext()
+                                )}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </ExpandableCard>
                     </CardContent>
                   )}
                 </Card>
