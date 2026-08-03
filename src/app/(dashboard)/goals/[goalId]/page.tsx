@@ -4,13 +4,11 @@ import { ArrowLeft } from "lucide-react"
 
 import { getCurrentUser } from "@/lib/auth"
 import { getGoalById } from "@/features/goals/server/service"
-import { EstimatedCompletionLine } from "@/features/goals/components/goal-card"
 import { GoalDetailActions } from "@/features/goals/components/goal-detail-actions"
 import { ContributionForm } from "@/features/goals/components/contribution-form"
 import { ContributionHistoryList } from "@/features/goals/components/contribution-history-list"
-import { formatCurrency, formatDate } from "@/lib/utils"
+import { GoalDetailProgressCard } from "@/features/goals/components/goal-detail-progress-card"
 import { getUserPreference } from "@/features/settings/server/service"
-import { ProgressRing } from "@/components/shared/progress-ring"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
@@ -80,52 +78,10 @@ export default async function GoalDetailPage({
         <GoalDetailActions goal={goal} />
       </div>
 
-      <Card>
-        <CardContent className="flex flex-col items-center gap-4 py-6 sm:flex-row sm:items-center">
-          <ProgressRing
-            value={goal.percentComplete}
-            size={120}
-            strokeWidth={10}
-            label={
-              <span className="text-lg font-semibold">
-                {Math.round(goal.percentComplete)}%
-              </span>
-            }
-            aria-label={`${goal.name} progress`}
-          />
-
-          <div className="flex flex-1 flex-col gap-1 text-center sm:text-left">
-            <span className="font-heading text-2xl font-semibold text-foreground">
-              {formatCurrency(goal.currentProgress, userPreference.currencyDisplay)}{" "}
-              <span className="text-base font-normal text-muted-foreground">
-                of {formatCurrency(goal.targetAmount, userPreference.currencyDisplay)}
-              </span>
-            </span>
-            {goal.overageAmount > 0 ? (
-              <span className="text-sm text-muted-foreground">
-                {formatCurrency(goal.overageAmount, userPreference.currencyDisplay)} over your{" "}
-                {formatCurrency(goal.targetAmount, userPreference.currencyDisplay)} target
-              </span>
-            ) : (
-              <span className="text-sm text-muted-foreground">
-                {formatCurrency(goal.remainingAmount, userPreference.currencyDisplay)} remaining
-              </span>
-            )}
-            {goal.targetDate && (
-              <span className="text-sm text-muted-foreground">
-                Target date: {formatDate(goal.targetDate)}
-              </span>
-            )}
-            {goal.plannedMonthlyContribution !== null && (
-              <span className="text-sm text-muted-foreground">
-                Planned monthly contribution:{" "}
-                {formatCurrency(goal.plannedMonthlyContribution, userPreference.currencyDisplay)}
-              </span>
-            )}
-            <EstimatedCompletionLine goal={goal} />
-          </div>
-        </CardContent>
-      </Card>
+      <GoalDetailProgressCard
+        goal={goal}
+        currencyDisplay={userPreference.currencyDisplay}
+      />
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
