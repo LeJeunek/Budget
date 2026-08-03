@@ -23,13 +23,19 @@
  *
  * A plain Server Component — no hooks of its own; `Tooltip` is a Client
  * Component internally, which a Server Component can render as a child
- * without itself needing `"use client"`.
+ * without itself needing `"use client"`. The grid below is wrapped in
+ * `FadeIn` (Chart Transitions, Phase 5b —
+ * docs/architecture/phase-5b-technical-design.md §5.3) the same way:
+ * `FadeIn` is a Client Component leaf rendered directly, with the
+ * already-server-rendered grid JSX passed through as `children` — no
+ * `"use client"` conversion of this file itself.
  */
 
 import { formatCurrency } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { CHART_TRANSITION_DURATION_MS, FadeIn } from "@/components/shared/motion"
 
 import type { DailySpendingHeatmapPoint } from "../types"
 import { formatMonthLabel } from "./chart-format"
@@ -133,62 +139,64 @@ export function DailySpendingHeatmap({ data, currency }: DailySpendingHeatmapPro
             ({hiddenMonthCount} earlier {hiddenMonthCount === 1 ? "month" : "months"} not shown).
           </p>
         )}
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {grids.map((grid) => (
-            <div key={grid.monthKey} className="flex flex-col gap-1.5">
-              <p className="text-xs font-medium text-foreground">
-                {formatMonthLabel(grid.monthKey)}
-              </p>
-              <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-muted-foreground">
-                {WEEKDAY_LABELS.map((label, index) => (
-                  <span key={index}>{label}</span>
-                ))}
-              </div>
-              <div className="flex flex-col gap-1">
-                {grid.weeks.map((week, weekIndex) => (
-                  <div key={weekIndex} className="grid grid-cols-7 gap-1">
-                    {week.map((dateKey, dayIndex) => {
-                      if (!dateKey) {
-                        return <span key={dayIndex} className="size-6" />
-                      }
+        <FadeIn durationMs={CHART_TRANSITION_DURATION_MS}>
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {grids.map((grid) => (
+              <div key={grid.monthKey} className="flex flex-col gap-1.5">
+                <p className="text-xs font-medium text-foreground">
+                  {formatMonthLabel(grid.monthKey)}
+                </p>
+                <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-muted-foreground">
+                  {WEEKDAY_LABELS.map((label, index) => (
+                    <span key={index}>{label}</span>
+                  ))}
+                </div>
+                <div className="flex flex-col gap-1">
+                  {grid.weeks.map((week, weekIndex) => (
+                    <div key={weekIndex} className="grid grid-cols-7 gap-1">
+                      {week.map((dateKey, dayIndex) => {
+                        if (!dateKey) {
+                          return <span key={dayIndex} className="size-6" />
+                        }
 
-                      const point = byDate.get(dateKey)
-                      const dayNumber = Number(dateKey.slice(-2))
+                        const point = byDate.get(dateKey)
+                        const dayNumber = Number(dateKey.slice(-2))
 
-                      return (
-                        <Tooltip key={dateKey}>
-                          <TooltipTrigger asChild>
-                            <span
-                              className={cn(
-                                "flex size-6 items-center justify-center rounded-sm text-[10px]",
-                                point ? "text-foreground" : "bg-muted text-muted-foreground",
-                              )}
-                              style={
-                                point
-                                  ? {
-                                      backgroundColor: "var(--chart-2)",
-                                      opacity: intensityToOpacity(point.relativeIntensity),
-                                    }
-                                  : undefined
-                              }
-                            >
-                              {dayNumber}
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            {point
-                              ? `${formatCurrency(point.amount, currency)} on ${dateKey}`
-                              : `No spending on ${dateKey}`}
-                          </TooltipContent>
-                        </Tooltip>
-                      )
-                    })}
-                  </div>
-                ))}
+                        return (
+                          <Tooltip key={dateKey}>
+                            <TooltipTrigger asChild>
+                              <span
+                                className={cn(
+                                  "flex size-6 items-center justify-center rounded-sm text-[10px]",
+                                  point ? "text-foreground" : "bg-muted text-muted-foreground",
+                                )}
+                                style={
+                                  point
+                                    ? {
+                                        backgroundColor: "var(--chart-2)",
+                                        opacity: intensityToOpacity(point.relativeIntensity),
+                                      }
+                                    : undefined
+                                }
+                              >
+                                {dayNumber}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {point
+                                ? `${formatCurrency(point.amount, currency)} on ${dateKey}`
+                                : `No spending on ${dateKey}`}
+                            </TooltipContent>
+                          </Tooltip>
+                        )
+                      })}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </FadeIn>
       </CardContent>
     </Card>
   )

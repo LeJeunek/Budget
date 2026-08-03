@@ -29,6 +29,7 @@ import { Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip } from "re
 import type { FinancialGoalTrendPoint } from "@/features/financial-goals/types"
 import { formatDateLabel } from "@/features/financial-goals/components/financial-goal-shared"
 import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
+import { useChartAnimationProps } from "@/components/shared/motion"
 
 export interface NetWorthTrendSparklineProps {
   points: FinancialGoalTrendPoint[]
@@ -43,6 +44,9 @@ export function NetWorthTrendSparkline({
   targetAmount,
 }: NetWorthTrendSparklineProps) {
   const formatCurrency = useFormatCurrency()
+  // Chart Transitions (Phase 5b): one shared entrance/update animation gate,
+  // reduced-motion-aware — see docs/architecture/phase-5b-technical-design.md §5.1.
+  const chartAnimationProps = useChartAnimationProps()
 
   if (points.length === 0) {
     return null
@@ -74,6 +78,7 @@ export function NetWorthTrendSparkline({
             dot={false}
             stroke="var(--chart-1)"
             strokeWidth={2}
+            {...chartAnimationProps}
           />
         </LineChart>
       </ResponsiveContainer>

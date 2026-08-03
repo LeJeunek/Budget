@@ -26,6 +26,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
 import type { AllocationEntry } from "@/features/investments/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
+import { useChartAnimationProps } from "@/components/shared/motion"
 
 const SLICE_COLORS = [
   "var(--chart-1)",
@@ -43,6 +44,9 @@ export interface AllocationChartProps {
 
 export function AllocationChart({ title, data, emptyMessage }: AllocationChartProps) {
   const formatCurrency = useFormatCurrency()
+  // Chart Transitions (Phase 5b): one shared entrance/update animation gate,
+  // reduced-motion-aware — see docs/architecture/phase-5b-technical-design.md §5.1.
+  const chartAnimationProps = useChartAnimationProps()
   const hasData = data.length > 0
 
   return (
@@ -70,6 +74,7 @@ export function AllocationChart({ title, data, emptyMessage }: AllocationChartPr
                     outerRadius="85%"
                     paddingAngle={data.length > 1 ? 2 : 0}
                     stroke="var(--card)"
+                    {...chartAnimationProps}
                   >
                     {data.map((row, index) => (
                       <Cell

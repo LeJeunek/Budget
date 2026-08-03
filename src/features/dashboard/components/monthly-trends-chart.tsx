@@ -21,6 +21,7 @@ import {
   useCurrencyDisplay,
   useFormatCurrency,
 } from "@/app/(dashboard)/currency-preference-provider"
+import { useChartAnimationProps } from "@/components/shared/motion"
 
 import type { MonthlyTrend } from "../types"
 import { formatCompactCurrency } from "./chart-format"
@@ -51,6 +52,9 @@ function formatMonthLabel(monthKey: string): string {
 export function MonthlyTrendsChart({ data }: MonthlyTrendsChartProps) {
   const formatCurrency = useFormatCurrency()
   const currency = useCurrencyDisplay()
+  // Chart Transitions (Phase 5b): one shared entrance/update animation gate,
+  // reduced-motion-aware — see docs/architecture/phase-5b-technical-design.md §5.1.
+  const chartAnimationProps = useChartAnimationProps()
 
   // Only a genuinely empty series (e.g. a user whose signup month floor
   // dropped every requested month — not expected in practice since the
@@ -126,6 +130,7 @@ export function MonthlyTrendsChart({ data }: MonthlyTrendsChartProps) {
                 stroke="var(--chart-1)"
                 strokeWidth={2}
                 dot={false}
+                {...chartAnimationProps}
               />
               <Line
                 type="monotone"
@@ -134,6 +139,7 @@ export function MonthlyTrendsChart({ data }: MonthlyTrendsChartProps) {
                 stroke="var(--chart-2)"
                 strokeWidth={2}
                 dot={false}
+                {...chartAnimationProps}
               />
             </LineChart>
           </ResponsiveContainer>

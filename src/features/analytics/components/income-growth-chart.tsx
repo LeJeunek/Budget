@@ -35,6 +35,7 @@ import {
   useCurrencyDisplay,
   useFormatCurrency,
 } from "@/app/(dashboard)/currency-preference-provider"
+import { useChartAnimationProps } from "@/components/shared/motion"
 
 import type { IncomeGrowthPoint, IncomeSourceType } from "../types"
 import { CHART_PALETTE, formatCompactCurrency, formatMonthLabel } from "./chart-format"
@@ -47,6 +48,9 @@ export interface IncomeGrowthChartProps {
 export function IncomeGrowthChart({ data }: IncomeGrowthChartProps) {
   const formatCurrency = useFormatCurrency()
   const currency = useCurrencyDisplay()
+  // Chart Transitions (Phase 5b): one shared entrance/update animation gate,
+  // reduced-motion-aware — see docs/architecture/phase-5b-technical-design.md §5.1.
+  const chartAnimationProps = useChartAnimationProps()
 
   if (data.length === 0) {
     return (
@@ -134,6 +138,7 @@ export function IncomeGrowthChart({ data }: IncomeGrowthChartProps) {
                     stackId="income"
                     fill={CHART_PALETTE[index % CHART_PALETTE.length]}
                     maxBarSize={64}
+                    {...chartAnimationProps}
                   />
                 ))}
               </BarChart>

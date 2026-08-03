@@ -53,6 +53,12 @@ export function UserTable({ users }: UserTableProps) {
       cell: ({ row }) => (
         <span className="whitespace-nowrap">{formatDateTime(row.original.createdAt)}</span>
       ),
+      // Phase 5b (Expandable Cards, phase-5b-technical-design.md §3.2): an
+      // admin scanning this card-list on mobile needs email + verification
+      // status (already "primary") and last-active (a dormancy signal) at a
+      // glance — signup date is real, but the least time-sensitive of the
+      // three, so it moves behind this card's own expand affordance instead.
+      meta: { cardDisplay: "expandable" },
     },
     {
       id: "emailVerified",

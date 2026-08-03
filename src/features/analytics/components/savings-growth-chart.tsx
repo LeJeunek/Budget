@@ -36,6 +36,7 @@ import {
   useCurrencyDisplay,
   useFormatCurrency,
 } from "@/app/(dashboard)/currency-preference-provider"
+import { useChartAnimationProps } from "@/components/shared/motion"
 
 import type { SavingsGrowthPoint } from "../types"
 import { formatCompactCurrency, formatMonthLabel } from "./chart-format"
@@ -47,6 +48,9 @@ export interface SavingsGrowthChartProps {
 export function SavingsGrowthChart({ data }: SavingsGrowthChartProps) {
   const formatCurrency = useFormatCurrency()
   const currency = useCurrencyDisplay()
+  // Chart Transitions (Phase 5b): one shared entrance/update animation gate,
+  // reduced-motion-aware — see docs/architecture/phase-5b-technical-design.md §5.1.
+  const chartAnimationProps = useChartAnimationProps()
   const hasAnyMonth = data.some((point) => point.actualSavings !== null)
 
   if (data.length === 0 || !hasAnyMonth) {
@@ -127,6 +131,7 @@ export function SavingsGrowthChart({ data }: SavingsGrowthChartProps) {
                   strokeWidth={2}
                   dot={chartData.length === 1}
                   connectNulls={false}
+                  {...chartAnimationProps}
                 />
               </LineChart>
             </ResponsiveContainer>

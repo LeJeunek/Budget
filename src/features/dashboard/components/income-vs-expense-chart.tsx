@@ -17,6 +17,7 @@ import {
   useCurrencyDisplay,
   useFormatCurrency,
 } from "@/app/(dashboard)/currency-preference-provider"
+import { useChartAnimationProps } from "@/components/shared/motion"
 
 import { formatCompactCurrency } from "./chart-format"
 
@@ -28,6 +29,9 @@ export interface IncomeVsExpenseChartProps {
 export function IncomeVsExpenseChart({ income, expenses }: IncomeVsExpenseChartProps) {
   const formatCurrency = useFormatCurrency()
   const currency = useCurrencyDisplay()
+  // Chart Transitions (Phase 5b): one shared entrance/update animation gate,
+  // reduced-motion-aware — see docs/architecture/phase-5b-technical-design.md §5.1.
+  const chartAnimationProps = useChartAnimationProps()
 
   // Mirrors the "user has accounts but no transactions yet" edge case from
   // dashboard-overview.md: both figures at exactly 0 means no activity this
@@ -85,7 +89,12 @@ export function IncomeVsExpenseChart({ income, expenses }: IncomeVsExpenseChartP
                     color: "var(--popover-foreground)",
                   }}
                 />
-                <Bar dataKey="amount" radius={[6, 6, 0, 0]} maxBarSize={96}>
+                <Bar
+                  dataKey="amount"
+                  radius={[6, 6, 0, 0]}
+                  maxBarSize={96}
+                  {...chartAnimationProps}
+                >
                   {data.map((row) => (
                     <Cell key={row.label} fill={row.fill} />
                   ))}

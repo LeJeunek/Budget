@@ -18,6 +18,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
+import { useChartAnimationProps } from "@/components/shared/motion"
 
 import type { CategorySpending } from "../types"
 
@@ -39,6 +40,9 @@ export interface SpendingByCategoryChartProps {
 
 export function SpendingByCategoryChart({ data }: SpendingByCategoryChartProps) {
   const formatCurrency = useFormatCurrency()
+  // Chart Transitions (Phase 5b): one shared entrance/update animation gate,
+  // reduced-motion-aware — see docs/architecture/phase-5b-technical-design.md §5.1.
+  const chartAnimationProps = useChartAnimationProps()
 
   // A row-with-zero-total can't happen from the service (grouped rows only
   // exist when there was at least one expense), but an empty array is the
@@ -75,6 +79,7 @@ export function SpendingByCategoryChart({ data }: SpendingByCategoryChartProps) 
                     outerRadius="85%"
                     paddingAngle={data.length > 1 ? 2 : 0}
                     stroke="var(--card)"
+                    {...chartAnimationProps}
                   >
                     {data.map((row, index) => (
                       <Cell

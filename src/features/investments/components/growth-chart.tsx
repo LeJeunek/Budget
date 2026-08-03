@@ -32,6 +32,7 @@ import {
   useCurrencyDisplay,
   useFormatCurrency,
 } from "@/app/(dashboard)/currency-preference-provider"
+import { useChartAnimationProps } from "@/components/shared/motion"
 
 /** Compact axis-tick currency formatter — duplicated from
  * `features/dashboard/components/chart-format.ts`'s `formatCompactCurrency`
@@ -59,6 +60,9 @@ export interface GrowthChartProps {
 export function GrowthChart({ title, data }: GrowthChartProps) {
   const formatCurrency = useFormatCurrency()
   const currency = useCurrencyDisplay()
+  // Chart Transitions (Phase 5b): one shared entrance/update animation gate,
+  // reduced-motion-aware — see docs/architecture/phase-5b-technical-design.md §5.1.
+  const chartAnimationProps = useChartAnimationProps()
 
   if (data.length === 0) {
     return (
@@ -146,6 +150,7 @@ export function GrowthChart({ title, data }: GrowthChartProps) {
                 stroke="var(--chart-1)"
                 strokeWidth={2}
                 dot={false}
+                {...chartAnimationProps}
               />
             </LineChart>
           </ResponsiveContainer>

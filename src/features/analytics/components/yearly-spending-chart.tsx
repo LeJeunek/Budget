@@ -19,6 +19,7 @@ import {
   useCurrencyDisplay,
   useFormatCurrency,
 } from "@/app/(dashboard)/currency-preference-provider"
+import { useChartAnimationProps } from "@/components/shared/motion"
 
 import type { YearlySpendingPoint } from "../types"
 import { formatCompactCurrency } from "./chart-format"
@@ -30,6 +31,9 @@ export interface YearlySpendingChartProps {
 export function YearlySpendingChart({ data }: YearlySpendingChartProps) {
   const formatCurrency = useFormatCurrency()
   const currency = useCurrencyDisplay()
+  // Chart Transitions (Phase 5b): one shared entrance/update animation gate,
+  // reduced-motion-aware — see docs/architecture/phase-5b-technical-design.md §5.1.
+  const chartAnimationProps = useChartAnimationProps()
 
   return (
     <Card>
@@ -107,6 +111,7 @@ export function YearlySpendingChart({ data }: YearlySpendingChartProps) {
                       fill="var(--chart-2)"
                       radius={[6, 6, 0, 0]}
                       maxBarSize={96}
+                      {...chartAnimationProps}
                     />
                   </BarChart>
                 </ResponsiveContainer>

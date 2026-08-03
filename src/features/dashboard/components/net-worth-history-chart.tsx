@@ -49,6 +49,7 @@ import {
   useCurrencyDisplay,
   useFormatCurrency,
 } from "@/app/(dashboard)/currency-preference-provider"
+import { useChartAnimationProps } from "@/components/shared/motion"
 
 import type { NetWorthHistoryRange, NetWorthHistoryResponse } from "../types"
 import { useNetWorthHistory } from "../hooks/use-net-worth-history"
@@ -93,6 +94,9 @@ export function NetWorthHistoryChart({
 }: NetWorthHistoryChartProps) {
   const formatCurrency = useFormatCurrency()
   const currency = useCurrencyDisplay()
+  // Chart Transitions (Phase 5b): one shared entrance/update animation gate,
+  // reduced-motion-aware — see docs/architecture/phase-5b-technical-design.md §5.1.
+  const chartAnimationProps = useChartAnimationProps()
   const [range, setRange] = React.useState<NetWorthHistoryRange>(initialRange)
   const [view, setView] = React.useState<BreakdownView>("net-worth")
 
@@ -212,6 +216,7 @@ export function NetWorthHistoryChart({
                         stroke="var(--chart-2)"
                         strokeWidth={2}
                         dot={points.length === 1}
+                        {...chartAnimationProps}
                       />
                       <Line
                         type="monotone"
@@ -221,6 +226,7 @@ export function NetWorthHistoryChart({
                         strokeWidth={2}
                         strokeDasharray="4 4"
                         dot={points.length === 1}
+                        {...chartAnimationProps}
                       />
                     </>
                   )}
@@ -239,6 +245,7 @@ export function NetWorthHistoryChart({
                     // style (monthly-trends-chart.tsx, growth-chart.tsx).
                     dot={points.length === 1}
                     activeDot={{ r: 5 }}
+                    {...chartAnimationProps}
                   />
                 </LineChart>
               </ResponsiveContainer>

@@ -31,6 +31,7 @@ import {
   useCurrencyDisplay,
   useFormatCurrency,
 } from "@/app/(dashboard)/currency-preference-provider"
+import { useChartAnimationProps } from "@/components/shared/motion"
 
 import type { CategoryTrend } from "../types"
 import { CHART_PALETTE, formatCompactCurrency, formatMonthLabel } from "./chart-format"
@@ -50,6 +51,9 @@ const MAX_RENDERED_CATEGORIES = 8
 export function CategoryTrendsChart({ data }: CategoryTrendsChartProps) {
   const formatCurrency = useFormatCurrency()
   const currency = useCurrencyDisplay()
+  // Chart Transitions (Phase 5b): one shared entrance/update animation gate,
+  // reduced-motion-aware — see docs/architecture/phase-5b-technical-design.md §5.1.
+  const chartAnimationProps = useChartAnimationProps()
 
   if (data.length === 0) {
     return (
@@ -154,6 +158,7 @@ export function CategoryTrendsChart({ data }: CategoryTrendsChartProps) {
                     stroke={CHART_PALETTE[index % CHART_PALETTE.length]}
                     strokeWidth={2}
                     dot={monthKeys.length === 1}
+                    {...chartAnimationProps}
                   />
                 ))}
               </LineChart>

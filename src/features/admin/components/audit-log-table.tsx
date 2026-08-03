@@ -62,6 +62,13 @@ export function AuditLogTable({ entries }: AuditLogTableProps) {
           // displays plainly, never errors or disappears.
           <span className="text-muted-foreground">Deleted account</span>
         ),
+      // Phase 5b (Expandable Cards, phase-5b-technical-design.md §3.2): a raw
+      // user id is real detail (traceability for a follow-up investigation)
+      // but not glanceable the way event type/timestamp (already "primary")
+      // or the human-readable summary are — moves behind this card's own
+      // expand affordance instead of sitting in the default card body as an
+      // opaque id string.
+      meta: { cardDisplay: "expandable" },
     },
     {
       id: "occurredAt",

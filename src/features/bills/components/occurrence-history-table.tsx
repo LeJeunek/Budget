@@ -94,6 +94,12 @@ export function OccurrenceHistoryTable({
       header: "Paid via",
       cell: ({ row }) =>
         row.original.transactionId ? "Linked transaction" : row.original.paidAmount !== null ? "Manual entry" : "—",
+      // Phase 5b (Expandable Cards, phase-5b-technical-design.md §3.2): status
+      // + paid amount (already "primary") are what a user scanning this
+      // bill's payment history on mobile needs at a glance — how it was paid
+      // and whether it was on time are real, but secondary follow-up detail,
+      // so both move behind this card's own expand affordance.
+      meta: { cardDisplay: "expandable" },
     },
     {
       id: "onTime",
@@ -117,6 +123,7 @@ export function OccurrenceHistoryTable({
           </Badge>
         )
       },
+      meta: { cardDisplay: "expandable" },
     },
     {
       id: "actions",

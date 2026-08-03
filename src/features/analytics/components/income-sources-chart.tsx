@@ -20,6 +20,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollAffordanceContainer } from "@/components/shared/scroll-affordance-container"
 import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
+import { useChartAnimationProps } from "@/components/shared/motion"
 
 import type { IncomeSourceEntry } from "../types"
 import { CHART_PALETTE } from "./chart-format"
@@ -31,6 +32,9 @@ export interface IncomeSourcesChartProps {
 
 export function IncomeSourcesChart({ data }: IncomeSourcesChartProps) {
   const formatCurrency = useFormatCurrency()
+  // Chart Transitions (Phase 5b): one shared entrance/update animation gate,
+  // reduced-motion-aware — see docs/architecture/phase-5b-technical-design.md §5.1.
+  const chartAnimationProps = useChartAnimationProps()
 
   return (
     <Card>
@@ -70,6 +74,7 @@ export function IncomeSourcesChart({ data }: IncomeSourcesChartProps) {
                       outerRadius="85%"
                       paddingAngle={data.length > 1 ? 2 : 0}
                       stroke="var(--card)"
+                      {...chartAnimationProps}
                     >
                       {data.map((row, index) => (
                         <Cell key={row.type} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />

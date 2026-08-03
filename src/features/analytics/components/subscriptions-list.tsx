@@ -28,11 +28,21 @@
  * disclosure button by default (secondary to the primary candidates table
  * above), with an "Undismiss" action per row using this same file's
  * established "Server Action -> toast -> `router.refresh()`" pattern.
+ *
+ * That disclosure is built on the shared `ExpandableCard` primitive (Phase
+ * 5b, Expandable Cards — docs/architecture/phase-5b-technical-design.md
+ * §3.3), not a hand-rolled `useState` + ghost-`Button` toggle — this
+ * migration is what closes this file's own previously-incomplete instance
+ * (`aria-expanded` set, but no `aria-controls` linking the trigger to the
+ * disclosed region; ExpandableCard's underlying Radix `Collapsible` wires
+ * both correctly, with zero extra code here). Only the toggle's own
+ * implementation changed — the dismiss/undismiss Server Action behavior and
+ * the `<Table>` markup below are unchanged.
  */
 
-import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { ChevronDown, ChevronRight } from "lucide-react"
+import { useState } from "react"
+import { ChevronRight } from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -40,7 +50,7 @@ import {
   undismissSubscriptionMerchant,
 } from "@/features/analytics/server/actions"
 import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
-import { AnimatedNumber } from "@/components/shared/motion"
+import { AnimatedNumber, ExpandableCard } from "@/components/shared/motion"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -98,10 +108,6 @@ export function SubscriptionsList({
   const router = useRouter()
   const [dismissingMerchant, setDismissingMerchant] = useState<string | null>(null)
   const [undismissingMerchant, setUndismissingMerchant] = useState<string | null>(null)
-  // Collapsed by default: this section is secondary to the candidates table
-  // above (per this file's own JSDoc) — a user only needs it when reviewing/
-  // reversing a past dismissal, not on every visit to this card.
-  const [showDismissed, setShowDismissed] = useState(false)
 
   async function handleDismiss(normalizedMerchantName: string) {
     setDismissingMerchant(normalizedMerchantName)
@@ -224,19 +230,32 @@ export function SubscriptionsList({
         )}
 
         {dismissedMerchants.length > 0 && (
-          <div className="flex flex-col gap-2 border-t pt-4">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-fit gap-1 px-2 text-muted-foreground"
-              onClick={() => setShowDismissed((current) => !current)}
-              aria-expanded={showDismissed}
+          <div className="border-t pt-4">
+            {/* Collapsed by default (ExpandableCard's own `defaultOpen =
+                false`): this section is secondary to the candidates table
+                above (per this file's own JSDoc) — a user only needs it when
+                reviewing/reversing a past dismissal, not on every visit to
+                this card. */}
+            <ExpandableCard
+              trigger={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="group w-fit gap-1 px-2 text-muted-foreground"
+                >
+                  {/* Radix Collapsible's own `data-state` drives the chevron
+                      rotation via CSS, not a second, manually-tracked open
+                      boolean — mirroring `DataTableCardList`'s identical
+                      "Show more" trigger treatment. */}
+                  <ChevronRight
+                    className="size-4 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-90"
+                    aria-hidden="true"
+                  />
+                  Dismissed merchants ({dismissedMerchants.length})
+                </Button>
+              }
             >
-              {showDismissed ? <ChevronDown /> : <ChevronRight />}
-              Dismissed merchants ({dismissedMerchants.length})
-            </Button>
-
-            {showDismissed && (
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -273,7 +292,7 @@ export function SubscriptionsList({
                   ))}
                 </TableBody>
               </Table>
-            )}
+            </ExpandableCard>
           </div>
         )}
       </CardContent>

@@ -24,6 +24,7 @@
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useChartAnimationProps } from "@/components/shared/motion"
 import type { FinancialHealthScoreHistoryPoint } from "@/features/financial-health-score/types"
 
 export interface FinancialHealthScoreHistoryChartProps {
@@ -38,6 +39,10 @@ const MIN_POINTS_FOR_TREND = 2
 export function FinancialHealthScoreHistoryChart({
   data,
 }: FinancialHealthScoreHistoryChartProps) {
+  // Chart Transitions (Phase 5b): one shared entrance/update animation gate,
+  // reduced-motion-aware — see docs/architecture/phase-5b-technical-design.md §5.1.
+  const chartAnimationProps = useChartAnimationProps()
+
   if (data.length < MIN_POINTS_FOR_TREND) {
     return (
       <Card>
@@ -98,6 +103,7 @@ export function FinancialHealthScoreHistoryChart({
                 stroke="var(--chart-1)"
                 strokeWidth={2}
                 dot={false}
+                {...chartAnimationProps}
               />
             </LineChart>
           </ResponsiveContainer>

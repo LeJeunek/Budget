@@ -424,6 +424,15 @@ export function TransactionTable({
             </div>
           )
         },
+        // Phase 5b (Expandable Cards, phase-5b-technical-design.md §3.2):
+        // tags and notes are real detail, but not what a user scanning their
+        // mobile transaction list needs at a glance — merchant/amount
+        // (already "primary") and category/account/date cover that; tags and
+        // notes move behind this card's own expand affordance instead of
+        // adding to an already-dense default card body. Unaffected in the
+        // desktop `<table>` view — `meta.cardDisplay` is read only by
+        // `DataTableCardList`.
+        meta: { cardDisplay: "expandable" },
       },
       {
         id: "notes",
@@ -433,6 +442,7 @@ export function TransactionTable({
             {row.original.notes || "—"}
           </span>
         ),
+        meta: { cardDisplay: "expandable" },
       },
       {
         id: "actions",

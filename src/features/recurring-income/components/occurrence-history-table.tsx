@@ -106,6 +106,14 @@ export function OccurrenceHistoryTable({
           : row.original.receivedAmount !== null
             ? "Manual entry"
             : "—",
+      // Phase 5b (Expandable Cards, phase-5b-technical-design.md §3.2): status
+      // + received amount (already "primary") are what a user scanning this
+      // stream's occurrence history on mobile needs at a glance — how it was
+      // received and whether it was on time are real, but secondary
+      // follow-up detail, so both move behind this card's own expand
+      // affordance, mirroring Bills' identical `OccurrenceHistoryTable`
+      // treatment.
+      meta: { cardDisplay: "expandable" },
     },
     {
       id: "onTime",
@@ -129,6 +137,7 @@ export function OccurrenceHistoryTable({
           </Badge>
         )
       },
+      meta: { cardDisplay: "expandable" },
     },
     {
       id: "actions",
