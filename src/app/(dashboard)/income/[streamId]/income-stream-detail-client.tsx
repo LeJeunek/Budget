@@ -31,6 +31,7 @@ import {
 import { OccurrenceHistoryTable } from "@/features/recurring-income/components/occurrence-history-table"
 import { IrregularEventHistoryList } from "@/features/recurring-income/components/irregular-event-history-list"
 import { LogIncomeEventButton } from "@/features/recurring-income/components/irregular-event-form"
+import { AnimatedNumber } from "@/components/shared/motion"
 import { cn, formatDate } from "@/lib/utils"
 import {
   useCurrencyDisplay,
@@ -112,7 +113,11 @@ export function IncomeStreamDetailClient({ stream }: IncomeStreamDetailClientPro
             <div className="flex flex-col gap-1">
               <span className="text-xs text-muted-foreground">Expected amount</span>
               <span className="font-heading text-lg font-semibold text-foreground">
-                {stream.expectedAmount !== null ? formatCurrency(stream.expectedAmount) : "—"}
+                {stream.expectedAmount !== null ? (
+                  <AnimatedNumber value={stream.expectedAmount} format={formatCurrency} />
+                ) : (
+                  "—"
+                )}
               </span>
             </div>
             <div className="flex flex-col gap-1">

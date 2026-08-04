@@ -12,11 +12,11 @@ import { HoldingDetailActions } from "@/features/investments/components/holding-
 import { GrowthChart } from "@/features/investments/components/growth-chart"
 import { ValueHistoryList } from "@/features/investments/components/value-history-list"
 import { DividendHistoryList } from "@/features/investments/components/dividend-history-list"
+import { HoldingDetailStatsCard } from "@/features/investments/components/holding-detail-stats-card"
 import {
   ASSET_TYPE_LABELS,
   SECTOR_LABELS,
 } from "@/features/investments/components/investment-labels"
-import { cn, formatCurrency } from "@/lib/utils"
 import { getUserPreference } from "@/features/settings/server/service"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -74,7 +74,6 @@ export default async function HoldingDetailPage({
 
   const container = containers.find((c) => c.id === holding.accountId)
   const isClosed = holding.closedAt !== null
-  const isGainNegative = holding.gainLossAmount < 0
   const totalDividends = holding.dividends.reduce((sum, d) => sum + d.amount, 0)
 
   return (
@@ -108,52 +107,14 @@ export default async function HoldingDetailPage({
         <HoldingDetailActions holding={holding} containers={containers} />
       </div>
 
-      <Card>
-        <CardContent className="grid grid-cols-1 gap-4 py-6 sm:grid-cols-4">
-          <div className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">Current value</span>
-            <span className="font-heading text-xl font-semibold text-foreground">
-              {formatCurrency(holding.currentValue, userPreference.currencyDisplay)}
-            </span>
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">Cost basis</span>
-            <span className="font-heading text-xl font-semibold text-foreground">
-              {formatCurrency(holding.costBasis, userPreference.currencyDisplay)}
-            </span>
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">Gain / loss</span>
-            <span
-              className={cn(
-                "font-heading text-xl font-semibold",
-                // Accessibility fix (docs/testing/e2e/accessibility-run-report.md's
-                // 2026-08-02 re-run, finding #1, axe `color-contrast`) — see
-                // holding-row.tsx's identical fix/comment for the full
-                // reasoning; this is Holding detail's own page-level
-                // gain/loss heading, a separate instance from that list-row
-                // component.
-                isGainNegative
-                  ? "text-red-700 dark:text-red-400"
-                  : "text-emerald-700 dark:text-emerald-400",
-              )}
-            >
-              {isGainNegative ? "" : "+"}
-              {formatCurrency(holding.gainLossAmount, userPreference.currencyDisplay)}
-              {holding.gainLossPercent !== null &&
-                ` (${holding.gainLossPercent >= 0 ? "+" : ""}${holding.gainLossPercent.toFixed(1)}%)`}
-            </span>
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">
-              Total dividend income
-            </span>
-            <span className="font-heading text-xl font-semibold text-foreground">
-              {formatCurrency(totalDividends, userPreference.currencyDisplay)}
-            </span>
-          </div>
-        </CardContent>
-      </Card>
+      <HoldingDetailStatsCard
+        currentValue={holding.currentValue}
+        costBasis={holding.costBasis}
+        gainLossAmount={holding.gainLossAmount}
+        gainLossPercent={holding.gainLossPercent}
+        totalDividends={totalDividends}
+        currencyDisplay={userPreference.currencyDisplay}
+      />
 
       <GrowthChart title="Growth history" data={growthHistory} />
 
