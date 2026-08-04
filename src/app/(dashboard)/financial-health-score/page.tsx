@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation"
 
 import { getCurrentUser } from "@/lib/auth"
-import { cn } from "@/lib/utils"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   getFinancialHealthScore,
@@ -11,6 +10,7 @@ import { getFinancialHealthScoreHistory } from "@/features/financial-health-scor
 import { FinancialHealthScoreBreakdownGrid } from "@/features/financial-health-score/components/financial-health-score-breakdown"
 import { FinancialHealthScoreNarrativeCard } from "@/features/financial-health-score/components/financial-health-score-narrative"
 import { FinancialHealthScoreHistoryChart } from "@/features/financial-health-score/components/financial-health-score-history-chart"
+import { FinancialHealthScoreHeadlineCard } from "@/features/financial-health-score/components/financial-health-score-headline-card"
 import type { FinancialHealthScoreComponentKey } from "@/features/financial-health-score/types"
 
 /**
@@ -109,27 +109,16 @@ export default async function FinancialHealthScorePage() {
         </Card>
       ) : (
         <>
-          <Card>
-            <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
-              <span className="font-heading text-5xl font-semibold text-foreground">
-                {breakdown.score}
-              </span>
-              <span
-                className={cn(
-                  "text-base font-medium",
-                  LABEL_STYLES[breakdown.label],
-                )}
-              >
-                {breakdown.label}
-              </span>
-              {missingHints.length > 0 && (
-                <p className="max-w-sm text-xs text-muted-foreground">
-                  Score based on {4 - missingHints.length} of 4 factors — add{" "}
-                  {missingHints.join(", ")} for a more complete score.
-                </p>
-              )}
-            </CardContent>
-          </Card>
+          <FinancialHealthScoreHeadlineCard
+            score={breakdown.score}
+            label={breakdown.label}
+            labelClassName={LABEL_STYLES[breakdown.label]}
+            missingHintsText={
+              missingHints.length > 0
+                ? `Score based on ${4 - missingHints.length} of 4 factors — add ${missingHints.join(", ")} for a more complete score.`
+                : null
+            }
+          />
 
           <FinancialHealthScoreBreakdownGrid breakdown={breakdown} />
           <FinancialHealthScoreNarrativeCard narrative={narrative} />
