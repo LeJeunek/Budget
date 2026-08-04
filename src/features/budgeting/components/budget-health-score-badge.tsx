@@ -1,3 +1,5 @@
+"use client"
+
 /**
  * BudgetHealthScoreBadge — renders `BudgetHealthScore` (docs/product/
  * budgeting.md AC12): a 0-100 score plus its banded label, or an explicit
@@ -22,11 +24,21 @@
  * equivalents to reuse (its palette is grayscale plus a single `destructive`
  * red), so this follows the codebase's existing precedent for this exact
  * situation rather than inventing a new custom color in `globals.css`.
+ *
+ * **Phase 5b addition (Number Counters, docs/release/phase-5b-third-pass.md):**
+ * gained its own "use client" specifically to wire `AnimatedNumber` for the
+ * score — the explicitly-documented sibling of
+ * `financial-health-score-badge.tsx`, which already had this treatment;
+ * this file was missed in the original Number Counters pass and caught by
+ * the Release Manager's third review-gate pass. `score` already arrives as
+ * a plain prop at both call sites, so no Server/Client boundary extraction
+ * was needed — only this file's own client-boundary conversion.
  */
 
 import { Gauge } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { AnimatedNumber } from "@/components/shared/motion"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import type { BudgetHealthScore } from "@/features/budgeting/types"
 
@@ -69,9 +81,11 @@ export function BudgetHealthScoreBadge({
           </span>
         ) : (
           <span className="flex items-baseline gap-2">
-            <span className="font-heading text-2xl font-semibold text-foreground">
-              {score.score}
-            </span>
+            <AnimatedNumber
+              value={score.score}
+              format={(n) => Math.round(n).toString()}
+              className="font-heading text-2xl font-semibold text-foreground"
+            />
             <span
               className={cn("text-sm font-medium", LABEL_STYLES[score.label])}
             >
