@@ -8,7 +8,7 @@ import type { Account } from "@/features/accounts/types"
 import { AddDebtButton } from "@/features/debt/components/debt-form"
 import { DebtList } from "@/features/debt/components/debt-list"
 import { StrategyComparison } from "@/features/debt/components/strategy-comparison"
-import { formatCurrency } from "@/lib/utils"
+import { TotalActiveDebtCard } from "@/features/debt/components/total-active-debt-card"
 import { getUserPreference } from "@/features/settings/server/service"
 import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -103,16 +103,10 @@ export default async function DebtPage() {
       ) : (
         <>
           {activeDebts.length > 0 && (
-            <Card>
-              <CardContent className="flex flex-wrap items-center justify-between gap-2 py-4">
-                <span className="text-sm text-muted-foreground">
-                  Total active debt
-                </span>
-                <span className="font-heading text-xl font-semibold text-foreground">
-                  {formatCurrency(totalActiveBalance, userPreference.currencyDisplay)}
-                </span>
-              </CardContent>
-            </Card>
+            <TotalActiveDebtCard
+              totalActiveBalance={totalActiveBalance}
+              currencyDisplay={userPreference.currencyDisplay}
+            />
           )}
 
           {comparisonDebts.length > 0 && (

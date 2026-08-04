@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn, formatDate } from "@/lib/utils"
 import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
+import { AnimatedNumber } from "@/components/shared/motion"
 
 export interface TransactionDetailClientProps {
   transaction: TransactionDetail
@@ -83,7 +84,7 @@ export function TransactionDetailClient({
             )}
           >
             {isExpense ? "-" : "+"}
-            {formatCurrency(Math.abs(transaction.amount))}
+            <AnimatedNumber value={Math.abs(transaction.amount)} format={formatCurrency} />
           </div>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-6">
