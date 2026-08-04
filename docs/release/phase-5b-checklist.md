@@ -6,21 +6,26 @@ follow-up (not blocking) · [!] verified FAIL, blocking this gate
 See `phase-5b-notes.md` for the first-pass full review,
 `phase-5b-second-pass.md` for the second pass's full reasoning,
 `phase-5b-third-pass.md` for the third pass's full reasoning,
-`phase-5b-fourth-pass.md` for the fourth pass's full reasoning, and
-`phase-5b-fifth-pass.md` for this fifth pass's full reasoning.
-**Gate status: REJECTED (fifth pass) — Phase 5b is still NOT closed.** The
-fourth pass's blocking finding (`/financial-health-score`'s own headline
-score span) is fixed and confirmed — but this fifth pass's own required
-independent sweep (a genuinely new detection mechanism: re-deriving AC6's
-own ten-surface list from the product spec verbatim and checking every named
-sub-clause individually) found a new, previously-uncaught blocking item
-below (`budget-category-row.tsx`'s own per-category "percent used" label —
-named by AC6's "category-row progress" phrase and AC4's "budget... progress
-percentages" phrase, styled with no `font-semibold`/`font-bold` weight class
-at all). It must be fixed and this gate re-run (a sixth pass) before Phase
-5b — and therefore Phase 5 in full — can close.
+`phase-5b-fourth-pass.md` for the fourth pass's full reasoning,
+`phase-5b-fifth-pass.md` for the fifth pass's full reasoning, and
+`phase-5b-sixth-pass.md` for this sixth pass's full reasoning.
+**Gate status: REJECTED (sixth pass) — Phase 5b is still NOT closed.** The
+fifth pass's blocking finding (`budget-category-row.tsx`'s percent-used
+label) is fixed and confirmed, along with a broader proactive sweep (commit
+`12d1d52`) that fixed seven more instances of the same "secondary caption
+under an already-wired headline" pattern across Financial Goals/Goals/Debt/
+Budgeting. But this sixth pass's own required independent judgment check on
+that same commit's "left correctly unwired" list found that one of its own
+dismissals — `strategy-comparison.tsx`'s "total interest paid" figure,
+carried forward unchanged from the third pass's own reasoning — no longer
+held once that same commit wired `debt-card.tsx`'s previously-un-animated
+sibling captions, the exact precedent the dismissal's own reasoning depended
+on. Fixed directly (commit follows), live-verified genuinely animating. This
+is the seventh instance of a "named-or-implied AC6 figure skipped" defect
+shape this phase has produced, and the first that is a stale re-affirmed
+dismissal rather than a newly-discovered surface.
 
-## Blocking (found by the fifth pass)
+## Blocking (found by the sixth pass, now fixed)
 
 - [!] **Number Counters' Definition of Done ("all ten AC6 surfaces... each
       confirmed to animate") still not met — a sixth instance found.**

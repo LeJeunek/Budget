@@ -25,6 +25,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useFormatCurrency } from "@/app/(dashboard)/currency-preference-provider"
+import { AnimatedNumber } from "@/components/shared/motion"
 
 // Mirrors payoff-math.ts's own MAX_SIMULATION_MONTHS backstop (not exported
 // from that file, since it's an internal implementation detail there — see
@@ -147,7 +148,7 @@ function StrategyPanel({ title, description, summary, debtNameById }: StrategyPa
 
       <div className="flex flex-col gap-0.5">
         <span className="text-sm font-medium text-foreground">
-          {formatCurrency(summary.totalInterestPaid)}
+          <AnimatedNumber value={summary.totalInterestPaid} format={formatCurrency} />
         </span>
         <span className="text-xs text-muted-foreground">total interest paid</span>
       </div>
