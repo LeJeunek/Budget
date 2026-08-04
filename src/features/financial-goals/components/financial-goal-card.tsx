@@ -221,7 +221,11 @@ function DebtPayoffProgress({ goal }: { goal: FinancialGoalWithProgress }) {
           starting balance
         </span>
         <span className="text-xs text-muted-foreground">
-          {Math.round(percentPaidOff)}% paid off
+          <AnimatedNumber
+            value={percentPaidOff}
+            format={(n) => `${Math.round(n)}%`}
+          />{" "}
+          paid off
         </span>
         {balanceIncreasedSinceStart && (
           <span className="text-xs text-muted-foreground">
@@ -259,9 +263,11 @@ function NetWorthSavingsProgress({ goal }: { goal: FinancialGoalWithProgress }) 
         <span className="text-xs text-muted-foreground">
           {goal.measurementBasis ? MEASUREMENT_BASIS_LABELS[goal.measurementBasis] : ""}
           {" · "}
-          {distanceToTarget > 0
-            ? `${formatCurrency(distanceToTarget)} to go`
-            : `${formatCurrency(Math.abs(distanceToTarget))} over target`}
+          <AnimatedNumber
+            value={Math.abs(distanceToTarget)}
+            format={formatCurrency}
+          />{" "}
+          {distanceToTarget > 0 ? "to go" : "over target"}
         </span>
       </div>
       {goal.trend && goal.trend.length > 0 && (
@@ -291,7 +297,7 @@ function SavingsRateProgress({ goal }: { goal: FinancialGoalWithProgress }) {
           format={(n) => `${n.toFixed(1)}%`}
         />{" "}
         <span className="text-sm font-normal text-muted-foreground">
-          &rarr; target {targetPercent}%
+          &rarr; target <AnimatedNumber value={targetPercent} format={(n) => `${n}%`} />
         </span>
       </span>
       <span className="text-xs text-muted-foreground">

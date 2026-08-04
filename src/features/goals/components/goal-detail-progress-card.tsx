@@ -69,7 +69,7 @@ export function GoalDetailProgressCard({
           {goal.overageAmount > 0 ? (
             <span className="text-sm text-muted-foreground">
               <AnimatedNumber value={goal.overageAmount} format={formatCurrency} /> over
-              your {formatCurrency(goal.targetAmount)} target
+              your <AnimatedNumber value={goal.targetAmount} format={formatCurrency} /> target
             </span>
           ) : (
             <span className="text-sm text-muted-foreground">

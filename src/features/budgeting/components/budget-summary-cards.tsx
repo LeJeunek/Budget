@@ -91,7 +91,10 @@ export function BudgetSummaryCards({
       <p className="rounded-md border border-dashed border-border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
         Uncategorized spending this month:{" "}
         <span className="font-medium text-foreground">
-          {formatCurrency(uncategorizedSpent, currency)}
+          <AnimatedNumber
+            value={uncategorizedSpent}
+            format={(n) => formatCurrency(n, currency)}
+          />
         </span>
       </p>
     </div>

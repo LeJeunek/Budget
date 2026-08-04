@@ -167,7 +167,8 @@ export function DebtCard({ debt, eligibleAccounts }: DebtCardProps) {
               className="font-heading text-2xl font-semibold text-foreground"
             />
             <span className="text-xs text-muted-foreground">
-              {debt.interestRate}% APR &middot; {formatCurrency(debt.minimumPayment)}
+              {debt.interestRate}% APR &middot;{" "}
+              <AnimatedNumber value={debt.minimumPayment} format={formatCurrency} />
               /mo minimum
             </span>
           </div>
@@ -189,8 +190,11 @@ export function DebtCard({ debt, eligibleAccounts }: DebtCardProps) {
                 </span>
               </p>
               <p className="text-xs text-muted-foreground">
-                {formatCurrency(debt.totalInterestRemaining ?? 0)} total interest
-                remaining at minimum payment
+                <AnimatedNumber
+                  value={debt.totalInterestRemaining ?? 0}
+                  format={formatCurrency}
+                />{" "}
+                total interest remaining at minimum payment
               </p>
               {debt.isEstimate && (
                 <p className="text-xs text-muted-foreground">

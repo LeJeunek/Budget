@@ -194,12 +194,12 @@ export function GoalCard({ goal }: GoalCardProps) {
             </span>
             {goal.overageAmount > 0 ? (
               <span className="text-xs text-muted-foreground">
-                {formatCurrency(goal.overageAmount)} over your{" "}
-                {formatCurrency(goal.targetAmount)} target
+                <AnimatedNumber value={goal.overageAmount} format={formatCurrency} /> over your{" "}
+                <AnimatedNumber value={goal.targetAmount} format={formatCurrency} /> target
               </span>
             ) : (
               <span className="text-xs text-muted-foreground">
-                {formatCurrency(goal.remainingAmount)} remaining
+                <AnimatedNumber value={goal.remainingAmount} format={formatCurrency} /> remaining
               </span>
             )}
             <EstimatedCompletionLine goal={goal} />
