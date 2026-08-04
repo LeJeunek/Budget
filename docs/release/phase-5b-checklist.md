@@ -7,55 +7,74 @@ See `phase-5b-notes.md` for the first-pass full review,
 `phase-5b-second-pass.md` for the second pass's full reasoning,
 `phase-5b-third-pass.md` for the third pass's full reasoning,
 `phase-5b-fourth-pass.md` for the fourth pass's full reasoning,
-`phase-5b-fifth-pass.md` for the fifth pass's full reasoning, and
-`phase-5b-sixth-pass.md` for this sixth pass's full reasoning.
-**Gate status: REJECTED (sixth pass) — Phase 5b is still NOT closed.** The
-fifth pass's blocking finding (`budget-category-row.tsx`'s percent-used
-label) is fixed and confirmed, along with a broader proactive sweep (commit
-`12d1d52`) that fixed seven more instances of the same "secondary caption
-under an already-wired headline" pattern across Financial Goals/Goals/Debt/
-Budgeting. But this sixth pass's own required independent judgment check on
-that same commit's "left correctly unwired" list found that one of its own
-dismissals — `strategy-comparison.tsx`'s "total interest paid" figure,
-carried forward unchanged from the third pass's own reasoning — no longer
-held once that same commit wired `debt-card.tsx`'s previously-un-animated
-sibling captions, the exact precedent the dismissal's own reasoning depended
-on. Fixed directly (commit follows), live-verified genuinely animating. This
-is the seventh instance of a "named-or-implied AC6 figure skipped" defect
-shape this phase has produced, and the first that is a stale re-affirmed
-dismissal rather than a newly-discovered surface.
+`phase-5b-fifth-pass.md` for the fifth pass's full reasoning,
+`phase-5b-sixth-pass.md` for the sixth pass's full reasoning, and
+`phase-5b-seventh-pass.md` for this seventh, final pass's full reasoning.
 
-## Blocking (found by the sixth pass, now fixed)
+**Gate status: APPROVED (seventh pass). Phase 5b is closed, and Phase 5 is
+complete.** The sixth pass's blocking finding
+(`strategy-comparison.tsx`'s "total interest paid" figure — a stale
+"correctly out of scope" dismissal whose supporting precedent had been
+overturned by the same commit that carried it forward) is fixed and
+confirmed, live-verified sampling the exact same fixture value the sixth
+pass recorded static (`$723.77`) now genuinely counting up. This seventh
+pass's own required final audit — a targeted re-read of every remaining
+"correctly out of scope" judgment call across all six prior passes, checking
+specifically for the same stale-precedent defect class the sixth pass
+discovered — found no eighth instance. All automated checks pass fresh,
+live. Security and Performance sign-offs hold, unaffected by a fix that
+touches exactly one source file, two insertions, one deletion. Phase 5b —
+and with it, Phase 5 in full (motion/transitions, accessibility,
+responsive/mobile) — is complete.
 
-- [!] **Number Counters' Definition of Done ("all ten AC6 surfaces... each
-      confirmed to animate") still not met — a sixth instance found.**
-      `src/features/budgeting/components/budget-category-row.tsx` renders
-      each budget category row's own "percent of allocation used" figure
-      (paired with a `Progress` linear bar) as a plain, unformatted
-      `{Math.round(line.percentUsed as number)}%`, styled `text-xs
-      font-medium tabular-nums` — no `font-semibold`/`font-bold` anywhere in
-      the file, and no `AnimatedNumber` import anywhere in the file. This is
-      the exact semantic counterpart of `ProgressRing`'s own already-
-      universally-animated default label, just paired with the app's other
-      progress-indicator primitive instead. AC6 names this figure directly
-      (*"Budgeting (`/budgeting`, **category-row progress** + summary
-      cards)"*) and AC4 names its figure-type directly (*"goal/**budget**/
-      debt-payoff progress **percentages**... one consistent counting
-      treatment"*) — not an inferred or judgment-call surface. Live-sampled
-      on a real seeded page load alongside a genuinely-animating `StatCard`
-      dollar figure on the same page (a positive control confirming the
-      sampling method itself is capable of catching a real animation on
-      this exact page, re-run twice with consistent results): the
-      percent-used label stayed static at `14%` across fifteen samples
-      (re-confirmed on a second, independent run across sixteen samples)
-      while the dollar figure genuinely counted up
-      (`$250.34 -> $293.99 -> ... -> $400.00`) in the same run. See
-      `phase-5b-fifth-pass.md` §2 for the full reasoning, the negative
-      checks confirming no seventh instance elsewhere, and the concrete,
-      one-line fix (a trivial in-place `AnimatedNumber` wrap — this file is
-      already a Client Component, no boundary extraction needed).
+## RESOLVED (sixth pass's blocking item — confirmed fixed by this seventh pass)
 
-## RESOLVED (fourth pass's blocking item — confirmed fixed by this fifth pass)
+- [x] `src/features/debt/components/strategy-comparison.tsx`'s "total
+      interest paid" figure — the third pass's original "correctly out of
+      scope" dismissal (a secondary caption, justified by comparison to
+      `debt-card.tsx`'s then-un-animated sibling captions) went stale once
+      `12d1d52` wired those exact sibling captions, but was carried forward
+      unchanged by that same commit's own "left correctly unwired" list. The
+      sixth pass caught this and re-derived the figure as genuinely in scope
+      (Debt's "payoff figures," none of AC7's three exclusions apply). Fixed
+      by a trivial in-place `AnimatedNumber` wrap (`17e4336`) — the file
+      already carried `"use client"` and the `formatCurrency` closure. Live-
+      verified sampling the exact fixture value the sixth pass recorded
+      fully static (`$723.77`, 18/18 samples flat) now genuinely counting up
+      (`$723.77 -> $61.55 -> ... -> $723.77`, 11 distinct values across 20
+      samples). See `phase-5b-seventh-pass.md` §1.
+- [x] **Final stale-dismissal audit (this seventh pass's own required
+      check).** Every other "correctly out of scope" judgment call across
+      all six prior passes was re-derived against the codebase's *current*
+      state, not trusted on citation alone. The only other citation of the
+      same now-stale precedent (the fifth pass's non-blocking note on
+      `financial-goal-card.tsx`'s `percentPaidOff`/`targetPercent`
+      captions) was already independently fixed by `12d1d52`'s own proactive
+      sweep before it could ever surface as a live gap.
+      `holding-detail-stats-card.tsx`'s `gainLossPercent` parenthetical (the
+      one remaining dismissal sharing this bug class's structural shape) was
+      re-derived from scratch and both of its supporting premises still
+      independently hold — no sibling of its exact shape exists anywhere in
+      the app, and it falls outside AC4's own enumerated percentage
+      categories. No eighth instance found. See `phase-5b-seventh-pass.md`
+      §3.
+
+## RESOLVED (fifth pass's blocking item — confirmed fixed by the sixth pass, re-confirmed unaffected by this seventh pass)
+
+- [x] `src/features/budgeting/components/budget-category-row.tsx` — each
+      budget category row's own "percent of allocation used" figure now
+      wrapped in `AnimatedNumber` (trivial in-place wrap; the file was
+      already a Client Component). Confirmed by direct source/diff re-read
+      and a live Playwright run showing a genuine count-up
+      (`14% -> 0% -> 3% -> ... -> 14%`). The same fix commit (`12d1d52`)
+      proactively swept and fixed seven more instances of the same
+      "secondary caption under an already-wired headline" pattern across
+      `budget-summary-cards.tsx`, `debt-card.tsx` (×2), `goal-card.tsx`/
+      `goal-detail-progress-card.tsx`, and `financial-goal-card.tsx` (×3) —
+      all six independently confirmed genuine and correctly shaped by the
+      sixth pass. See `phase-5b-sixth-pass.md` §1–§2.
+
+## RESOLVED (fourth pass's blocking item — confirmed fixed by the fifth pass, re-confirmed unaffected since)
 
 - [x] `src/app/(dashboard)/financial-health-score/page.tsx`'s own big
       headline score — now wrapped in `AnimatedNumber` via new
@@ -67,7 +86,7 @@ dismissal rather than a newly-discovered surface.
       subscore grid (positive control) on the same page load. See
       `phase-5b-fifth-pass.md` §1.
 
-## RESOLVED (third pass's blocking item — confirmed fixed by the fourth pass, re-confirmed unaffected by this fifth pass)
+## RESOLVED (third pass's blocking item — confirmed fixed by the fourth pass, re-confirmed unaffected since)
 
 - [x] `src/features/budgeting/components/budget-health-score-badge.tsx` —
       score now wrapped in `AnimatedNumber` (`"use client"` added, identical
@@ -78,7 +97,7 @@ dismissal rather than a newly-discovered surface.
       `/budgeting` (`100 -> 6 -> 19 -> ... -> 100`). See
       `phase-5b-fourth-pass.md` §1.
 
-## RESOLVED (second pass's blocking item — confirmed fixed by the third pass, re-confirmed unaffected by the fourth and fifth passes)
+## RESOLVED (second pass's blocking item — confirmed fixed by the third pass, re-confirmed unaffected since)
 
 - [x] `src/app/(dashboard)/debt/page.tsx` — "Total active debt" now wrapped
       in `AnimatedNumber` via new `total-active-debt-card.tsx`. See
@@ -87,10 +106,13 @@ dismissal rather than a newly-discovered surface.
       — headline transaction amount now wrapped in `AnimatedNumber`
       (proactive fix). See `phase-5b-third-pass.md` §2.
 - [x] `src/features/debt/components/strategy-comparison.tsx`'s "total
-      interest paid" figure — confirmed correctly out of scope (a secondary
-      caption, not a second headline). See `phase-5b-third-pass.md` §2.
+      interest paid" figure — the third pass's own original dismissal here
+      ("correctly out of scope, a secondary caption") is the judgment call
+      that later went stale and was fixed by the sixth/seventh passes above;
+      recorded here for the historical record, superseded by the RESOLVED
+      entry at the top of this checklist.
 
-## RESOLVED (first pass's blocking item — confirmed fixed by the second pass, re-confirmed unaffected by the third, fourth, and fifth passes)
+## RESOLVED (first pass's blocking item — confirmed fixed by the second pass, re-confirmed unaffected since)
 
 - [x] `src/app/(dashboard)/income/[streamId]/income-stream-detail-client.tsx`
       — "Expected amount" wrapped in `AnimatedNumber`. See
@@ -98,72 +120,82 @@ dismissal rather than a newly-discovered surface.
 - [x] `src/app/(dashboard)/investments/[holdingId]/page.tsx` — all four
       headline figures wrapped via `holding-detail-stats-card.tsx`. Its
       `gainLossPercent` inline parenthetical annotation confirmed correctly
-      out of scope (a same-span annotation of an already-animating figure).
-      See `phase-5b-second-pass.md` §1, `phase-5b-third-pass.md` §3.
+      out of scope (a same-span annotation of an already-animating figure)
+      — re-derived from scratch, not merely re-cited, by the seventh pass's
+      own final stale-dismissal audit; both of its supporting premises
+      independently still hold. See `phase-5b-second-pass.md` §1,
+      `phase-5b-third-pass.md` §3, `phase-5b-seventh-pass.md` §3.2.
 - [x] `tests/e2e/support/axe.ts`'s 700ms fixed-buffer addition — confirmed
-      sound and still holding under this fifth pass's own fresh, live,
-      clean 45/45 Playwright run. See `phase-5b-second-pass.md` §2.
+      sound and still holding under every subsequent pass's own fresh, live,
+      clean 45/45 Playwright run, through this seventh pass. See
+      `phase-5b-second-pass.md` §2.
 
-## Non-blocking, adjacent observation (fifth pass, recorded for completeness)
+## RESOLVED (fifth pass's non-blocking observation — confirmed fixed by the sixth pass)
 
-- [~] `src/features/financial-goals/components/financial-goal-card.tsx`'s
-      `SavingsRateProgress` renders `→ target {targetPercent}%` as static
-      text beside its own already-wired current-rate `AnimatedNumber` —
-      inconsistent with its own file's `NetWorthSavingsProgress` sibling,
-      whose equivalent target *amount* is wired. Judged non-blocking (no AC6/
-      AC4 clause names a "target percentage" sub-figure specifically, and it
-      is a rarely-changing configured value, not a fluctuating progress
-      figure) but flagged as a strongly-recommended fix in the same commit
-      that closes the blocking finding above. See `phase-5b-fifth-pass.md`
-      §2.
+- [x] `src/features/financial-goals/components/financial-goal-card.tsx`'s
+      `SavingsRateProgress` target-percentage caption and `DebtPayoffProgress`'s
+      `percentPaidOff` caption — both wrapped in `AnimatedNumber` by
+      `12d1d52`'s proactive sweep, closing the fifth pass's own strongly-
+      recommended (non-blocking) note. This independently pre-empted a
+      second stale-dismissal instance the seventh pass's own audit would
+      otherwise have found: the fifth pass's note on `percentPaidOff` cited
+      the same now-overturned `debt-card.tsx` precedent
+      `strategy-comparison.tsx`'s dismissal did, but the figure it was
+      protecting was already fixed before that staleness could surface as a
+      live gap. See `phase-5b-sixth-pass.md` §2.4,
+      `phase-5b-seventh-pass.md` §3.1.
 
 ## Product / Architecture artifacts
 
 - [x] Product Owner spec (`docs/product/phase-5b-motion-craft.md`) — every
       capability's AC and Definition of Done checked against real evidence
-      across all five passes, including this fifth pass's own from-scratch
+      across all seven passes, including the fifth pass's own from-scratch
       re-derivation of AC6's full ten-surface list against shipped code
-      (not against any prior pass's own summary of it). The spec itself is
-      sound and internally consistent; every blocking gap found across all
-      five passes is an implementation-completeness failure against the
-      spec, not a defect in the spec's own scope definition.
+      (not against any prior pass's own summary of it), and the seventh
+      pass's own final audit re-deriving every remaining exclusion against
+      AC4/AC6/AC7's own text directly. The spec itself is sound and
+      internally consistent; every gap found across all seven passes was
+      either an implementation-completeness failure against the spec or a
+      stale re-affirmation of an otherwise-correct judgment call — never a
+      defect in the spec's own scope definition.
 - [x] Solution Architect design (`docs/architecture/phase-5b-technical-design.md`)
       — confirmed matching shipped code by direct inspection across all
-      five passes.
+      seven passes.
 - [x] CTO Phase 5b resolution pass + Follow-up re-check (`roadmap.md`) —
       Number Counters' AC1/AC6 reconciliation confirmed sound; not reopened
-      by any pass's findings (each is a completeness gap against an
-      already-correct scope definition).
+      by any pass's findings (each is a completeness gap or stale-dismissal
+      gap against an already-correct scope definition).
 - [x] Risk register (`docs/planning/risk-register.md` rows #40, #44, #52,
       #53, #55–#59) — all eight reviewed rows in a coherent final state, no
-      row dangling or falsely marked resolved. See `phase-5b-notes.md` §7;
-      unaffected by this fifth pass's finding (a completeness gap, not a
-      visual regression — same reasoning as every prior pass's row #52
-      discussion).
+      row dangling or falsely marked resolved. See `phase-5b-notes.md` §7,
+      re-confirmed unaffected by every subsequent pass including this
+      seventh (`phase-5b-seventh-pass.md` §5).
 
-## Automated checks (re-run live by all five passes)
+## Automated checks (re-run live by all seven passes)
 
-- [x] `npm run typecheck` — clean, 0 errors (all five passes).
-- [x] `npm run lint` — clean, 0 errors/warnings (all five passes).
-- [x] `npx vitest run` — 633/633 tests passing, 52 test files (all five
+- [x] `npm run typecheck` — clean, 0 errors (all seven passes).
+- [x] `npm run lint` — clean, 0 errors/warnings (all seven passes).
+- [x] `npx vitest run` — 633/633 tests passing, 52 test files (all seven
       passes, identical count — no pass's changes touch unit-tested
       surface).
-- [x] `npm run seed:e2e` — ran fresh in all five passes;
+- [x] `npm run seed:e2e` — ran fresh in all seven passes;
       `tests/e2e/support/fixture-ids.json` restored to its committed
       placeholder form afterward each time (confirmed via `git status`
       showing no diff on that file).
 - [x] `npx playwright test accessibility --project=desktop --workers=1
-      --reporter=list` — **45/45 passing** in all five passes (9
+      --reporter=list` — **45/45 passing** in all seven passes (9
       `accent-contrast.spec.ts` + 6 `reduced-motion.spec.ts` + 28
-      `route-a11y.spec.ts` + 2 setup logins). This fifth pass's own run was
+      `route-a11y.spec.ts` + 2 setup logins). This seventh pass's own run was
       a single clean run with no flake observed; note this suite verifies
       zero critical/serious axe violations and the reduced-motion end-state
       contract, not the Number Counters mount-animation contract, so its
-      passing does not contradict this pass's own finding.
+      passing does not substitute for this pass's own live-sampling
+      verification of the specific fixed figure.
 - [x] `git status`/`git log` — working tree clean at the start and end of
-      all five reviews (aside from the expected, accepted
+      all seven reviews (aside from the expected, accepted
       `docs/testing/e2e/accessibility-report.md` timestamp regeneration).
-      `HEAD` at `25fb0e7` for this fifth pass, matching its stated scope.
+      `HEAD` at `17e4336` for this seventh, final pass, matching its stated
+      scope.
 
 ## Reduced-Motion Foundation
 
@@ -172,7 +204,7 @@ dismissal rather than a newly-discovered surface.
       correctly composed.
 - [x] **RESOLVED (first pass's own Bug Hunter pass).** Fresh-page-load race
       — fixed, confirmed by direct source read and a live-passing E2E test
-      in all five passes.
+      in all seven passes.
 - [x] **RESOLVED (first pass's own Bug Hunter pass).** Mid-session
       reduced-motion re-enable not resuming animation — fixed via
       `useSyncExternalStore`-based hook, confirmed by direct source read.
@@ -181,16 +213,29 @@ dismissal rather than a newly-discovered surface.
 
 ## Number Counters
 
-- [!] **BLOCKING — see above.** Nine of AC6's ten named surfaces (and the
-      "summary cards" half of Budgeting's own tenth-line two-part
-      description) now have every headline figure confirmed correctly
-      wired; that same tenth line's "category-row progress" half is not.
-- [x] **RESOLVED (this fifth pass).** `/financial-health-score`'s own
-      headline score span. See §1 above and `phase-5b-fifth-pass.md` §1.
+- [x] **CLOSED.** All ten of AC6's named surfaces, and every named
+      sub-clause within each (Budgeting's "category-row progress" +
+      "summary cards," Financial Health Score's "the score itself" +
+      "subscores"), confirmed correctly wired to `AnimatedNumber`, plus the
+      one stale-dismissal instance (`strategy-comparison.tsx`'s "total
+      interest paid," AC6's Debt "payoff figures") fixed and live-verified.
+      This closed only after seven consecutive Release Manager passes each
+      independently caught one further instance of this phase's own
+      recurring "named-or-implied AC6 figure skipped" defect shape — see the
+      RESOLVED sections above for the full chain, and
+      `phase-5b-seventh-pass.md` §3 for the final audit confirming no eighth
+      instance remains.
+- [x] **RESOLVED (seventh pass).** `strategy-comparison.tsx`'s "total
+      interest paid" figure (Debt).
+- [x] **RESOLVED (sixth pass).** `budget-category-row.tsx`'s per-category
+      percent-used label, plus seven proactively-fixed sibling captions
+      across Budgeting/Debt/Goals/Financial Goals.
+- [x] **RESOLVED (fifth pass).** `/financial-health-score`'s own headline
+      score span.
 - [x] **RESOLVED (fourth pass).** `BudgetHealthScoreBadge`'s score, on both
       `/budgeting` and the Dashboard.
-- [x] **RESOLVED (second pass, re-confirmed by the third, fourth, and fifth
-      passes).** Debt's page-level "Total active debt" aggregate.
+- [x] **RESOLVED (second pass, re-confirmed since).** Debt's page-level
+      "Total active debt" aggregate.
 - [x] **RESOLVED (third pass, proactive fix).** Transaction detail's
       headline amount.
 - [x] **RESOLVED (second pass's own re-verification).** Recurring Income
@@ -201,7 +246,18 @@ dismissal rather than a newly-discovered surface.
 - [x] Duration bound (`NUMBER_COUNTER_DURATION_MS = 600`), single shared
       formatting pipeline, and the null/zero-crossing edge cases all
       confirmed by direct read of `animated-number.tsx`, and reconfirmed
-      live across all five passes.
+      live across all seven passes.
+- [x] `holding-detail-stats-card.tsx`'s `gainLossPercent` inline
+      parenthetical — the one remaining figure in this phase sharing the
+      sixth pass's stale-dismissal defect shape — re-derived from scratch by
+      the seventh pass's own final audit and confirmed still genuinely
+      correctly out of scope (no sibling of its exact shape exists anywhere
+      in the app; falls outside AC4's own enumerated percentage
+      categories). Investments' `dividend-history-list.tsx`/
+      `value-history-list.tsx` (never individually named by any prior pass)
+      directly confirmed correctly row-level-excluded on the same
+      established grounds as every other history/list table in the app. See
+      `phase-5b-seventh-pass.md` §3.2–§3.3.
 
 ## Chart Transitions
 
@@ -210,7 +266,7 @@ dismissal rather than a newly-discovered surface.
       `FadeIn`.
 - [x] Risk #56 — measured non-issue, per the Performance Engineer's direct
       frame-timing capture.
-- [x] This fifth pass's own negative check confirmed no chart renders a
+- [x] The fifth pass's own negative check confirmed no chart renders a
       headline figure via custom SVG `<text>` content that would bypass
       both Chart Transitions' native-animation mechanism and Number
       Counters' `AnimatedNumber` mechanism. See `phase-5b-fifth-pass.md` §2.
@@ -232,110 +288,110 @@ dismissal rather than a newly-discovered surface.
       `ExpandableCard` primitive directly.
 - [x] **RESOLVED (first pass's own Bug Hunter pass).** `aria-controls`
       missing while collapsed — fixed, confirmed by direct source read and
-      a live-passing E2E test across all five passes.
+      a live-passing E2E test across all seven passes.
 - [x] Risk #59 — spot-checked; no misannotation found.
 
 ## Cross-Cutting GPU-Compositable-Properties Bar
 
 - [x] No undocumented third exception found beyond the two named ones,
-      confirmed across all five passes' own source reads and the
+      confirmed across all seven passes' own source reads and the
       Performance Engineer's independent review.
 
 ## Security
 
 - [x] Security Architect review (`docs/security/phase-5b-security-review.md`)
-      — APPROVE, confirmed still current across all five passes: `25fb0e7`
-      touches only two source-adjacent files (`financial-health-score/
-      page.tsx`, the new `financial-health-score-headline-card.tsx`) plus
-      the auto-generated accessibility report — no new Server Action, Route
-      Handler, or query-layer change, confirmed via a direct `git diff
-      --stat` this fifth pass ran itself. This fifth pass's own new finding
-      (§2 of `phase-5b-fifth-pass.md`) is, once fixed, a pure display-layer
-      change with no security surface of its own, matching every prior
-      instance's fix shape.
+      — APPROVE, confirmed still current through this seventh, final pass:
+      every fix commit across all seven passes' own `git diff --stat`
+      touches only display-layer feature files (an `AnimatedNumber` import
+      plus an in-place wrap, or a small Client Component boundary extraction
+      receiving plain serializable props) — no new Server Action, Route
+      Handler, or query-layer change at any point in this chain. This
+      seventh pass's own re-check (`git diff --stat 12d1d52..17e4336`)
+      confirms the final fix is a one-file, two-insertion/one-deletion
+      source diff. See `phase-5b-seventh-pass.md` §4.
 
 ## Performance
 
 - [x] Performance Engineer review
       (`docs/performance/phase-5b-performance-review.md`) — APPROVE, two
       non-blocking findings, confirmed still current and unaffected by
-      anything since, across all five passes.
+      anything since, across all seven passes.
 
 ## Bug Hunter
 
 - [x] 4 findings total (first-pass gate), all 4 fixed and independently
       re-verified against each bug report's own root cause.
-- [!] The systematic per-surface sweep the Definition of Done calls for
-      still has not actually been completed: after the Savings Goal detail
-      finding (Bug Hunter), the first-pass Release Manager's own two-surface
-      finding, the second-pass Release Manager's own Debt-aggregate
-      finding, the third-pass Release Manager's own `BudgetHealthScoreBadge`
-      finding, and the fourth-pass Release Manager's own Financial Health
-      Score headline-score finding, this fifth pass's own independent sweep
-      — using a genuinely new detection mechanism, not a repeat of any prior
-      grep pattern — found a *sixth* instance of the identical gap shape
-      (`budget-category-row.tsx`'s own per-category percent-used label,
-      named by both AC6's "category-row progress" phrase and AC4's "budget
-      progress percentages" phrase). See Blocking, above.
+- [x] **CLOSED.** The systematic per-surface sweep the Number Counters
+      Definition of Done called for was never produced as a standalone
+      artifact, but was effectively completed the hard way: seven
+      consecutive Release Manager passes, each independently catching one
+      further instance of the same "named-or-implied AC6 figure skipped"
+      defect shape (two full-surface misses, a page-level aggregate, two
+      score badges, one percent-used label, and one stale re-affirmed
+      dismissal), until the seventh pass's own final, dedicated
+      stale-dismissal audit found no further instance. Recorded here as a
+      standing lesson for future phases: a per-component pass/fail
+      checklist enumerated against the spec's own text from the start would
+      have caught all eight instances on the first sweep rather than one at
+      a time across seven review rounds.
 
 ## Documentation
 
 - [x] Product spec, architecture design doc, both Security/Performance
       reviews, all four bug reports, and the E2E reduced-motion report/spec
       — all internally consistent with shipped code, confirmed by direct
-      source inspection across all five passes.
+      source inspection across all seven passes.
 - [x] `docs/planning/risk-register.md` — all eight reviewed rows in a
       coherent final state, no dangling rows.
 
 ## Overall Gate Decision
 
-**REJECT (fifth pass). Phase 5b is not closed.**
+**APPROVE (seventh pass). Phase 5b is closed, and Phase 5 is complete.**
 
-The fourth pass's blocking finding (`/financial-health-score`'s own headline
-score span) is genuinely fixed, independently confirmed by both direct
-source review and live Playwright verification against the real seeded
-database, using the page's own already-wired subscore grid as a positive
-control.
+The sixth pass's blocking finding — `strategy-comparison.tsx`'s "total
+interest paid" figure, a stale "correctly out of scope" dismissal whose
+supporting precedent had been overturned earlier in the same commit that
+carried it forward unchanged — is genuinely fixed, independently confirmed
+both by direct source/diff review and by live browser verification sampling
+the exact fixture value the sixth pass recorded fully static, now genuinely
+counting up.
 
-But this fifth pass's own required independent sweep — deliberately using a
-genuinely new detection mechanism (re-deriving AC6's own ten-surface list
-from the product spec verbatim and checking every named sub-clause
-individually against shipped code, rather than any className- or
-field-name-based grep the five prior findings' own fix commits and Release
-Manager passes had each already used) — found a sixth, previously-uncaught
-instance of the identical defect shape: `budget-category-row.tsx`'s own
-per-category "percent used" label, named explicitly by both AC6
-("category-row progress") and AC4 ("budget... progress percentages"),
-styled with no `font-semibold`/`font-bold` weight class at all — the one
-styling convention no prior pass's grep pattern could ever have matched.
-Live-sampled on the same page, in the same run, alongside a genuinely-
-animating dollar figure (a positive control, re-run twice with consistent
-results), the percent-used label was confirmed fully static while the
-dollar figure genuinely counted up. Number Counters' binding Definition of
-Done ("all ten [AC6] surfaces... each confirmed to animate") still does not
-hold. Per this project's own standing "trust but verify" discipline, now
-exercised for a sixth time on this exact capability, with genuinely no
-exception made for how many rounds this has taken, this is a genuine,
-confirmed gap, not a nitpick, and this release cannot be approved with it
-open.
+This seventh pass's own required final audit — a targeted re-read of every
+remaining "correctly out of scope" judgment call across all six prior
+passes' own reasoning, checking specifically for the same stale-precedent
+defect class the sixth pass discovered, not a new sweep for previously-
+undiscovered surfaces — found no eighth instance. The only other citation of
+the now-overturned precedent had already been independently fixed by the
+same commit that created the staleness, before it could ever surface as a
+live gap. The one remaining dismissal sharing this defect class's structural
+shape (`holding-detail-stats-card.tsx`'s `gainLossPercent` parenthetical) was
+re-derived from scratch against the codebase's current state, and both of
+its supporting premises independently still hold. Every row-level exclusion
+this phase has produced (Transactions, Bills, Recurring Income, Analytics,
+Investments' two history lists) rests on AC7's own named exclusion or a
+structural distinction that does not depend on any other figure's wired
+state, and therefore cannot go stale the way `strategy-comparison.tsx`'s did.
 
-**Required before re-review:** wire `AnimatedNumber` into
-`budget-category-row.tsx`'s percent-used label — a trivial in-place wrap (no
-`"use client"` addition needed; this file is already a Client Component),
-the same "trivial fix" shape `income-stream-detail-client.tsx`'s and
-`transaction-detail-client.tsx`'s own fixes both were. **Strongly
-recommended, not required, in the same commit:** also fix the related,
-lower-confidence `SavingsRateProgress` target-percentage inconsistency
-(`financial-goal-card.tsx`) noted above. **Strongly recommended, not
-required, before the next re-review:** produce the per-component AC6
-pass/fail checklist the Definition of Done has now asked for across five
-consecutive passes — its continued absence is demonstrably the root cause
-all six instances of this same defect shape went uncaught until an ad hoc
-spot-check happened to find each one, and this sixth instance specifically
-demonstrates that even re-deriving AC6's own surface list from scratch is
-only sufficient when each surface's every named sub-clause is checked
-individually against shipped code, not against a prior pass's own aggregate
-summary of that same surface.
+`npm run typecheck`, `npm run lint`, `npx vitest run` (633/633), and the full
+45-test `accessibility` Playwright project were all re-run fresh, live, on
+this exact commit, with no flake observed. Security Architect and
+Performance Engineer sign-offs hold, unaffected — the fix under this pass's
+review is a one-file, two-insertion/one-deletion source diff with no new
+Server Action, Route Handler, API route, query-layer file, or dependency.
+The risk register remains coherent.
 
-Phase 5 remains open pending this fix and a follow-up (sixth) Release
-Manager pass.
+Number Counters' own Definition of Done — "all ten [AC6] surfaces... each
+confirmed to animate" — now genuinely holds, across all ten named surfaces
+and every named sub-clause within them, after seven consecutive Release
+Manager passes and eight total instances of this phase's own recurring
+defect shape, ending with this pass's own confirmation that no ninth
+instance remains. Reduced-Motion Foundation, Chart Transitions, Page
+Transitions, Expandable Cards, and the Cross-Cutting GPU-Compositable-
+Properties Bar were each independently confirmed sound across multiple
+passes and are unaffected by this final fix.
+
+**Phase 5b is closed.** Phase 5's original roadmap stub named three
+workstreams: motion/transitions, accessibility, and responsive/mobile. Phase
+5a (accessibility, responsive/mobile) and Phase 5b (motion/transitions,
+Motion & Craft) are both now shipped, audited, and signed off. **Phase 5, in
+full, is complete.**
