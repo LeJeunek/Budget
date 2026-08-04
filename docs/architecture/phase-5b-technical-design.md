@@ -57,6 +57,20 @@ Both are verified, not assumed: `progress-ring.tsx`'s `motion.circle` was confir
 
 Every primitive this document designs (§2–§5) is required, by its own construction, to render a fully correct, fully legible static end state with the animation entirely absent — this is threaded through each section below as a stated property of that primitive's own API (e.g., `AnimatedNumber` always renders `format(value)` as real text, whether or not a tween is in flight), not bolted on separately.
 
+### 1.4 Correction (Bug Hunter, Phase 5b review gate): §1.1's re-export decision and §1.2's `progress-ring.tsx` row did not hold up under live re-verification
+
+Two Bug Hunter reports disproved §1.1's central claim, by direct read of the installed `framer-motion` version's actual source:
+- `docs/testing/bug-reports/reduced-motion-not-honored-on-first-page-load-animated-number-progress-ring.md`
+- `docs/testing/bug-reports/reduced-motion-mid-session-re-enable-does-not-resume-animation.md`
+
+Framer Motion's own `useReducedMotion` hook resolves the OS preference via a **one-time** `useState` read of a module-level singleton, and — per that hook's own upstream source comment (`// TODO See if people miss automatically updating shouldReduceMotion setting`) — never updates it again after a given component's first mount. This is the opposite of §1.1's stated reason for re-exporting it ("subscribes to the `matchMedia` query's `change` event internally and re-renders every consumer automatically"). Two concrete bugs followed: a fresh-load race (an animation could briefly play despite `reduce` already being active before navigation) and a mid-session-re-enable failure (an already-mounted component stays frozen in its reduced state even after the OS preference reverts).
+
+**What actually shipped, superseding §1.1 point 2 and its code block:** `components/shared/motion/use-reduced-motion.ts` is no longer a bare re-export — it's a real hook built on React's own `useSyncExternalStore`, subscribed directly to `window.matchMedia("(prefers-reduced-motion: reduce)")`. This closes both bugs (fresh reads on every render, live reactivity in both directions) while still being the one canonical, single shared hook every primitive branches on — the "avoid duplication" property §1.1 wanted is preserved; only the implementation underneath changed. See that file's own doc comment for the full account.
+
+**What actually shipped, superseding §1.2's `progress-ring.tsx` row:** `MotionConfig`'s own internal `reducedMotion="user"` resolution turned out to carry the *identical* one-time-read bug, in Framer Motion's own internals — confirmed by direct read of `motion-dom`'s `render/VisualElement.mjs` (`this.shouldReduceMotion = prefersReducedMotion.current`, set once, at mount, never revisited). Since this lives inside the library, not this codebase, it cannot be patched the way `use-reduced-motion.ts` was. `progress-ring.tsx` was changed to stop relying on `MotionConfig` alone for its stroke animation — it now calls the shared hook explicitly and drives the stroke imperatively via `useMotionValue`/`animate()` inside a `useLayoutEffect`, the same architecture `AnimatedNumber` (§2) already used. Its default percentage label (still routed through `AnimatedNumber`, §2.4, unaffected by this correction) required an additional fix of its own for the identical reason — see that file's own doc comment for the full history, including why the first fix attempt (branching `initial={prefersReducedMotion ? false : {...}}` directly in JSX, still using Framer Motion's declarative props) did not hold up either.
+
+`MotionConfig` remains mounted in `providers.tsx` and remains the correct, zero-code default for every *other* bare `motion.*` transition in the app that has no history of this same demonstrated staleness — this correction is not a signal to migrate every `motion.*` usage to an explicit hook branch, only a fix for the two components where it was proven necessary.
+
 ---
 
 ## 2. Number Counters — the `AnimatedNumber` primitive, and Risk #55's resolution

@@ -36,6 +36,24 @@
  * skipped (a zero-duration, no `initial`/`exit` states), never the
  * disclosure mechanism itself.
  *
+ * `aria-controls`: Radix's own `CollapsibleTrigger` only emits
+ * `aria-controls` while `open` is `true` (confirmed by direct read of
+ * `node_modules/@radix-ui/react-collapsible/dist/index.mjs`:
+ * `"aria-controls": context.open ? context.contentId : void 0`) — so every
+ * card's default, as-loaded, collapsed state (every card, on every page
+ * load, until a user interacts with it) shipped with no `aria-controls` at
+ * all, contradicting Expandable Cards AC2
+ * (`docs/testing/bug-reports/expandable-card-aria-controls-missing-while-collapsed.md`).
+ * Since `CollapsibleContent forceMount` already guarantees the disclosed
+ * region is a real, stable, present DOM node regardless of `isOpen`, this
+ * component generates its own stable id via `useId()` and threads it
+ * explicitly as `id` on `CollapsibleContent` and `aria-controls` on
+ * `CollapsibleTrigger` — both override Radix's own conditional/generated
+ * values (each of Radix's own defaults is spread *before* this component's
+ * own explicit props in Radix's own prop order, confirmed by the same
+ * source read), so the attribute is correct and present in every state, not
+ * only once a card has been expanded at least once.
+ *
  * Usage:
  * ```tsx
  * // Uncontrolled (the common case)
@@ -102,6 +120,11 @@ export function ExpandableCard({
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen)
   const isControlled = controlledOpen !== undefined
   const isOpen = isControlled ? controlledOpen : uncontrolledOpen
+  // Stable regardless of open state, and independent of Radix's own
+  // internal `contentId` — this is what lets the trigger below carry a
+  // correct `aria-controls` even while collapsed (see this file's own doc
+  // comment, "aria-controls" section).
+  const contentId = React.useId()
 
   const handleOpenChange = React.useCallback(
     (next: boolean) => {
@@ -117,7 +140,9 @@ export function ExpandableCard({
       onOpenChange={handleOpenChange}
       className={className}
     >
-      <CollapsibleTrigger asChild>{trigger}</CollapsibleTrigger>
+      <CollapsibleTrigger asChild aria-controls={contentId}>
+        {trigger}
+      </CollapsibleTrigger>
       {/* `forceMount` hands unmount/remount timing to the `AnimatePresence`
           below instead of Radix's own default instant show/hide — the
           standard Radix-primitive-plus-Framer-Motion-visual-layer
@@ -125,8 +150,9 @@ export function ExpandableCard({
           own locally-tracked state, always kept identical to the
           `Collapsible`'s own (it's the value driving `open` above), which
           is what lets `AnimatePresence` know exactly when to play the
-          enter/exit animation. */}
-      <CollapsibleContent forceMount>
+          enter/exit animation. The explicit `id` overrides Radix's own
+          auto-generated `contentId`, matching the `aria-controls` above. */}
+      <CollapsibleContent forceMount id={contentId}>
         <AnimatePresence initial={false}>
           {isOpen && (
             <motion.div

@@ -106,21 +106,39 @@ export function AnimatedNumber({
   className,
 }: AnimatedNumberProps) {
   const prefersReducedMotion = useReducedMotion()
-  // AC1a: initial mount animates from a starting point of zero to the
-  // mounted value, exactly like any other counter update (the product
-  // spec's own "StatCard loading skeleton resolving to a value" edge case
-  // states this explicitly — mount is not a special, static-render case).
-  // `previousValueRef` starts at `undefined`, not `value`, specifically so
-  // the effect below can distinguish "this is the first mount" from "this
-  // value happens to be unchanged" — the two have different starting points
-  // (zero vs. the current motion value) but otherwise share one code path.
-  const motionValue = useMotionValue(0)
+  // The initial render — server AND the client's own first (hydration) pass
+  // — always shows the real, correct `format(value)`, unconditionally, never
+  // `format(0)`. This is deliberate, per
+  // docs/testing/bug-reports/reduced-motion-not-honored-on-first-page-load-animated-number-progress-ring.md's
+  // root-cause finding: the server can never know the client's OS-level
+  // `prefers-reduced-motion` preference, so any attempt to decide "start at
+  // 0 or at the real value" during the render that has to match SSR output
+  // is inherently racy — for a reduced-motion user, this means it is
+  // impossible to *reliably* avoid a `format(0)` flash if the zero-start
+  // decision is made here, since it depends on a value that is not
+  // trustworthy until a `useLayoutEffect` has actually run on the client.
+  // Rendering the correct value unconditionally instead means a
+  // reduced-motion user's very first byte of HTML is already, and stays,
+  // correct — no race, no window in which anything wrong could ever be
+  // painted, regardless of hydration timing. See the `useLayoutEffect`
+  // below for where the "start at 0, then count up" behavior (AC1a) now
+  // lives instead, for the non-reduced-motion case only.
+  const motionValue = useMotionValue(value)
   const [display, setDisplay] = React.useState<React.ReactNode>(() =>
-    prefersReducedMotion ? format(value) : format(0)
+    format(value)
   )
   const previousValueRef = React.useRef<number | undefined>(undefined)
 
-  React.useEffect(() => {
+  // `useLayoutEffect`, not `useEffect` — this still matters even though the
+  // reduced-motion branch below is now a pure no-op against what's already
+  // rendered (see above): the non-reduced-motion mount case explicitly
+  // resets the displayed value back to 0 before starting its tween, and that
+  // reset must be flushed before the browser's first paint (via
+  // `useLayoutEffect`'s synchronous-before-paint guarantee), or a
+  // non-reduced-motion user would see a flash of the correct value first,
+  // then an incorrect jump back down to 0, before the tween starts — worse
+  // than the original bug, not a fix.
+  React.useLayoutEffect(() => {
     const isMount = previousValueRef.current === undefined
     // AC1: a value updating to the identical value it already held (e.g. an
     // unrelated parent re-render) never replays the animation — this only
@@ -129,11 +147,26 @@ export function AnimatedNumber({
     previousValueRef.current = value
 
     if (prefersReducedMotion) {
-      // AC5: instant snap, still rendered through the real `format` pipeline
-      // — no tween on mount or on update.
+      // AC5: instant snap, still rendered through the real `format`
+      // pipeline — no tween on mount or on update. For the mount case
+      // specifically, `display`/`motionValue` already equal this exact
+      // value from the initial render above, so this is a genuine no-op,
+      // not merely a fast correction — there is no window, of any duration,
+      // in which anything but the correct value was ever painted.
       motionValue.set(value)
       setDisplay(format(value))
       return
+    }
+
+    if (isMount) {
+      // AC1a, moved here from the initial render (see above) specifically
+      // so it only ever runs once `prefersReducedMotion` is known-correct
+      // on the client — resets the already-correct initial paint back to a
+      // starting point of zero, synchronously, before the browser's first
+      // paint (this file's own reason for using `useLayoutEffect`), then
+      // the tween below counts back up from there.
+      motionValue.set(0)
+      setDisplay(format(0))
     }
 
     const controls = animate(motionValue, value, {

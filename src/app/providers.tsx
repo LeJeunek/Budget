@@ -24,19 +24,40 @@ import { MotionConfig } from "framer-motion"
  *
  * **Phase 5b addition (docs/architecture/phase-5b-technical-design.md
  * §1.1):** also mounts `<MotionConfig reducedMotion="user">`, the app-wide,
- * zero-code-change default that makes every bare, declarative `motion.*`
- * component's `transition` (e.g. `components/shared/progress-ring.tsx`'s
- * existing `motion.circle` stroke animation) honor the OS-level
- * `prefers-reduced-motion` preference for free — Reduced-Motion Foundation
- * AC3, satisfied with zero edits to that file's own animation code. This is
- * root-layout plumbing in the identical sense `QueryClientProvider` already
- * is here (mounted once, above the whole app, rendering no visible output
- * of its own), so it belongs in this same file rather than a second,
+ * zero-code-change default for any bare, declarative `motion.*` component
+ * whose own animation doesn't need to branch on reduced motion explicitly.
+ * This is root-layout plumbing in the identical sense `QueryClientProvider`
+ * already is here (mounted once, above the whole app, rendering no visible
+ * output of its own), so it belongs in this same file rather than a second,
  * motion-specific provider for one JSX element with no state of its own.
  * `MotionConfig` wraps `QueryClientProvider`'s own `{children}` rather than
  * the other way around — the two providers have no dependency on each
  * other's order, so this is simply "outermost plumbing wraps the query
  * boundary," not a meaningful nesting decision.
+ *
+ * **Correction (Bug Hunter, Phase 5b review gate,
+ * `docs/testing/bug-reports/reduced-motion-not-honored-on-first-page-load-animated-number-progress-ring.md`
+ * and `reduced-motion-mid-session-re-enable-does-not-resume-animation.md`):**
+ * this doc comment previously claimed `MotionConfig`'s own `reducedMotion="user"`
+ * resolution reliably makes bare `motion.*` transitions honor the live OS
+ * preference, citing `components/shared/progress-ring.tsx`'s stroke
+ * animation as the example. That example turned out to be wrong: Framer
+ * Motion's own internal reduced-motion resolution (the mechanism
+ * `MotionConfig="user"` relies on) reads the same one-time,
+ * never-updated-after-mount value the installed `framer-motion` version's
+ * public `useReducedMotion` hook had — `components/shared/motion/
+ * use-reduced-motion.ts` was rewritten to a real, reactive
+ * `useSyncExternalStore`-based hook to fix this for every EXPLICIT caller of
+ * that hook, but `MotionConfig`'s own internal resolution is a separate
+ * code path inside Framer Motion's own internals that this rewrite cannot
+ * reach or fix. `progress-ring.tsx` no longer relies on `MotionConfig` alone
+ * for this reason — it now calls the shared hook explicitly and drives its
+ * stroke animation imperatively (see that file's own doc comment for the
+ * full history). `MotionConfig` remains correctly mounted here for every
+ * OTHER bare `motion.*` transition in the app that has no history of this
+ * same demonstrated staleness — this is not a signal to migrate every
+ * `motion.*` usage away from it, only a correction to what this file's own
+ * comment previously, incorrectly, held up as proof it worked reliably.
  */
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient())
