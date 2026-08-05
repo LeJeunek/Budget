@@ -625,10 +625,9 @@ src/
 │   │   ├── users/page.tsx
 │   │   ├── audit-log/page.tsx
 │   │   ├── feature-flags/page.tsx
-│   │   ├── categories/page.tsx         # Manage Categories (the starter template) — deliberately
-│   │   │                              #   NOT under /settings/ or /categories/, since it edits a
-│   │   │                              #   global template, not a per-user resource
-│   │   └── demo-data/page.tsx
+│   │   └── categories/page.tsx         # Manage Categories (the starter template) — deliberately
+│   │                                   #   NOT under /settings/ or /categories/, since it edits a
+│   │                                   #   global template, not a per-user resource
 │   │
 │   │                                   # Zero new Route Handlers anywhere in Phase 4c — every
 │   │                                   #   read is a Server Component direct call or searchParam
@@ -729,10 +728,7 @@ src/
 │       │   │                          #   zero business logic of its own
 │       │   ├── feature-flags.ts        # getFeatureFlags() — thin read over lib/feature-flags.ts's
 │       │   │                          #   own FeatureFlag table
-│       │   ├── demo-data.ts            # triggerDemoDataSeed() — thin, no-parameter wrapper around
-│       │   │                          #   the EXISTING prisma/seed-showcase.ts script; environment-
-│       │   │                          #   gated server-side, never client-side only
-│       │   └── actions.ts              # toggleFeatureFlag, seedDemoData,
+│       │   └── actions.ts              # toggleFeatureFlag,
 │       │                              #   createCategoryTemplateEntry, updateCategoryTemplateEntry,
 │       │                              #   reorderCategoryTemplateEntries, deleteCategoryTemplateEntry
 │       │                              #   — every one calls getCurrentAdminUser() FIRST, then
@@ -742,8 +738,7 @@ src/
 │           ├── user-table.tsx          # reuses components/ui/data-table/ directly — no new table
 │           ├── audit-log-table.tsx     #   primitive
 │           ├── feature-flag-toggle.tsx
-│           ├── category-template-editor.tsx
-│           └── seed-demo-data-button.tsx
+│           └── category-template-editor.tsx
 │
 └── lib/
     └── feature-flags.ts               # NEW MODULE — isFeatureEnabled(key: FeatureFlagKey):

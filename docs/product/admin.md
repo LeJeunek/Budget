@@ -157,46 +157,19 @@ The starter set (`DEFAULT_CATEGORIES`, `src/features/categories/default-categori
 
 ---
 
-## Capability 6: Seed Demo Data
+## Capability 6: Seed Demo Data — REMOVED (2026-08-04)
 
-### User Story
-As an admin, I want to trigger a refresh of FinanceOS's existing showcase demo account with realistic, good-looking sample data, so the team can demo or screenshot the app without needing an engineer to run a script from the command line every time.
-
-### Business Value
-`prisma/seed-showcase.ts` (run via `npm run seed:showcase`) already exists and already does exactly this work end to end — accounts, transactions, recurring income, budgeting, bills, debt, investments, goals, net worth history, every AI-feature cache — for one dedicated account, `showcase@lkbudget.demo`. The gap this capability closes is purely operational: today, refreshing the demo account requires someone with local repo access and database credentials to run a command-line script. Exposing a trigger for it inside Admin lets any admin — including someone on sales or marketing, not just an engineer — refresh the demo account before a call or a screenshot session.
-
-### Explicit Scope Resolution (per Risk #26, decided here rather than left implicit)
-
-**This capability seeds one and only one fixed, dedicated demo account (`showcase@lkbudget.demo`) — never an arbitrary or admin-chosen target — *and* is restricted to non-production environments only. Both guardrails apply together, not either/or.**
-
-Reasoning:
-1. Scoping to the fixed demo account alone, without an environment restriction, would still leave a real risk: this trigger is a repeatable, on-demand, full-account delete-and-recreate action sitting behind a UI button. A mistake, a compromised admin session, or a future change that widens it to accept a target parameter would then have live-production blast radius for what's meant to be a harmless demo-refresh convenience.
-2. Restricting to non-production alone, without pinning the target account, would still leave a real risk in staging/dev: an admin screen that accepts or infers *which* user to seed is exactly the "unbounded data-generation vector" Risk #26 warns about, even outside production — it invites scope creep toward "seed data for any user," a fundamentally more dangerous capability than "refresh the one known demo account."
-3. Together, these two guardrails mean the worst case of any misuse is: the existing showcase account gets reset and refilled with fresh sample data, in an environment that was never serving real users — the exact same blast radius the script already has today when an engineer runs it manually by hand, no larger.
-
-### Acceptance Criteria
-1. An admin sees a single action ("Refresh Demo Data" or equivalent) with no target/user selection of any kind — no field, dropdown, or parameter lets an admin choose which account to seed. The action always operates on exactly the fixed `showcase@lkbudget.demo` account.
-2. This action is available and functions only in non-production environments (development, staging/preview). In a production environment, the action is not shown at all — not merely disabled — consistent with Capability 1 AC3's "no visible trace" principle applied here.
-3. Triggering the action re-runs the same idempotent delete-and-recreate behavior `seed-showcase.ts` already implements (existing showcase data is fully replaced, not appended to) — this capability exposes/triggers that existing script; it does not reimplement or duplicate its data-generation logic.
-4. The admin sees a clear confirmation before triggering (this is destructive to the demo account's current data) and a clear success/failure result after it completes.
-5. This action is itself an admin action worth recording — see Capability 3 (which admin, when, success or failure).
-
-### Edge Cases
-- **The action is triggered while someone else is actively using the demo account for a live demo or call**: the refresh proceeds and replaces the in-progress demo's data out from under them — no requirement to lock or queue around a concurrent demo session in this phase; this is an accepted, known limitation of a single shared demo account, not a defect this spec requires solving.
-- **The script fails partway through** (e.g. a transient database error): the admin sees a clear failure message per AC4 rather than a silent partial refresh; whether a failed run leaves the account partially reset or safely rolled back is an implementation detail — the product requirement is that failure is reported honestly, never hidden.
-- **Someone attempts to reach this action's underlying endpoint directly, bypassing the UI, in a production environment**: blocked at the server, not merely hidden client-side, per Capability 1 AC2's "checked on every request" discipline.
-- **A future need to seed a different kind of demo scenario** (not the one existing showcase account): out of scope here — this capability is scoped exactly to today's one existing script; a genuinely new demo-data need earns its own spec/script, not a silently expanded version of this trigger.
+This capability, and the `showcase@lkbudget.demo` account it existed to refresh, has been removed. It is superseded by a public, unauthenticated `/demo` route backed by static fixture data (see `docs/product/public-demo.md`) — a demo that is always populated and needs no admin trigger, no credentials, and no database account to keep fresh. The former `prisma/seed-showcase.ts`/`npm run seed:showcase` script, the `/admin/demo-data` page, and the `seedDemoData` Server Action have all been deleted. Historical `AdminActionLog` rows of type `DEMO_DATA_SEEDED` are left in place as an unaltered historical record; the audit log UI still renders them.
 
 ---
 
 ## Definition of Done
 
-- Non-admin access to every admin route/action, across all six capabilities, is verified by test to be blocked or redirected — no capability reachable without the `ADMIN` tier, checked per request, not just at nav-render time.
+- Non-admin access to every admin route/action, across the remaining five capabilities, is verified by test to be blocked or redirected — no capability reachable without the `ADMIN` tier, checked per request, not just at nav-render time.
 - View Users is verified, by test against the full user-record shape (not just the fields this spec lists), to never expose a password, session token, or OAuth token.
 - Audit log entries are verified, by test against fixture data, to be recorded for every event type in Capability 3 AC1, each with correct outcome, timestamp, and user attribution, and to be immutable through the product's own UI.
 - Feature flags are verified, by test, to produce exactly the same degraded-state behavior their affected surface already defines (`ai-features.md`'s degradation states when AI is off; `notifications-v2.md` AC7's failure-independent in-app behavior when email is off) — never a new, separately-designed broken state.
 - Manage Categories is verified, by test, to affect only future signups — an existing user's already-seeded categories are unaffected by any template edit — and the template is verified to never be reducible to zero entries.
-- Seed Demo Data is verified, by test, to (a) never accept or infer a target other than the fixed showcase account, and (b) be entirely unreachable — UI and underlying endpoint — in a production environment.
 - Cross-user data leakage via any admin view (View Users, Audit Logs) is verified to be impossible by any request path, extending Risk #4's standing bar to this phase's admin-side views per Risk #18.
 - Meets the release-level bar defined in the Project Charter: tests passing, Security Architect review (privilege escalation is this phase's headline focus per Risk #18, plus audit-log tamper-resistance and feature-flag access control), Performance Engineer review, documentation, and CTO/architecture sign-off.
 
@@ -204,7 +177,6 @@ Reasoning:
 
 - The admin authorization mechanism (Solution Architect + Database Architect's 4c pass, per Risk #18) — every capability above depends on it existing before any Admin backend work starts.
 - The DB-backed system-category-template model (Solution Architect + Database Architect's 4c pass, per Risk #25) — Capability 5 cannot be implemented against the current hardcoded `DEFAULT_CATEGORIES` constant read by `src/lib/auth.ts`'s signup hook.
-- `prisma/seed-showcase.ts` / `npm run seed:showcase` (already exists) — Capability 6 exposes and triggers this script; it is not reimplemented.
 - 4a's AI features (`ai-features.md`) and their existing data (category suggestions, monthly summary generation, spending insights, financial health score narrative generation) — source of Capability 3's AI-usage audit entries and Capability 4's AI kill-switch behavior.
 - 4b's Reports (`reports.md`) and Notifications v2 (`notifications-v2.md`, including its email-delivery status tracking) — source of Capability 3's report-generation and email-send audit entries, and Capability 4's email kill-switch behavior.
 - **Genuine gap, flagged for the architecture pass rather than assumed solved:** Reports (4b) currently has no persisted record of when a report was generated — it is an on-demand rendering with no stored generation-event row (`reports.md`). Capability 3's report-generation audit entries need the Database Architect to decide whether to add a lightweight generation-event log as part of 4c's schema pass, since there is no existing row to surface for this one event type the way there already is for the other three (category suggestions, notification email status, and — pending the architecture pass's own design — feature flag/template change history).
@@ -214,7 +186,6 @@ Reasoning:
 
 - Time from an incident being noticed to the relevant feature flag being toggled off — a direct measure of whether the kill-switch capability delivers its intended value (fast mitigation without a deploy).
 - Number of starter-category-template edits made through the admin UI after launch, against zero in the product's entire history before it — a direct measure of whether this capability replaces the "engineer edits a constant and redeploys" workflow it exists to remove.
-- Number of demo-data refreshes triggered through the admin UI versus through the command line — adoption of the self-service trigger over the original script-only workflow.
 - Zero reported incidents of a non-admin reaching any admin route or action.
 - Zero reported incidents of View Users or Audit Logs exposing a credential/secret, or another user's financial data, through any admin view.
 

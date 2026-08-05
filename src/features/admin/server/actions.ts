@@ -15,7 +15,6 @@ import {
   CategoryTemplateConcurrentModificationError,
   type SystemCategoryTemplateEntry,
 } from "@/features/categories/server/template"
-import { triggerDemoDataSeed } from "@/features/admin/server/demo-data"
 import type { FeatureFlagView } from "@/features/admin/types"
 import {
   ToggleFeatureFlagSchema,
@@ -105,36 +104,6 @@ export async function toggleFeatureFlag(input: unknown): Promise<ApiResult<Featu
     updatedAt: updated.updatedAt,
     updatedByUserId: updated.updatedByUserId,
   })
-}
-
-// ---------------------------------------------------------------------------
-// Seed Demo Data (admin.md Capability 6)
-// ---------------------------------------------------------------------------
-
-/**
- * Triggers the fixed-target, non-production-only demo data seed (§7.1's
- * `demo-data.ts`, which itself re-checks the environment gate). Takes no
- * arguments — there is no target/user parameter of any kind anywhere in this
- * call chain, by construction (Capability 6 AC1).
- */
-export async function seedDemoData(): Promise<ApiResult<{ success: boolean }>> {
-  const admin = await getCurrentAdminUser()
-  if (!admin) return fail(UNAUTHORIZED)
-
-  const result = await triggerDemoDataSeed()
-
-  await db.adminActionLog.create({
-    data: {
-      adminUserId: admin.id,
-      action: "DEMO_DATA_SEEDED",
-      details: result.error ? { success: result.success, error: result.error } : { success: result.success },
-    },
-  })
-
-  if (!result.success) {
-    return fail(result.error ?? "Demo data seeding failed")
-  }
-  return ok({ success: true })
 }
 
 // ---------------------------------------------------------------------------

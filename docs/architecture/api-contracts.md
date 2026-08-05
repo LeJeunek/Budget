@@ -801,7 +801,6 @@ Every action below requires the acting account to hold the `ADMIN` tier, checked
 | Edit a category-template entry | Server Action `updateCategoryTemplateEntry` | `{ id: string; name?: string; color?: string }` | `ApiResult<SystemCategoryTemplateEntry>` |
 | Reorder the category template | Server Action `reorderCategoryTemplateEntries` | `{ orderedIds: string[] }` | `ApiResult<SystemCategoryTemplateEntry[]>` |
 | Remove a category-template entry | Server Action `deleteCategoryTemplateEntry` | `{ id: string }` — rejected if this would reduce the template to zero entries (AC6) | `ApiResult<{ id: string }>` |
-| Trigger a demo-data refresh | Server Action `seedDemoData` | — (no target parameter of any kind — always the fixed `showcase@lkbudget.demo` account; unreachable, server-side, outside non-production environments) | `ApiResult<{ success: boolean }>` — also writes one `AdminActionLog` row |
 
 **`getUsers`/`getAuditLog` are this codebase's first-ever query functions not scoped to a single authenticated user's own ID** — a deliberate, narrow exception to this document's own opening rule ("all queries are scoped server-side to `getCurrentUser().id`"), safe only because both are reachable exclusively from behind `getCurrentAdminUser()`. See `phase-4c-technical-design.md` §7/§9 and risk-register #33.
 

@@ -4,7 +4,6 @@ import { redirect } from "next/navigation"
 import { LayoutDashboard } from "lucide-react"
 
 import { getCurrentAdminUser } from "@/lib/auth"
-import { isDemoDataSeedAvailable } from "@/features/admin/server/demo-data"
 import { AdminNav, type AdminNavItem } from "@/features/admin/components/admin-nav"
 
 /**
@@ -26,30 +25,20 @@ import { AdminNav, type AdminNavItem } from "@/features/admin/components/admin-n
  *
  * A small top bar + horizontal tab nav is Admin's entire chrome — no
  * Sidebar/TopNav reuse (see this design doc section's own "does not need to
- * render the ordinary dashboard sidebar/nav chrome" note). The "Demo Data"
- * tab is present only when `isDemoDataSeedAvailable()` — admin.md Capability
- * 6 AC2's "not shown at all... not merely disabled" applied to this shell's
- * own nav, not just the trigger button itself (`app/admin/demo-data/
- * page.tsx` independently gates the page's own content the same way).
+ * render the ordinary dashboard sidebar/nav chrome" note).
  */
-const BASE_ADMIN_NAV_ITEMS: AdminNavItem[] = [
+const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { label: "Users", href: "/admin/users" },
   { label: "Audit Log", href: "/admin/audit-log" },
   { label: "Feature Flags", href: "/admin/feature-flags" },
   { label: "Categories", href: "/admin/categories" },
 ]
 
-const DEMO_DATA_NAV_ITEM: AdminNavItem = { label: "Demo Data", href: "/admin/demo-data" }
-
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const admin = await getCurrentAdminUser()
   if (!admin) {
     redirect("/")
   }
-
-  const navItems = isDemoDataSeedAvailable()
-    ? [...BASE_ADMIN_NAV_ITEMS, DEMO_DATA_NAV_ITEM]
-    : BASE_ADMIN_NAV_ITEMS
 
   return (
     <div className="flex min-h-svh flex-col bg-background">
@@ -68,7 +57,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           Back to Dashboard
         </Link>
       </header>
-      <AdminNav items={navItems} />
+      <AdminNav items={ADMIN_NAV_ITEMS} />
       <main className="flex-1 p-4 md:p-6">{children}</main>
     </div>
   )
