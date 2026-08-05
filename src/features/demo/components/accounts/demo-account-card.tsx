@@ -16,6 +16,15 @@
  * `@/features/accounts/server/actions`, which nothing under `/demo` may ever
  * reach, even transitively (Capability 3 AC2).
  *
+ * The account name links to `/demo/accounts/${account.id}` — `/accounts/
+ * [accountId]` has no real, authenticated equivalent (Accounts has no detail
+ * route in the real app today), but `/demo/accounts/[accountId]` was still
+ * built per the design doc's own §7 ("every listed account... detail route
+ * resolve correctly, not just one token example") and public-demo.md
+ * Capability 5 AC2 ("at least one working example... a visitor can go one
+ * level deep"). Mirrors `DemoGoalCard`/`DemoFinancialGoalCard`/
+ * `DemoHoldingRow`'s identical title-links-to-detail pattern.
+ *
  * `ACCOUNT_TYPE_LABELS` is imported from `account-form-schema.ts` (not the
  * card file) — that module only imports `zod` and this feature's own
  * `types.ts`, so reusing it here duplicates nothing and pulls in nothing
@@ -32,6 +41,8 @@
  * <DemoAccountCard account={account} currency="EUR" />
  * ```
  */
+
+import Link from "next/link"
 
 import { cn, formatCurrency } from "@/lib/utils"
 import { ACCOUNT_TYPE_LABELS } from "@/features/accounts/components/account-form-schema"
@@ -70,7 +81,11 @@ export function DemoAccountCard({ account, currency = "USD" }: DemoAccountCardPr
             aria-hidden="true"
           />
           <div className="flex min-w-0 flex-col gap-1">
-            <CardTitle className="truncate">{account.name}</CardTitle>
+            <CardTitle className="truncate">
+              <Link href={`/demo/accounts/${account.id}`} className="hover:underline">
+                {account.name}
+              </Link>
+            </CardTitle>
             <div className="flex flex-wrap items-center gap-1.5">
               <Badge variant="outline">{ACCOUNT_TYPE_LABELS[account.type]}</Badge>
               {account.institution && (

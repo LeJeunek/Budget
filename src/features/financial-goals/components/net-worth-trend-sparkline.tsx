@@ -55,7 +55,16 @@ export function NetWorthTrendSparkline({
   return (
     <div className="h-16 w-full" aria-hidden="true">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={points} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+        {/* accessibilityLayer={false}: Recharts 3.x's default keyboard-nav
+            overlay makes its <svg role="application"> focusable, which axe
+            flags (aria-hidden-focus) since this whole chart is already
+            aria-hidden — a purely decorative sparkline, never the primary
+            way to read this data. */}
+        <LineChart
+          data={points}
+          margin={{ top: 4, right: 4, bottom: 4, left: 4 }}
+          accessibilityLayer={false}
+        >
           <Tooltip
             labelFormatter={(value) => formatDateLabel(String(value))}
             formatter={(value) => [formatCurrency(Number(value)), "Net worth"]}

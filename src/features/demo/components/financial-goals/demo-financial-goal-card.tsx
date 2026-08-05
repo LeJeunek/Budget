@@ -261,7 +261,14 @@ function DemoNetWorthTrendSparkline({
   return (
     <div className="h-16 w-full" aria-hidden="true">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={points} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+        {/* accessibilityLayer={false}: mirrors net-worth-trend-sparkline.tsx's
+            identical fix — Recharts' default keyboard-nav overlay makes its
+            svg focusable, which axe flags inside an aria-hidden wrapper. */}
+        <LineChart
+          data={points}
+          margin={{ top: 4, right: 4, bottom: 4, left: 4 }}
+          accessibilityLayer={false}
+        >
           <Tooltip
             labelFormatter={(value) => formatDateLabel(String(value))}
             formatter={(value) => [formatCurrency(Number(value), currency), "Net worth"]}
