@@ -51,7 +51,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
-import { Sidebar } from "@/components/shared/sidebar"
+import { Sidebar, type NavSection } from "@/components/shared/sidebar"
 import { ThemeToggle } from "@/components/shared/theme-toggle"
 
 export interface TopNavUser {
@@ -106,6 +106,17 @@ export interface TopNavProps {
    * applies. Omitted entirely for every consumer that doesn't need it.
    */
   onSheetCloseAutoFocus?: (event: Event) => void
+  /**
+   * Public Demo Mode addition (`docs/architecture/public-demo-technical-design.md`
+   * §6.1): forwarded straight through to the mobile `Sheet`'s own `Sidebar`
+   * instance below. Optional — when omitted, `Sidebar` falls back to its own
+   * default `NAV_SECTIONS` exactly as before, so every existing consumer
+   * that doesn't pass this is completely unaffected. Exists because the
+   * mobile hamburger menu renders a second, independent `Sidebar` instance
+   * that `Sidebar`'s own `sections` prop (when passed to the *desktop* rail
+   * elsewhere) does not automatically reach.
+   */
+  sidebarSections?: NavSection[]
 }
 
 function getInitials(name: string): string {
@@ -129,6 +140,7 @@ export function TopNav({
   mobileNavOpen: controlledMobileNavOpen,
   onMobileNavOpenChange,
   onSheetCloseAutoFocus,
+  sidebarSections,
 }: TopNavProps) {
   const [internalMobileNavOpen, setInternalMobileNavOpen] =
     React.useState(false)
@@ -171,6 +183,7 @@ export function TopNav({
           <SheetTitle className="sr-only">Navigation menu</SheetTitle>
           <Sidebar
             mobile
+            sections={sidebarSections}
             onNavigate={() => setMobileNavOpen(false)}
             className="pt-10"
           />

@@ -219,6 +219,22 @@ export interface SidebarProps {
   defaultCollapsed?: boolean
   /** Invoked after a nav link is activated — e.g. to close a mobile Sheet. */
   onNavigate?: () => void
+  /**
+   * Public Demo Mode addition (`docs/architecture/
+   * public-demo-technical-design.md` §6.1): an externally-supplied nav
+   * section list, defaulting to `NAV_SECTIONS` below. Exists so `/demo`'s
+   * own composition (`features/demo/components/demo-shell.tsx`) can render
+   * this same component with a `/demo`-scoped, ten-item nav
+   * (`DEMO_NAV_SECTIONS`) instead of the real app's own hrefs — several of
+   * which point at out-of-scope or authenticated-only routes a public,
+   * unauthenticated page must never link to (public-demo.md Capability 5
+   * AC4). Purely additive: every existing call site that doesn't pass this
+   * prop renders byte-for-byte identically to before, per the same
+   * "zero behavioral change for every existing render path" precedent
+   * `phase-5a-technical-design.md` §2.2 already used for `TopNav`'s own
+   * `mobileNavOpen`/`onMobileNavOpenChange` controlled props.
+   */
+  sections?: NavSection[]
 }
 
 /**
@@ -286,6 +302,7 @@ export function Sidebar({
   mobile = false,
   defaultCollapsed = false,
   onNavigate,
+  sections = NAV_SECTIONS,
 }: SidebarProps) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = React.useState(defaultCollapsed)
@@ -343,7 +360,7 @@ export function Sidebar({
         aria-label="Main navigation"
         className="flex flex-1 flex-col gap-4 overflow-y-auto p-2"
       >
-        {NAV_SECTIONS.map((section, index) => (
+        {sections.map((section, index) => (
           <div
             key={section.title ?? `section-${index}`}
             className="flex flex-col gap-1"

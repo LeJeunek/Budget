@@ -91,6 +91,18 @@ export interface BottomNavProps {
    * never imports or renders that Sheet; see this file's own top JSDoc.
    */
   onMoreClick?: () => void
+  /**
+   * Public Demo Mode addition (`docs/architecture/
+   * public-demo-technical-design.md` §6.1): an externally-supplied item
+   * list, defaulting to `BOTTOM_NAV_ITEMS` below. Exists so `/demo`'s own
+   * composition (`features/demo/components/demo-shell.tsx`) can render this
+   * same component with a `/demo`-scoped item list (`DEMO_BOTTOM_NAV_ITEMS`)
+   * instead of the real app's own hrefs, mirroring `Sidebar`'s identical
+   * `sections` addition and reasoning exactly. Purely additive: every
+   * existing call site that doesn't pass this prop renders byte-for-byte
+   * identically to before.
+   */
+  items?: NavItem[]
 }
 
 /**
@@ -134,7 +146,11 @@ function BottomNavLink({ item, active }: BottomNavLinkProps) {
   )
 }
 
-export function BottomNav({ className, onMoreClick }: BottomNavProps) {
+export function BottomNav({
+  className,
+  onMoreClick,
+  items = BOTTOM_NAV_ITEMS,
+}: BottomNavProps) {
   const pathname = usePathname()
 
   return (
@@ -147,7 +163,7 @@ export function BottomNav({ className, onMoreClick }: BottomNavProps) {
         className
       )}
     >
-      {BOTTOM_NAV_ITEMS.map((item) => (
+      {items.map((item) => (
         <BottomNavLink
           key={item.href}
           item={item}

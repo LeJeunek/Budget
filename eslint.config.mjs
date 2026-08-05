@@ -137,6 +137,54 @@ const eslintConfig = [
       ],
     },
   },
+  {
+    // Public Demo Mode, `src/app/demo/**` + `src/features/demo/**` — turns
+    // docs/architecture/public-demo-technical-design.md §4.1's "read-only by
+    // construction" guarantee into a build-time check, the same pattern as
+    // every rule above. public-demo.md Capability 3 requires that nothing
+    // under `/demo` can ever write to, or even read from, the database, and
+    // Capability 1 requires it never depend on session/auth state — this is
+    // the strongest of the rules in this file because `/demo` has no session
+    // to protect anything with, unlike Reports/Notifications/Admin/Calendar,
+    // which are all still gated by a real authenticated layout. Note (per
+    // the design doc's own §4.1): this rule catches a forbidden import
+    // written directly in a demo-owned file; it cannot see a forbidden
+    // import several files deep inside an otherwise-permitted-looking
+    // component import — that transitive case is closed today by never
+    // importing any of the repo's ~30 real "card/row" components that bundle
+    // Server Action imports (public-demo-technical-design.md §3.3), not by
+    // this rule alone.
+    files: ["src/app/demo/**/*.{ts,tsx}", "src/features/demo/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/features/*/server/*", "@/features/*/server/**"],
+              message:
+                "Nothing under /demo may import any feature's server/ directory, directly or transitively — every Server Action (server/actions.ts) and every Prisma-touching read (server/service.ts and siblings) lives there. See public-demo-technical-design.md §4.",
+            },
+            {
+              group: ["@/lib/db", "@/lib/db/*", "@prisma/client"],
+              message:
+                "Nothing under /demo may query the database, even read-only — public-demo.md Capability 3 AC3.",
+            },
+            {
+              group: ["@/lib/auth", "@/lib/auth/*"],
+              message:
+                "Nothing under /demo may depend on session/auth state of any kind — public-demo.md Capability 1 AC3.",
+            },
+            {
+              group: ["@/lib/ai", "@/lib/ai/*", "@/lib/email", "@/lib/email/*"],
+              message:
+                "Nothing under /demo may depend on a live AI or email call — public-demo.md's 'static... zero operational upkeep' framing.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ];
 
 export default eslintConfig;
