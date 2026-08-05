@@ -15,6 +15,7 @@
 
 import { useState } from "react"
 import Image from "next/image"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -293,6 +294,13 @@ export default function LoginPage() {
           <Separator className="flex-1" />
         </div>
         <GoogleButton />
+        <p className="text-center text-sm text-muted-foreground">
+          Just looking?{" "}
+          <Link href="/demo" className="font-medium text-primary hover:underline">
+            View the demo
+          </Link>{" "}
+          — no account needed.
+        </p>
       </CardContent>
     </Card>
   )

@@ -179,7 +179,7 @@ As a visitor to `/demo`, I want to click around between sections the same way a 
 
 These are genuine ambiguities this spec surfaces but does not resolve — flagged rather than silently decided:
 
-1. **In-product discoverability.** Should any public-facing surface of the real app (most plausibly `/login`) link *to* `/demo`? The client's own framing ("anyone with the link can open it") describes access, not discoverability — it does not require the app itself to advertise the link. Left open; a small, separate, low-risk addition if wanted later.
+1. ~~**In-product discoverability.**~~ **Resolved (2026-08-05):** `/login` links to `/demo` ("Just looking? View the demo — no account needed."), per direct user request after noticing the demo had no discoverable entry point from the real app.
 2. **Search-engine indexing.** Should `/demo` be crawlable (default) or explicitly excluded via `robots.txt`/meta-robots? A marketing/SEO call outside this spec's scope; noted so it isn't decided by default inaction.
 3. **Fixture-date mechanism.** Capability 2 AC6 requires that fixture dates never read as increasingly stale, but does not mandate the specific technique (relative-date computation from render time vs. some other approach) — left to the Solution Architect.
 4. **Future scope: Bills, Recurring Income, Calendar.** Explicitly excluded here (see Out-of-Scope reasoning above); flagged so it isn't silently forgotten if there's real appetite for a later pass once the freshness/date-relativity problem those three pages pose has a proven solution from Capability 2 AC6's resolution.

@@ -105,7 +105,7 @@ async function main() {
 
     const embedded = embeddedMerchant(parsed.descriptor)
     let merchant: string
-    let notesParts: string[] = [parsed.descriptor]
+    const notesParts: string[] = [parsed.descriptor]
 
     // Page breaks insert boilerplate (page footer/header, "Statement Page X
     // of 5", etc.) between a transaction line and its true continuation line
