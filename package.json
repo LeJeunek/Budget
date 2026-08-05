@@ -20,6 +20,7 @@
     "seed:e2e": "tsx prisma/seed-e2e-test-user.ts",
     "backfill:savings-rate-completion": "tsx prisma/backfill-savings-rate-goal-notifications.ts",
     "grant:admin": "tsx scripts/grant-admin.ts",
+    "convert:statement": "tsx scripts/convert-statement-pdf.ts",
     "db:studio": "prisma studio",
     "test:e2e": "playwright test"
   },
@@ -69,6 +70,7 @@
     "eslint": "^9",
     "eslint-config-next": "15.5.20",
     "jsdom": "^29.1.1",
+    "pdf-parse": "^2.4.5",
     "tailwindcss": "^4",
     "tsx": "^4.23.1",
     "typescript": "^5",
