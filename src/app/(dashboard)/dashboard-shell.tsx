@@ -52,10 +52,12 @@
 
 import * as React from "react"
 import type { ReactNode } from "react"
+import { useRouter } from "next/navigation"
 
 import { Sidebar } from "@/components/shared/sidebar"
 import { TopNav, type TopNavUser } from "@/components/shared/top-nav"
 import { BottomNav } from "@/components/shared/bottom-nav"
+import { signOut } from "@/lib/auth-client"
 
 export interface DashboardShellProps {
   user: TopNavUser
@@ -68,7 +70,22 @@ export function DashboardShell({
   notificationBell,
   children,
 }: DashboardShellProps) {
+  const router = useRouter()
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false)
+
+  // `TopNav`'s "Sign out" menu item previously had no `onSignOut` handler
+  // wired anywhere in the authenticated app (auth-client.ts's own JSDoc
+  // anticipated this call site but it was never actually connected) — the
+  // button rendered but silently did nothing. `router.push` first, then
+  // `router.refresh()`, mirrors `(auth)/login/page.tsx`'s own post-auth-change
+  // navigation pattern; `router.refresh()` re-runs `(dashboard)/layout.tsx`'s
+  // `getCurrentUser()` check on the next render, which is what actually
+  // redirects to `/login` once the session cookie is gone.
+  const handleSignOut = React.useCallback(async () => {
+    await signOut()
+    router.push("/login")
+    router.refresh()
+  }, [router])
   // See this file's own top JSDoc "Bug fix" note for the full reasoning.
   const lastMobileNavOpenTriggerRef = React.useRef<HTMLElement | null>(null)
 
@@ -99,6 +116,7 @@ export function DashboardShell({
           mobileNavOpen={mobileNavOpen}
           onMobileNavOpenChange={setMobileNavOpen}
           onSheetCloseAutoFocus={handleMobileNavCloseAutoFocus}
+          onSignOut={handleSignOut}
         />
         {/* Phase 5a accessibility fix (docs/testing/e2e/accessibility-run-report.md
             finding #4, scrollable-region-focusable): this `overflow-y-auto` region
