@@ -5,6 +5,8 @@ import { headers } from "next/headers"
 
 import { db } from "@/lib/db"
 import { getSystemCategoryTemplate } from "@/features/categories/server/template"
+import { sendAuthEmail } from "@/lib/email/send-auth-email"
+import { ResetPasswordEmail } from "@/lib/email/templates/reset-password"
 
 /**
  * Better Auth server instance.
@@ -84,6 +86,22 @@ export const auth = betterAuth({
   // Phase 0 scope per docs/planning/roadmap.md: email/password + Google only.
   emailAndPassword: {
     enabled: true,
+    // `sendResetPassword` is Better Auth's own required hook for enabling
+    // the "forgot password" flow (`POST /request-password-reset` throws
+    // "Reset password isn't enabled" without one — confirmed by direct read
+    // of `node_modules/better-auth/dist/api/routes/password.mjs`). `url` is
+    // ALREADY Better Auth's own fully-built, token-bearing link
+    // (`${baseURL}/reset-password/${token}?callbackURL=...`) — this
+    // callback's only job is to email it, never to construct a link of its
+    // own. `resetPasswordTokenExpiresIn` is left at Better Auth's own
+    // default (3600s / 1 hour), matching `ResetPasswordEmail`'s own copy.
+    sendResetPassword: async ({ user, url }) => {
+      await sendAuthEmail({
+        to: user.email,
+        subject: "Reset your FinanceOS password",
+        template: ResetPasswordEmail({ resetUrl: url }),
+      })
+    },
   },
   socialProviders: {
     google: {

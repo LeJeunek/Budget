@@ -49,6 +49,7 @@ import {
   SlidersHorizontal,
   Target,
   TrendingUp,
+  UserCircle,
   Wallet,
   type LucideIcon,
 } from "lucide-react"
@@ -193,6 +194,11 @@ export const NAV_SECTIONS: NavSection[] = [
     // brief floated it as an option.
     title: "Account",
     items: [
+      // Added alongside `TopNav`'s "Profile" menu-item fix (that item
+      // previously had no destination at all) — same "Account" section as
+      // every other account-level, cross-cutting settings screen below,
+      // for the identical reason those already give in their own comments.
+      { label: "Account", href: "/settings/account", icon: UserCircle },
       { label: "Notification Preferences", href: "/settings/notifications", icon: Settings },
       // (Phase 4c) Customization's two settings pages
       // (phase-4c-technical-design.md §3.6), placed in this same "Account"

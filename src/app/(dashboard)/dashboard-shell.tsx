@@ -117,6 +117,7 @@ export function DashboardShell({
           onMobileNavOpenChange={setMobileNavOpen}
           onSheetCloseAutoFocus={handleMobileNavCloseAutoFocus}
           onSignOut={handleSignOut}
+          profileHref="/settings/account"
         />
         {/* Phase 5a accessibility fix (docs/testing/e2e/accessibility-run-report.md
             finding #4, scrollable-region-focusable): this `overflow-y-auto` region

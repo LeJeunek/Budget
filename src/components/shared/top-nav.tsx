@@ -31,6 +31,7 @@
  */
 
 import * as React from "react"
+import Link from "next/link"
 import { LogOut, Menu, Search, User as UserIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -117,6 +118,26 @@ export interface TopNavProps {
    * elsewhere) does not automatically reach.
    */
   sidebarSections?: NavSection[]
+  /**
+   * Where the user-menu's "Profile" item links to. Optional and omitted by
+   * default — previously this item rendered with no `href`/`onSelect` at
+   * all (a real bug: it did nothing when clicked). Rather than default it
+   * to some assumed route, the item is only rendered when a caller
+   * explicitly supplies one — the real authenticated shell passes
+   * `/settings/account`; `/demo` deliberately omits this prop (no real
+   * profile exists there), so the item simply doesn't render rather than
+   * linking to an authenticated route the demo must never reference.
+   */
+  profileHref?: string
+  /**
+   * Label for the sign-out menu item — defaults to "Sign out". `/demo`
+   * overrides this to "Back to login" and wires `onSignOut` to a plain
+   * client-side navigation to `/login` instead of a real Better Auth
+   * sign-out call (there is no session to end in a read-only, unauthenticated
+   * route) — closes the gap where that menu item previously did nothing at
+   * all for a demo visitor.
+   */
+  signOutLabel?: string
 }
 
 function getInitials(name: string): string {
@@ -141,6 +162,8 @@ export function TopNav({
   onMobileNavOpenChange,
   onSheetCloseAutoFocus,
   sidebarSections,
+  profileHref,
+  signOutLabel = "Sign out",
 }: TopNavProps) {
   const [internalMobileNavOpen, setInternalMobileNavOpen] =
     React.useState(false)
@@ -242,13 +265,17 @@ export function TopNav({
               )}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
-              <UserIcon aria-hidden="true" />
-              Profile
-            </DropdownMenuItem>
+            {profileHref && (
+              <DropdownMenuItem asChild>
+                <Link href={profileHref}>
+                  <UserIcon aria-hidden="true" />
+                  Profile
+                </Link>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onSelect={() => onSignOut?.()}>
               <LogOut aria-hidden="true" />
-              Sign out
+              {signOutLabel}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

@@ -27,8 +27,17 @@
  * AC1), and `children`. `onSearchChange` is a plain no-op — `TopNav`'s search
  * input stays present for visual authenticity but is never wired to
  * anything, per Capability 5 AC3's explicitly-permitted inert control.
- * `onSignOut` is left unwired — genuinely truthful, not misleading, since
- * `/demo` has no session to end (Capability 1 AC2/AC3).
+ * `onSignOut` navigates to `/login` via a plain client-side `router.push`
+ * (no `@/lib/auth` import, no session read, no Better Auth call — just
+ * leaving the demo), and the menu item's label is overridden to "Back to
+ * login" via `signOutLabel` — a real "Sign out" label would be misleading
+ * here since there is no session to end (Capability 1 AC2/AC3); this gives
+ * a demo visitor who wants to reach the real app an actual working way
+ * back, closing the gap where this menu item previously did nothing at
+ * all. `profileHref` is deliberately never passed, so `TopNav`'s "Profile"
+ * item doesn't render at all — `/demo` has no real profile, and the real
+ * one lives behind auth (Capability 1 AC4: nothing under `/demo` may link
+ * to an authenticated route).
  *
  * Reproduces `dashboard-shell.tsx`'s own focus-return fix (Bug Hunter, Phase
  * 5a review gate,
@@ -47,6 +56,7 @@
 
 import * as React from "react"
 import type { ReactNode } from "react"
+import { useRouter } from "next/navigation"
 
 import { Sidebar } from "@/components/shared/sidebar"
 import { TopNav, type TopNavUser } from "@/components/shared/top-nav"
@@ -67,6 +77,7 @@ function handleSearchChange(): void {
 }
 
 export function DemoShell({ user, children }: DemoShellProps) {
+  const router = useRouter()
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false)
   // See this file's own top JSDoc "focus-return fix" note for the full
   // reasoning — copied from dashboard-shell.tsx verbatim.
@@ -100,6 +111,8 @@ export function DemoShell({ user, children }: DemoShellProps) {
           onMobileNavOpenChange={setMobileNavOpen}
           onSheetCloseAutoFocus={handleMobileNavCloseAutoFocus}
           sidebarSections={DEMO_NAV_SECTIONS}
+          onSignOut={() => router.push("/login")}
+          signOutLabel="Back to login"
         />
         <DemoModeBanner />
         <main

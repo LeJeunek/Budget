@@ -15,4 +15,18 @@ import { createAuthClient } from "better-auth/react"
  */
 export const authClient = createAuthClient()
 
-export const { signIn, signUp, signOut, useSession } = authClient
+export const {
+  signIn,
+  signUp,
+  signOut,
+  useSession,
+  // Better Auth's actual client method names, confirmed by direct read of
+  // `node_modules/better-auth/dist/api/routes/password.mjs` /
+  // `update-user.mjs`'s own `operationId` fields (not guessed from the
+  // server route paths, which use different casing/wording):
+  // `requestPasswordReset` (send the email), `resetPassword` (consume the
+  // token), `changePassword` (logged-in user, current password required).
+  requestPasswordReset,
+  resetPassword,
+  changePassword,
+} = authClient
